@@ -61,25 +61,33 @@ function renderHead() {
     `<th class="del"></th></tr>`;
 }
 
-function renderBody() {
+function rowInnerHtml(row, i) {
   const { edit, computed } = fieldsForTab();
+  let html = `<td class="rownum">${i + 1}</td>`;
+  for (const f of edit) html += editCell(f, row);
+  for (const f of computed) html += computedCell(f, row);
+  html += `<td class="del"><button title="Delete row" data-del="${row.id}">✕</button></td>`;
+  return html;
+}
+
+function renderBody() {
   const rows = state.rows[state.tab];
   const tbody = $('#tbody');
   tbody.innerHTML = '';
   rows.forEach((row, i) => {
     const tr = document.createElement('tr');
     tr.dataset.id = row.id;
-    let html = `<td class="rownum">${i + 1}</td>`;
-    for (const f of edit) html += editCell(f, row);
-    for (const f of computed) html += computedCell(f, row);
-    html += `<td class="del"><button title="Delete row" data-del="${row.id}">✕</button></td>`;
-    tr.innerHTML = html;
+    tr.innerHTML = rowInnerHtml(row, i);
     tbody.appendChild(tr);
   });
 }
 
 function editCell(f, row) {
   const val = row[f.key] ?? '';
+  // Offset Amount only applies to License Transfers; otherwise show a non-editable dash.
+  if (f.key === 'offset_amount' && (row.ctam_type || '').trim() !== 'License Transfer') {
+    return `<td class="num offset-na"><span class="na">—</span></td>`;
+  }
   const numClass = f.type === 'number' ? ' num' : '';
   if (f.type === 'select') {
     const opts = f.options.map((o) =>
@@ -152,7 +160,10 @@ async function loadAll() {
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
 }
 
-function renderAll() { renderHead(); renderSummary(); renderBody(); }
+function renderAll() {
+  $('#addRowBtn').textContent = state.tab === 'bookings' ? '+ New booking' : '+ Add row';
+  renderHead(); renderSummary(); renderBody();
+}
 
 function updateRowInState(table, updated) {
   const arr = state.rows[table];
@@ -183,11 +194,23 @@ function wireGrid() {
     const id = Number(tr.dataset.id);
     const key = ctl.dataset.key;
     try {
-      const updated = await api(`/api/${state.tab}/${id}`, {
+      let updated = await api(`/api/${state.tab}/${id}`, {
         method: 'PATCH', body: JSON.stringify({ [key]: ctl.value }),
       });
+      // Leaving License Transfer? Clear any stale Offset Amount so it can't linger unused.
+      if (key === 'ctam_type' && ctl.value.trim() !== 'License Transfer' && updated.offset_amount != null) {
+        updated = await api(`/api/${state.tab}/${id}`, {
+          method: 'PATCH', body: JSON.stringify({ offset_amount: '' }),
+        });
+      }
       updateRowInState(state.tab, updated);
-      refreshComputedCells(tr, updated);
+      // Changing CTAM Type flips whether the Offset cell is editable — re-render the whole row.
+      if (key === 'ctam_type') {
+        const idx = state.rows[state.tab].findIndex((r) => r.id === id);
+        tr.innerHTML = rowInnerHtml(updated, idx);
+      } else {
+        refreshComputedCells(tr, updated);
+      }
       if (state.tab === 'bookings') renderSummary();
       toast('Saved');
     } catch (err) { toast(err.message, true); }
@@ -221,6 +244,8 @@ function wireTabs() {
 
 function wireActions() {
   $('#addRowBtn').onclick = async () => {
+    // Bookings use the dedicated entry form; churn keeps the quick blank-row add.
+    if (state.tab === 'bookings') { openEntry(); return; }
     try {
       const row = await api(`/api/${state.tab}`, { method: 'POST', body: JSON.stringify({}) });
       state.rows[state.tab].push(row);
@@ -264,6 +289,89 @@ function wireActions() {
   };
 }
 
+// ---------- New booking entry form ----------
+// Fields shown in the entry form, in order. Offset Amount only appears for License Transfers.
+const ENTRY_KEYS = [
+  'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center',
+  'pilot_or_ctam', 'pilot_type', 'ctam_type', 'product', 'mql',
+  'contract_term', 'booked_term', 'date_signed', 'mrr', 'offset_amount',
+];
+
+function entryFieldHtml(f) {
+  let control;
+  if (f.type === 'select') {
+    const opts = f.options.map((o) => `<option value="${escapeAttr(o)}">${o || '—'}</option>`).join('');
+    control = `<select data-key="${f.key}">${opts}</select>`;
+  } else {
+    const inputType = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
+    const step = f.type === 'number' ? ' step="any"' : '';
+    control = `<input type="${inputType}"${step} data-key="${f.key}" />`;
+  }
+  const hidden = f.key === 'offset_amount' ? ' hidden' : '';
+  return `<div class="entry-field" data-field="${f.key}"${hidden}><label>${f.label}</label>${control}</div>`;
+}
+
+function renderEntryForm() {
+  const defs = state.schema.bookings.editable;
+  $('#entryForm').innerHTML = ENTRY_KEYS
+    .map((k) => defs.find((f) => f.key === k))
+    .filter(Boolean)
+    .map(entryFieldHtml)
+    .join('');
+  toggleEntryOffset();
+}
+
+// Show the Offset Amount field only when CTAM Type is License Transfer; clear it otherwise.
+function toggleEntryOffset() {
+  const ctam = $('#entryForm [data-key="ctam_type"]');
+  const field = $('#entryForm [data-field="offset_amount"]');
+  if (!ctam || !field) return;
+  const isLT = ctam.value.trim() === 'License Transfer';
+  field.hidden = !isLT;
+  if (!isLT) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
+}
+
+function openEntry() {
+  renderEntryForm();
+  $('#entryModal').hidden = false;
+  const first = $('#entryForm [data-key]');
+  if (first) first.focus();
+}
+function closeEntry() { $('#entryModal').hidden = true; }
+
+async function submitEntry(e) {
+  e.preventDefault();
+  const payload = {};
+  $('#entryForm').querySelectorAll('[data-key]').forEach((ctl) => {
+    const field = ctl.closest('.entry-field');
+    if (field && field.hidden) return; // skip the hidden Offset field on non-License-Transfers
+    payload[ctl.dataset.key] = ctl.value;
+  });
+  try {
+    const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
+    state.rows.bookings.push(row);
+    if (state.tab === 'bookings') {
+      renderBody(); renderSummary();
+      $('#scroller').scrollTop = $('#scroller').scrollHeight;
+    }
+    $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+    toast('Booking added');
+    renderEntryForm(); // reset for the next entry
+    const first = $('#entryForm [data-key]');
+    if (first) first.focus();
+  } catch (err) { toast(err.message, true); }
+}
+
+function wireEntry() {
+  $('#entryForm').addEventListener('submit', submitEntry);
+  $('#entryForm').addEventListener('change', (e) => {
+    if (e.target.dataset && e.target.dataset.key === 'ctam_type') toggleEntryOffset();
+  });
+  $('#entryClose').onclick = closeEntry;
+  $('#entryCancel').onclick = closeEntry;
+  $('#entryModal').addEventListener('click', (e) => { if (e.target.id === 'entryModal') closeEntry(); });
+}
+
 // ---------- Auth ----------
 function showAuth() { $('#authModal').hidden = false; }
 function wireAuth() {
@@ -278,7 +386,7 @@ function wireAuth() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireEntry();
   const { required } = await fetch('/api/auth-required').then((r) => r.json()).catch(() => ({ required: false }));
   try {
     await loadAll();

@@ -125,6 +125,8 @@ tbody td.computed {
   padding: 7px 10px; font-weight: 500;
 }
 tbody td.computed.neg { color: var(--neg); }
+tbody td.offset-na { text-align: right; }
+tbody td.offset-na .na { display: inline-block; padding: 7px 10px; color: var(--ink-soft); opacity: .5; }
 tbody td.del {
   position: sticky; right: 0; background: var(--panel); border-left: 1px solid var(--line-strong);
 }
@@ -152,3 +154,32 @@ tbody td.del button:hover { color: var(--neg); }
 .modal-card input { width: 100%; padding: 9px; border: 1px solid var(--line-strong); border-radius: 7px; font: inherit; margin-bottom: 12px; }
 .modal-card .btn { width: 100%; justify-content: center; }
 .err { color: var(--neg); font-size: 12px; min-height: 14px; }
+
+/* New booking entry form */
+.entry-card { width: 680px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }
+.entry-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.entry-head h2 { margin: 0; }
+.entry-close { border: none; background: none; font-size: 18px; line-height: 1; color: var(--ink-soft); cursor: pointer; padding: 4px; }
+.entry-close:hover { color: var(--neg); }
+.entry-form {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 11px 14px;
+  overflow: auto; padding: 6px 2px 16px; min-height: 0;
+}
+.entry-field { display: flex; flex-direction: column; }
+.entry-field[hidden] { display: none; }
+.entry-field label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-soft); margin-bottom: 4px;
+}
+.entry-field input, .entry-field select {
+  font: inherit; padding: 8px 9px; border: 1px solid var(--line-strong);
+  border-radius: 7px; background: #fff; color: var(--ink); width: 100%;
+}
+.entry-field input:focus, .entry-field select:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.entry-actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  border-top: 1px solid var(--line); padding-top: 14px;
+}
+.entry-actions .btn { width: auto; }

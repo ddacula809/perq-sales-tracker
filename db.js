@@ -34,6 +34,15 @@ function columnsDef(fields) {
   return fields.map((f) => `"${f.key}" ${sqlType(f.type)}`).join(',\n  ');
 }
 
+// Add any schema fields that aren't yet columns on an existing table. CREATE TABLE
+// IF NOT EXISTS only helps a fresh DB; for an already-deployed table (e.g. on Railway)
+// this is how a newly added field actually gets its column. Safe to run every boot.
+async function ensureColumns(table, fields) {
+  for (const f of fields) {
+    await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "${f.key}" ${sqlType(f.type)}`);
+  }
+}
+
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings (
@@ -51,6 +60,8 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  await ensureColumns('bookings', BOOKING_FIELDS);
+  await ensureColumns('churn', CHURN_FIELDS);
 }
 
 const TABLES = {

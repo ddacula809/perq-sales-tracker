@@ -47,6 +47,20 @@
 
   <div class="toast" id="toast"></div>
 
+  <div class="modal" id="entryModal" hidden>
+    <div class="modal-card entry-card">
+      <div class="entry-head">
+        <h2>New Booking</h2>
+        <button type="button" class="entry-close" id="entryClose" title="Close">✕</button>
+      </div>
+      <form id="entryForm" class="entry-form" autocomplete="off"></form>
+      <div class="entry-actions">
+        <button type="button" class="btn ghost" id="entryCancel">Cancel</button>
+        <button type="submit" class="btn solid" form="entryForm">Add booking</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="authModal" hidden>
     <div class="modal-card">
       <h2>Access key required</h2>

@@ -60,13 +60,11 @@ export function computeBooking(r) {
   const S = num(r.mrr);
   const N = num(r.rerate_paid_months);
   const O = num(r.rerate_old_mrr);
+  const T = num(r.offset_amount);   // Column T: Offset Amount — now an editable field (License Transfer only)
   const V = num(r.one_time_fee);
 
   const formula = formulaColumn(H, I);
   const category = bprCategory(r.product);
-
-  // Column T: Offset Amount (License Transfer) = MRR for license transfers
-  const offset = formula === 'License Transfer' ? S : null;
 
   // Column U: Annual Value of Agreement
   let annual = null;
@@ -83,7 +81,7 @@ export function computeBooking(r) {
       const v = ((S ?? 0) - (O ?? 0)) * (P ?? 0);
       companyTotal = v < 0 ? 0 : v;
     } else if (formula === 'License Transfer') {
-      companyTotal = ((S ?? 0) - (offset ?? 0)) * (Q ?? 0);
+      companyTotal = ((S ?? 0) - (T ?? 0)) * (Q ?? 0);
     } else {
       companyTotal = (Q ?? 0) * (S ?? 0);
     }
@@ -116,7 +114,6 @@ export function computeBooking(r) {
   return {
     formula_column: formula,
     bpr_prod_category: category,
-    offset_amount: offset,
     annual_value: annual,
     company_total_booking: companyTotal,
     commissionable_bookings: commissionable,

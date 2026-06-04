@@ -21,6 +21,7 @@ export const BOOKING_FIELDS = [
   { key: 'booked_term',                     label: 'Booked Term',            excel: 16, type: 'number' },
   { key: 'date_signed',                     label: 'Date Signed',            excel: 17, type: 'date' },
   { key: 'mrr',                             label: 'MRR',                    excel: 18, type: 'number' },
+  { key: 'offset_amount',                   label: 'Offset Amount',          excel: 19, type: 'number' },
   { key: 'one_time_fee',                    label: 'One-Time Fee',           excel: 21, type: 'number' },
   { key: 'notes',                           label: 'Notes',                  excel: 24, type: 'text' },
   { key: 'discuss_in_review',               label: 'To Discuss',             excel: 25, type: 'text' },
@@ -44,7 +45,6 @@ export const BOOKING_FIELDS = [
 export const BOOKING_COMPUTED = [
   { key: 'formula_column',          label: 'Formula Column',        excel: 9,  type: 'text' },
   { key: 'bpr_prod_category',       label: 'BPR Prod Category',     excel: 11, type: 'text' },
-  { key: 'offset_amount',           label: 'Offset Amount',         excel: 19, type: 'number' },
   { key: 'annual_value',            label: 'Annual Value',          excel: 20, type: 'number' },
   { key: 'company_total_booking',   label: 'Company Total Booking', excel: 22, type: 'number' },
   { key: 'commissionable_bookings', label: 'Commissionable',        excel: 23, type: 'number' },
