@@ -25,7 +25,8 @@ const state = {
   hiddenCols: (() => { try { return JSON.parse(localStorage.getItem('perqHiddenCols') || '{}'); } catch { return {}; } })(),
   // User-set column widths (px) per tab, e.g. { bookings: { mrr: 120 }, churn: {} }.
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
-  churnQuarter: 'All', // dashboard churn-by-month quarter filter
+  churnQuarter: 'All',   // dashboard churn-by-month quarter filter
+  bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
 };
 
 const $ = (s) => document.querySelector(s);
@@ -303,17 +304,28 @@ function renderSummary() {
       metric('Commissionable + OTF', totalComm + totalOTF) +
       '</div>';
 
-    // Company Total Booking summed per BPR product category.
+    // Company Total Booking per BPR product category, with its own (separate) quarter filter.
+    const bookingMY = (r) => ((r.booking_month && r.booking_year != null && r.booking_year !== '')
+      ? monthYearQuarter(`${r.booking_month} ${r.booking_year}`) : null);
+    const bQuarterMap = new Map();
+    for (const r of rows) { const info = bookingMY(r); if (info) bQuarterMap.set(info.label, info); }
+    const bQuarterVals = ['All', ...[...bQuarterMap.values()]
+      .sort((a, b) => (a.year - b.year) || (a.q - b.q)).map((x) => x.label)];
+    if (!bQuarterVals.includes(state.bookingQuarter)) state.bookingQuarter = 'All';
+    let catRows = filtered;
+    if (state.bookingQuarter !== 'All') {
+      catRows = catRows.filter((r) => { const i = bookingMY(r); return i && i.label === state.bookingQuarter; });
+    }
     const byCat = {};
-    for (const r of filtered) {
+    for (const r of catRows) {
       const c = (r.bpr_prod_category || '').trim() || 'Uncategorized';
       byCat[c] = (byCat[c] || 0) + (Number(r.company_total_booking) || 0);
     }
     const catCards = Object.keys(byCat).sort().map((c) => metric(c, byCat[c])).join('');
-    if (catCards) {
-      metricsHtml += '<div class="metrics-title">Booking Per Product Category</div>' +
-        `<div class="metrics-row">${catCards}</div>`;
-    }
+    const bQuarterSel = '<select id="bookingQuarter" class="churn-quarter">' +
+      bQuarterVals.map((q) => `<option${q === state.bookingQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
+    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Booking Per Product Category</span>${bQuarterSel}</div>` +
+      `<div class="metrics-row">${catCards || '<span class="muted">No data.</span>'}</div>`;
 
     // Churn by month: prorated churn + final churn amounts landing in each month.
     const churnByMonth = {};
@@ -361,9 +373,11 @@ function renderSummary() {
       if (ctl) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
     });
   }
-  // The churn quarter filter lives in the metrics area (always present on the dashboard).
+  // Quarter filters live in the metrics area (always present on the dashboard).
   const qSel = $('#churnQuarter');
   if (qSel) qSel.onchange = (e) => { state.churnQuarter = e.target.value; renderSummary(); };
+  const bqSel = $('#bookingQuarter');
+  if (bqSel) bqSel.onchange = (e) => { state.bookingQuarter = e.target.value; renderSummary(); };
 }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
