@@ -53,18 +53,23 @@ function fmtNum(v) {
 }
 
 // ---------- Rendering ----------
-// Churn billing section — shown at the very end (after the computed columns) and tinted blue.
-const BILLING_KEYS = new Set(['template_deleted', 'completed', 'notes']);
+// Billing sections (per tab) — shown at the very end, after the computed columns, and
+// tinted blue. Keys are in the order they should appear.
+const BILLING_KEYS = {
+  bookings: new Set(['billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'sage_id']),
+  churn: new Set(['template_deleted', 'completed', 'notes']),
+};
+function isBilling(key) { return !!(BILLING_KEYS[state.tab] && BILLING_KEYS[state.tab].has(key)); }
 
 // Ordered display columns for the active tab, plus a lookup of which keys are computed.
 function fieldsForTab() {
   const s = state.schema[state.tab];
   const computedKeys = new Set(s.computed.map((f) => f.key));
   let cols = [...s.editable, ...s.computed];
-  // Churn: move the billing fields to the very end, after the computed churn columns.
-  if (state.tab === 'churn') {
-    const isBilling = (c) => BILLING_KEYS.has(c.key);
-    cols = [...cols.filter((c) => !isBilling(c)), ...cols.filter(isBilling)];
+  // Move this tab's billing fields to the very end, after the computed columns.
+  const billing = BILLING_KEYS[state.tab];
+  if (billing) {
+    cols = [...cols.filter((c) => !billing.has(c.key)), ...cols.filter((c) => billing.has(c.key))];
   }
   return { cols, computedKeys, computed: s.computed };
 }
@@ -75,7 +80,7 @@ function renderHead() {
   $('#thead').innerHTML =
     `<tr><th class="rownum">#</th>` +
     cols.map((f) => {
-      const cls = computedKeys.has(f.key) ? 'computed' : (BILLING_KEYS.has(f.key) ? 'billing' : '');
+      const cls = computedKeys.has(f.key) ? 'computed' : (isBilling(f.key) ? 'billing' : '');
       return `<th class="${cls}" data-col="${f.key}" title="${f.label}">${f.label}</th>`;
     }).join('') +
     `<th class="del"></th></tr>`;
@@ -109,7 +114,7 @@ function editCell(f, row) {
   if (f.key === 'offset_amount' && (row.ctam_type || '').trim() !== 'License Transfer') {
     return `<td class="num offset-na" data-col="${f.key}"><span class="na">—</span></td>`;
   }
-  const billing = BILLING_KEYS.has(f.key) ? ' billing' : '';
+  const billing = isBilling(f.key) ? ' billing' : '';
   const numClass = f.type === 'number' ? ' num' : '';
   if (f.type === 'select') {
     const opts = f.options.map((o) =>
