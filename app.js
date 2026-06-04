@@ -123,9 +123,8 @@ function rowInnerHtml(row, i) {
 function renderBody() {
   const tbody = $('#tbody');
   if (state.tab !== 'bookings' && state.tab !== 'churn') { tbody.innerHTML = ''; return; }
-  let rows = state.rows[state.tab] || [];
-  if (state.tab === 'bookings') rows = rows.filter((r) => bookingMatch(r, state.filters.bookings));
-  else if (state.tab === 'churn') rows = rows.filter((r) => churnMatch(r, state.filters.churn));
+  // Build every row once; filtering only toggles row visibility (no rebuild) afterwards.
+  const rows = state.rows[state.tab] || [];
   tbody.innerHTML = '';
   rows.forEach((row, i) => {
     const tr = document.createElement('tr');
@@ -133,6 +132,28 @@ function renderBody() {
     tr.innerHTML = rowInnerHtml(row, i);
     tbody.appendChild(tr);
   });
+  applyRowFilter();
+}
+
+// Show/hide already-rendered rows to match the current filter — cheap vs. rebuilding the
+// grid, so filtering stays responsive on large tables. Renumbers the visible rows.
+function applyRowFilter() {
+  const tab = state.tab;
+  if (tab !== 'bookings' && tab !== 'churn') return;
+  const f = state.filters[tab];
+  const match = tab === 'bookings' ? bookingMatch : churnMatch;
+  const byId = new Map((state.rows[tab] || []).map((r) => [String(r.id), r]));
+  let n = 0;
+  for (const tr of $('#tbody').children) {
+    const row = byId.get(tr.dataset.id);
+    const show = row ? match(row, f) : true;
+    tr.style.display = show ? '' : 'none';
+    if (show) {
+      n += 1;
+      const rn = tr.querySelector('.rownum');
+      if (rn) rn.textContent = n;
+    }
+  }
 }
 
 function editCell(f, row) {
@@ -212,8 +233,12 @@ function monthYearQuarter(my) {
   return { q, year: Number(y), label: `Q${q} ${y}` };
 }
 
-// Re-render whatever the active tab shows that depends on the filters.
-function onFilterChange() { renderSummary(); renderBody(); }
+// React to a filter change. Bookings/Churn just toggle row visibility (fast); the
+// Dashboard recomputes its metric cards.
+function onFilterChange() {
+  if (state.tab === 'dashboard') renderSummary();
+  else applyRowFilter();
+}
 
 function renderSummary() {
   const el = $('#summary');
