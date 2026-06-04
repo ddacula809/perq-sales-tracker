@@ -25,6 +25,7 @@ const state = {
   hiddenCols: (() => { try { return JSON.parse(localStorage.getItem('perqHiddenCols') || '{}'); } catch { return {}; } })(),
   // User-set column widths (px) per tab, e.g. { bookings: { mrr: 120 }, churn: {} }.
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
+  churnQuarter: 'All', // dashboard churn-by-month quarter filter
 };
 
 const $ = (s) => document.querySelector(s);
@@ -202,6 +203,14 @@ function sortMonthYear(arr) {
     return (Number(ya) - Number(yb)) || (MONTHS.indexOf(ma) - MONTHS.indexOf(mb));
   });
 }
+// "May 2026" -> { q: 2, year: 2026, label: 'Q2 2026' } (null if unparseable).
+function monthYearQuarter(my) {
+  const [m, y] = String(my).split(' ');
+  const idx = MONTHS.indexOf(m);
+  if (idx < 0 || !y) return null;
+  const q = Math.floor(idx / 3) + 1;
+  return { q, year: Number(y), label: `Q${q} ${y}` };
+}
 
 // Re-render whatever the active tab shows that depends on the filters.
 function onFilterChange() { renderSummary(); renderBody(); }
@@ -280,6 +289,40 @@ function renderSummary() {
       metricsHtml += '<div class="metrics-title">Booking Per Product Category</div>' +
         `<div class="metrics-row">${catCards}</div>`;
     }
+
+    // Churn by month: prorated churn + final churn amounts landing in each month.
+    const churnByMonth = {};
+    const addChurn = (month, amt) => {
+      const m = String(month || '').trim();
+      const a = Number(amt);
+      if (!m || m === '-' || !Number.isFinite(a)) return;
+      churnByMonth[m] = (churnByMonth[m] || 0) + a;
+    };
+    for (const r of state.rows.churn) {
+      addChurn(r.prorated_churn_month, r.prorated_churn_amount);
+      addChurn(r.final_churn_month, r.final_churn_amount);
+    }
+    // Quarter options derived from the months present; reset selection if it no longer exists.
+    const quarterMap = new Map();
+    for (const m of Object.keys(churnByMonth)) {
+      const info = monthYearQuarter(m);
+      if (info) quarterMap.set(info.label, info);
+    }
+    const quarterVals = ['All', ...[...quarterMap.values()]
+      .sort((a, b) => (a.year - b.year) || (a.q - b.q)).map((x) => x.label)];
+    if (!quarterVals.includes(state.churnQuarter)) state.churnQuarter = 'All';
+    let churnMonths = Object.keys(churnByMonth);
+    if (state.churnQuarter !== 'All') {
+      churnMonths = churnMonths.filter((m) => {
+        const i = monthYearQuarter(m);
+        return i && i.label === state.churnQuarter;
+      });
+    }
+    const churnCards = sortMonthYear(churnMonths).map((m) => metric(m, churnByMonth[m])).join('');
+    const quarterSel = '<select id="churnQuarter" class="churn-quarter">' +
+      quarterVals.map((q) => `<option${q === state.churnQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
+    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>${quarterSel}</div>` +
+      `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
   }
 
   // Nothing to show (filters hidden and not the dashboard) — collapse the whole bar.
@@ -293,6 +336,9 @@ function renderSummary() {
       if (ctl) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
     });
   }
+  // The churn quarter filter lives in the metrics area (always present on the dashboard).
+  const qSel = $('#churnQuarter');
+  if (qSel) qSel.onchange = (e) => { state.churnQuarter = e.target.value; renderSummary(); };
 }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;

@@ -118,6 +118,12 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
   font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--ink-soft); font-weight: 600; margin-top: 4px;
 }
+.metrics-title-row { display: flex; align-items: center; gap: 12px; }
+.churn-quarter {
+  font: inherit; font-size: 12px; padding: 4px 7px; text-transform: none; letter-spacing: 0;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink);
+}
+.muted { color: var(--ink-soft); font-size: 12px; }
 .filter, .metric {
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   padding: 9px 13px; box-shadow: var(--shadow);
