@@ -309,10 +309,21 @@ function wireActions() {
 // ---------- New booking entry form ----------
 // Fields shown in the entry form, in order. Offset Amount only appears for License Transfers.
 const ENTRY_KEYS = [
+  'booking_month', 'booking_year',
   'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center',
   'pilot_or_ctam', 'pilot_type', 'ctam_type', 'product', 'mql',
   'contract_term', 'booked_term', 'date_signed', 'mrr', 'offset_amount',
 ];
+
+// Booking Month/Year default to the dataset's period and "stick" to whatever you last
+// entered, so adding many bookings for the same period doesn't mean re-picking each time.
+let entryDefaults = { booking_month: 'May', booking_year: '2026' };
+function applyEntryDefaults() {
+  for (const [k, v] of Object.entries(entryDefaults)) {
+    const ctl = $(`#entryForm [data-key="${k}"]`);
+    if (ctl && v != null && v !== '') ctl.value = v;
+  }
+}
 
 function entryFieldHtml(f) {
   let control;
@@ -335,6 +346,7 @@ function renderEntryForm() {
     .filter(Boolean)
     .map(entryFieldHtml)
     .join('');
+  applyEntryDefaults();
   toggleEntryOffset();
 }
 
@@ -373,6 +385,9 @@ async function submitEntry(e) {
     }
     $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
     toast('Booking added');
+    // Carry the booking period forward to the next entry.
+    if (payload.booking_month) entryDefaults.booking_month = payload.booking_month;
+    if (payload.booking_year) entryDefaults.booking_year = payload.booking_year;
     renderEntryForm(); // reset for the next entry
     const first = $('#entryForm [data-key]');
     if (first) first.focus();

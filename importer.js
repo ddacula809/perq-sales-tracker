@@ -41,7 +41,19 @@ export function parseWorkbook(buffer) {
   const result = { bookings: [], churn: [] };
 
   const bws = wb.Sheets[BOOKING_SHEET];
-  if (bws) result.bookings = rowsFromSheet(bws, BOOKING_FIELDS, 6); // header on row 7 (index 6)
+  if (bws) {
+    result.bookings = rowsFromSheet(bws, BOOKING_FIELDS, 6); // header on row 7 (index 6)
+    // The original workbook has no Booking Month/Year columns; the sheet itself names the
+    // period ("May 2026"). Tag imported rows from the sheet name so they stay distinguishable
+    // once all bookings share one tab. (An exported file already carries these columns, so
+    // a re-import of our own export keeps its real values and skips this default.)
+    const [sheetMonth, sheetYearStr] = BOOKING_SHEET.split(' ');
+    const sheetYear = Number(sheetYearStr);
+    for (const r of result.bookings) {
+      if (r.booking_month === null || r.booking_month === '') r.booking_month = sheetMonth || null;
+      if (r.booking_year === null || r.booking_year === '') r.booking_year = Number.isFinite(sheetYear) ? sheetYear : null;
+    }
+  }
 
   const cws = wb.Sheets[CHURN_SHEET];
   if (cws) result.churn = rowsFromSheet(cws, CHURN_FIELDS, 0); // header on row 1 (index 0)

@@ -4,6 +4,8 @@
 // Editable booking fields stored in DB. `excel` = 0-based column index in the
 // original "May 2026" sheet (header row 7, data from row 8).
 export const BOOKING_FIELDS = [
+  { key: 'booking_month',                   label: 'Booking Month',          excel: 40, type: 'select', options: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] },
+  { key: 'booking_year',                    label: 'Booking Year',           excel: 41, type: 'number' },
   { key: 'centralized',                     label: 'Centralized',            excel: 0,  type: 'select', options: ['Centralized', 'Decentralized'] },
   { key: 'sales_rep',                       label: 'Sales Rep',              excel: 1,  type: 'select', options: ['Kathryn', 'Doug', 'House/CSM', 'Caleb', 'Kirk', 'Scott', 'Cindy', 'Michelle'] },
   { key: 'property_id',                     label: 'Property ID',            excel: 2,  type: 'text' },

@@ -75,6 +75,14 @@ async function backfillOffsetAmount() {
   `);
 }
 
+// The Booking Month/Year columns were added after the existing rows were imported, so they
+// start out NULL. The current data is the May 2026 workbook — tag it once so it stays
+// distinguishable now that all bookings share one tab. New/imported rows set their own values.
+async function backfillBookingPeriod() {
+  await pool.query(`UPDATE bookings SET booking_month = 'May' WHERE booking_month IS NULL`);
+  await pool.query(`UPDATE bookings SET booking_year = 2026  WHERE booking_year IS NULL`);
+}
+
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings (
@@ -95,6 +103,7 @@ export async function initDb() {
   await ensureColumns('bookings', BOOKING_FIELDS);
   await ensureColumns('churn', CHURN_FIELDS);
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
+  await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
 }
 
 const TABLES = {
