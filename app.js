@@ -13,8 +13,8 @@ const state = {
   // Dashboard and Bookings filter independently: filtering the grid must not move the
   // dashboard totals, and vice versa.
   filters: {
-    dashboard: { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
-    bookings:  { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
+    dashboard: { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All', recbill: 'All', impbill: 'All' },
+    bookings:  { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All', recbill: 'All', impbill: 'All' },
     churn:     { pmcbc: 'All', property: 'All', product: 'All', fcm: 'All' },
   },
   token: localStorage.getItem('perqToken') || '',
@@ -179,7 +179,9 @@ function bookingMatch(r, f) {
     && (f.pmc === 'All' || r.pmc === f.pmc)
     && (f.prop === 'All' || r.property_name === f.prop)
     && (f.rep === 'All' || r.sales_rep === f.rep)
-    && (f.cat === 'All' || r.bpr_prod_category === f.cat);
+    && (f.cat === 'All' || r.bpr_prod_category === f.cat)
+    && (!f.recbill || f.recbill === 'All' || r.recurring_billing_status === f.recbill)
+    && (!f.impbill || f.impbill === 'All' || r.implementation_billing_status === f.impbill);
 }
 
 // True when a churn row passes the churn filter selection.
@@ -238,6 +240,11 @@ function renderSummary() {
     if (tab === 'bookings') filterDefs.push(['prop', 'Filter by Property Name', ['All', ...distinct('property_name').sort()], f.prop]);
     filterDefs.push(['rep', 'Filter by Sales Rep', ['All', ...distinct('sales_rep').sort()], f.rep]);
     filterDefs.push(['cat', 'Filter by BPR Category', ['All', ...distinct('bpr_prod_category').sort()], f.cat]);
+    // Billing-status filters: Bookings tab, admin/billing roles only.
+    if (tab === 'bookings' && (isAdmin() || role() === 'billing')) {
+      filterDefs.push(['recbill', 'Filter by Recurring Billing', ['All', ...distinct('recurring_billing_status').sort()], f.recbill]);
+      filterDefs.push(['impbill', 'Filter by Impl. Billing', ['All', ...distinct('implementation_billing_status').sort()], f.impbill]);
+    }
   }
 
   let filtersHtml = '';
