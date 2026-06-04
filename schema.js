@@ -13,7 +13,7 @@ export const BOOKING_FIELDS = [
   { key: 'pmc',                             label: 'PMC',                    excel: 4,  type: 'text' },
   { key: 'buying_center',                   label: 'Buying Center',          excel: 5,  type: 'text' },
   { key: 'pilot_or_ctam',                   label: 'Pilot or CTAM',          excel: 6,  type: 'select', options: ['', 'Pilot', 'CTAM'] },
-  { key: 'pilot_type',                      label: 'Pilot Type',             excel: 7,  type: 'select', options: ['New - Paid', 'New - Free', 'Conversion', 'Pilot Expansion', 'Second Signature'] },
+  { key: 'pilot_type',                      label: 'Pilot Type',             excel: 7,  type: 'select', options: ['', 'New - Paid', 'New - Free', 'Conversion', 'Pilot Expansion', 'Second Signature'] },
   { key: 'ctam_type',                       label: 'CTAM Type',              excel: 8,  type: 'select', options: ['Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
   { key: 'product',                         label: 'Product',                excel: 10, type: 'select', options: ['AI Lead Captur Agent', 'Pulse Data Hub', 'AI Leasing Agent', 'Performance Reporting Agent', 'Property Website', 'Corporate Website', 'Google Search Management', 'AI Google Booking Agent', 'AI Google Posts and Products', 'SEO'] },
   { key: 'mql',                             label: 'MQL',                    excel: 12, type: 'select', options: ['', 'YES', 'NO'] },
