@@ -32,7 +32,15 @@
     <button class="tab active" data-tab="dashboard">Dashboard</button>
     <button class="tab" data-tab="bookings">Bookings</button>
     <button class="tab" data-tab="churn">Churn Tracker</button>
-    <span class="status" id="status"></span>
+    <div class="view-tools">
+      <button class="view-btn" id="toggleFilters">Hide filters</button>
+      <div class="zoom" id="zoomGroup" title="Table size">
+        <button class="view-btn" id="zoomOut" aria-label="Smaller">&minus;</button>
+        <span id="zoomLevel">100%</span>
+        <button class="view-btn" id="zoomIn" aria-label="Larger">&plus;</button>
+      </div>
+      <span class="status" id="status"></span>
+    </div>
   </nav>
 
   <section class="summary" id="summary"></section>

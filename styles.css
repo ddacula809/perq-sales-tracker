@@ -64,7 +64,21 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
   padding: 12px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-.status { margin-left: auto; color: var(--ink-soft); font-size: 11px; font-family: 'IBM Plex Mono', monospace; }
+.status { color: var(--ink-soft); font-size: 11px; font-family: 'IBM Plex Mono', monospace; }
+
+/* View tools (filter toggle + table zoom), right side of the tab bar */
+.view-tools { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.view-btn {
+  font: inherit; font-size: 11.5px; font-weight: 600; line-height: 1;
+  background: #fff; border: 1px solid var(--line-strong); border-radius: 6px;
+  padding: 5px 9px; cursor: pointer; color: var(--ink-soft);
+}
+.view-btn:hover { border-color: var(--accent); color: var(--accent); }
+.zoom { display: flex; align-items: center; gap: 5px; }
+.zoom #zoomLevel {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft);
+  min-width: 40px; text-align: center;
+}
 
 /* Summary */
 .summary {

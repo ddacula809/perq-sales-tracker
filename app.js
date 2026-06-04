@@ -17,6 +17,8 @@ const state = {
     bookings:  { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
   },
   authKey: localStorage.getItem('perqKey') || '',
+  filtersHidden: localStorage.getItem('perqFiltersHidden') === '1',
+  zoom: parseFloat(localStorage.getItem('perqZoom')) || 1,
 };
 
 const $ = (s) => document.querySelector(s);
@@ -165,18 +167,22 @@ function renderSummary() {
   filterDefs.push(['rep', 'Filter by Sales Rep', repVals, f.rep]);
   filterDefs.push(['cat', 'Filter by BPR Category', catVals, f.cat]);
 
-  let html = '<div class="filters-row">' +
-    filterDefs.map(([id, label, vals, cur]) => sel(id, label, vals, cur)).join('') +
-    '</div>';
+  let filtersHtml = '';
+  if (!state.filtersHidden) {
+    filtersHtml = '<div class="filters-row">' +
+      filterDefs.map(([id, label, vals, cur]) => sel(id, label, vals, cur)).join('') +
+      '</div>';
+  }
 
   // Metric cards live on the Dashboard tab only, on their own row below the filters.
+  let metricsHtml = '';
   if (state.tab === 'dashboard') {
     const filtered = rows.filter((r) => bookingMatch(r, f));
     const sum = (k) => filtered.reduce((a, r) => a + (Number(r[k]) || 0), 0);
     const totalBooking = sum('company_total_booking');
     const totalOTF = sum('one_time_fee');
     const totalComm = sum('commissionable_bookings');
-    html += '<div class="metrics-row">' +
+    metricsHtml = '<div class="metrics-row">' +
       metric('Total Company Booking', totalBooking, true) +
       metric('Total One-Time Fees', totalOTF) +
       metric('Total Commissionable', totalComm) +
@@ -184,11 +190,17 @@ function renderSummary() {
       '</div>';
   }
 
-  el.innerHTML = html;
-  filterDefs.forEach(([id]) => {
-    const ctl = $('#' + id);
-    if (ctl) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
-  });
+  // Nothing to show (filters hidden and not the dashboard) — collapse the whole bar.
+  if (!filtersHtml && !metricsHtml) { el.className = 'summary hidden'; el.innerHTML = ''; return; }
+  el.className = 'summary';
+  el.innerHTML = filtersHtml + metricsHtml;
+
+  if (!state.filtersHidden) {
+    filterDefs.forEach(([id]) => {
+      const ctl = $('#' + id);
+      if (ctl) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
+    });
+  }
 }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
@@ -210,6 +222,10 @@ function renderAll() {
   addBtn.style.display = isDash ? 'none' : '';        // no grid to add rows to on the dashboard
   addBtn.textContent = state.tab === 'bookings' ? '+ New booking' : '+ Add row';
   $('#gridwrap').style.display = isDash ? 'none' : '';
+  // View tools: filter toggle only where filters exist; zoom only where a table shows.
+  $('#toggleFilters').style.display = state.tab === 'churn' ? 'none' : '';
+  $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
+  $('#zoomGroup').style.display = isDash ? 'none' : '';
   renderHead(); renderSummary(); renderBody();
 }
 
@@ -436,6 +452,28 @@ function wireEntry() {
   $('#entryModal').addEventListener('click', (e) => { if (e.target.id === 'entryModal') closeEntry(); });
 }
 
+// ---------- View tools: filter toggle + table zoom ----------
+function applyZoom() {
+  $('#grid').style.zoom = state.zoom;
+  $('#zoomLevel').textContent = Math.round(state.zoom * 100) + '%';
+}
+
+function wireView() {
+  $('#toggleFilters').onclick = () => {
+    state.filtersHidden = !state.filtersHidden;
+    localStorage.setItem('perqFiltersHidden', state.filtersHidden ? '1' : '0');
+    $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
+    renderSummary();
+  };
+  const setZoom = (z) => {
+    state.zoom = Math.min(2, Math.max(0.5, Math.round(z * 10) / 10)); // clamp 50%–200%, 10% steps
+    localStorage.setItem('perqZoom', String(state.zoom));
+    applyZoom();
+  };
+  $('#zoomOut').onclick = () => setZoom(state.zoom - 0.1);
+  $('#zoomIn').onclick = () => setZoom(state.zoom + 0.1);
+}
+
 // ---------- Auth ----------
 function showAuth() { $('#authModal').hidden = false; }
 function wireAuth() {
@@ -450,7 +488,8 @@ function wireAuth() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireEntry();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireEntry(); wireView();
+  applyZoom();
   const { required } = await fetch('/api/auth-required').then((r) => r.json()).catch(() => ({ required: false }));
   try {
     await loadAll();
