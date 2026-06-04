@@ -140,6 +140,12 @@ thead th {
 }
 thead th.computed { background: #dde7dd; color: var(--compute-ink); }
 thead th.billing { background: #d4e1f3; color: var(--billing-ink); }
+/* Drag-to-resize handle on the right edge of each data column header */
+thead th .col-resize {
+  position: absolute; top: 0; right: 0; width: 7px; height: 100%;
+  cursor: col-resize; user-select: none;
+}
+thead th .col-resize:hover { background: var(--accent); opacity: .45; }
 thead th.rownum, tbody td.rownum {
   position: sticky; left: 0; z-index: 2; min-width: 46px; text-align: right;
   background: #efe9dc; color: var(--ink-soft); font-family: 'IBM Plex Mono', monospace;

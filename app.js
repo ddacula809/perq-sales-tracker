@@ -23,6 +23,8 @@ const state = {
   zoom: parseFloat(localStorage.getItem('perqZoom')) || 1,
   // Hidden columns per tab, e.g. { bookings: ['notes'], churn: [...] }.
   hiddenCols: (() => { try { return JSON.parse(localStorage.getItem('perqHiddenCols') || '{}'); } catch { return {}; } })(),
+  // User-set column widths (px) per tab, e.g. { bookings: { mrr: 120 }, churn: {} }.
+  colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
 };
 
 const $ = (s) => document.querySelector(s);
@@ -99,7 +101,7 @@ function renderHead() {
     `<tr><th class="rownum">#</th>` +
     cols.map((f) => {
       const cls = computedKeys.has(f.key) ? 'computed' : (isBilling(f.key) ? 'billing' : '');
-      return `<th class="${cls}" data-col="${f.key}" title="${f.label}">${f.label}</th>`;
+      return `<th class="${cls}" data-col="${f.key}" title="${f.label}">${f.label}<span class="col-resize"></span></th>`;
     }).join('') +
     `<th class="del"></th></tr>`;
 }
@@ -309,6 +311,7 @@ function renderAll() {
   $('#colMenu').hidden = true;
   renderHead(); renderSummary(); renderBody();
   applyColHide();
+  applyColWidths();
 }
 
 function updateRowInState(table, updated) {
@@ -566,6 +569,48 @@ function applyColHide() {
   $('#colHideStyle').textContent = selector ? `${selector}{display:none!important;}` : '';
 }
 
+// ---------- Adjustable column widths (any user) ----------
+// Widths are applied via one generated CSS rule per resized column, keyed off data-col.
+function applyColWidths() {
+  const widths = state.colWidths[state.tab] || {};
+  let css = '';
+  for (const [key, px] of Object.entries(widths)) {
+    css += `#grid [data-col="${key}"]{width:${px}px;min-width:${px}px;max-width:${px}px;overflow:hidden;text-overflow:ellipsis;}`;
+    css += `#grid [data-col="${key}"] input,#grid [data-col="${key}"] select{min-width:0;}`;
+  }
+  $('#colWidthStyle').textContent = css;
+}
+function setColWidth(key, px) {
+  (state.colWidths[state.tab] || (state.colWidths[state.tab] = {}))[key] = px;
+  applyColWidths();
+}
+function saveColWidths() { localStorage.setItem('perqColWidths', JSON.stringify(state.colWidths)); }
+
+function wireResize() {
+  let active = null; // { key, startX, startW }
+  $('#thead').addEventListener('mousedown', (e) => {
+    const handle = e.target.closest('.col-resize');
+    if (!handle) return;
+    const th = handle.closest('th');
+    if (!th || !th.dataset.col) return;
+    e.preventDefault();
+    const zoom = state.zoom || 1;
+    active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom };
+    document.body.style.cursor = 'col-resize';
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!active) return;
+    const delta = (e.clientX - active.startX) / (state.zoom || 1);
+    setColWidth(active.key, Math.max(48, Math.min(900, Math.round(active.startW + delta))));
+  });
+  document.addEventListener('mouseup', () => {
+    if (!active) return;
+    saveColWidths();
+    active = null;
+    document.body.style.cursor = '';
+  });
+}
+
 function renderColMenu() {
   const { cols } = fieldsForTab();
   const hidden = state.hiddenCols[state.tab] || [];
@@ -740,7 +785,7 @@ function wireUsers() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize();
   applyZoom();
   if (state.token) {
     try {
