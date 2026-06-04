@@ -19,6 +19,8 @@ const state = {
   authKey: localStorage.getItem('perqKey') || '',
   filtersHidden: localStorage.getItem('perqFiltersHidden') === '1',
   zoom: parseFloat(localStorage.getItem('perqZoom')) || 1,
+  // Hidden columns per tab, e.g. { bookings: ['notes'], churn: [...] }.
+  hiddenCols: (() => { try { return JSON.parse(localStorage.getItem('perqHiddenCols') || '{}'); } catch { return {}; } })(),
 };
 
 const $ = (s) => document.querySelector(s);
@@ -67,9 +69,16 @@ function fieldsForTab() {
   return { cols, computedKeys, computed: s.computed };
 }
 
+// Like fieldsForTab, but with the user's hidden columns removed (for rendering the grid).
+function visibleCols() {
+  const { cols, computedKeys } = fieldsForTab();
+  const hidden = state.hiddenCols[state.tab] || [];
+  return { cols: cols.filter((f) => !hidden.includes(f.key)), computedKeys };
+}
+
 function renderHead() {
   if (state.tab === 'dashboard') { $('#thead').innerHTML = ''; return; }
-  const { cols, computedKeys } = fieldsForTab();
+  const { cols, computedKeys } = visibleCols();
   $('#thead').innerHTML =
     `<tr><th class="rownum">#</th>` +
     cols.map((f) => {
@@ -80,7 +89,7 @@ function renderHead() {
 }
 
 function rowInnerHtml(row, i) {
-  const { cols, computedKeys } = fieldsForTab();
+  const { cols, computedKeys } = visibleCols();
   let html = `<td class="rownum">${i + 1}</td>`;
   for (const f of cols) html += computedKeys.has(f.key) ? computedCell(f, row) : editCell(f, row);
   html += `<td class="del"><button title="Delete row" data-del="${row.id}">✕</button></td>`;
@@ -236,6 +245,8 @@ function renderAll() {
   $('#toggleFilters').style.display = state.tab === 'churn' ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
   $('#zoomGroup').style.display = isDash ? 'none' : '';
+  $('#colBtn').style.display = isDash ? 'none' : '';  // column hiding only where a grid shows
+  $('#colMenu').hidden = true;
   renderHead(); renderSummary(); renderBody();
 }
 
@@ -484,6 +495,48 @@ function wireView() {
   $('#zoomIn').onclick = () => setZoom(state.zoom + 0.1);
 }
 
+// ---------- Columns show/hide ----------
+function saveHiddenCols() { localStorage.setItem('perqHiddenCols', JSON.stringify(state.hiddenCols)); }
+
+function renderColMenu() {
+  const { cols } = fieldsForTab();
+  const hidden = state.hiddenCols[state.tab] || [];
+  const items = cols.map((f) =>
+    `<label class="col-item"><input type="checkbox" data-col="${f.key}"${hidden.includes(f.key) ? '' : ' checked'} /> ${f.label}</label>`
+  ).join('');
+  $('#colMenu').innerHTML =
+    '<div class="col-menu-head"><span>Show columns</span><button type="button" class="view-btn" id="colShowAll">Show all</button></div>' + items;
+}
+
+function wireColumns() {
+  $('#colBtn').onclick = () => {
+    const menu = $('#colMenu');
+    if (menu.hidden) { renderColMenu(); menu.hidden = false; } else { menu.hidden = true; }
+  };
+  // Toggle a single column.
+  $('#colMenu').addEventListener('change', (e) => {
+    const cb = e.target.closest('[data-col]');
+    if (!cb) return;
+    const hidden = state.hiddenCols[state.tab] || (state.hiddenCols[state.tab] = []);
+    const i = hidden.indexOf(cb.dataset.col);
+    if (cb.checked && i >= 0) hidden.splice(i, 1);
+    else if (!cb.checked && i < 0) hidden.push(cb.dataset.col);
+    saveHiddenCols();
+    renderHead(); renderBody();
+  });
+  // "Show all" resets visibility for the current tab.
+  $('#colMenu').addEventListener('click', (e) => {
+    if (e.target.id !== 'colShowAll') return;
+    state.hiddenCols[state.tab] = [];
+    saveHiddenCols();
+    renderColMenu(); renderHead(); renderBody();
+  });
+  // Click outside closes the menu.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.col-menu-wrap')) $('#colMenu').hidden = true;
+  });
+}
+
 // ---------- Auth ----------
 function showAuth() { $('#authModal').hidden = false; }
 function wireAuth() {
@@ -498,7 +551,7 @@ function wireAuth() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireEntry(); wireView();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireEntry(); wireView(); wireColumns();
   applyZoom();
   const { required } = await fetch('/api/auth-required').then((r) => r.json()).catch(() => ({ required: false }));
   try {

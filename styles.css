@@ -82,6 +82,26 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
   min-width: 40px; text-align: center;
 }
 
+/* Columns show/hide dropdown */
+.col-menu-wrap { position: relative; }
+.col-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  background: var(--panel); border: 1px solid var(--line-strong); border-radius: 9px;
+  box-shadow: var(--shadow); padding: 8px; min-width: 210px; max-height: 60vh; overflow: auto;
+}
+.col-menu[hidden] { display: none; }
+.col-menu-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 2px 6px 8px; margin-bottom: 6px; border-bottom: 1px solid var(--line);
+}
+.col-menu-head span { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-soft); }
+.col-item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+  font-size: 12.5px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.col-item:hover { background: var(--paper); }
+.col-item input { margin: 0; }
+
 /* Summary */
 .summary {
   display: flex; flex-direction: column; gap: 12px; padding: 14px 22px;
