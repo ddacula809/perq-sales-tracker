@@ -15,6 +15,7 @@ const state = {
   filters: {
     dashboard: { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
     bookings:  { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
+    churn:     { pmcbc: 'All', property: 'All', product: 'All', fcm: 'All' },
   },
   token: localStorage.getItem('perqToken') || '',
   user: null, // { id, username, role }
@@ -121,6 +122,7 @@ function renderBody() {
   if (state.tab === 'dashboard') { tbody.innerHTML = ''; return; }
   let rows = state.rows[state.tab] || [];
   if (state.tab === 'bookings') rows = rows.filter((r) => bookingMatch(r, state.filters.bookings));
+  else if (state.tab === 'churn') rows = rows.filter((r) => churnMatch(r, state.filters.churn));
   tbody.innerHTML = '';
   rows.forEach((row, i) => {
     const tr = document.createElement('tr');
@@ -178,42 +180,63 @@ function bookingMatch(r, f) {
     && (f.cat === 'All' || r.bpr_prod_category === f.cat);
 }
 
+// True when a churn row passes the churn filter selection.
+function churnMatch(r, f) {
+  return (f.pmcbc === 'All' || r.pmc_buying_center === f.pmcbc)
+    && (f.property === 'All' || r.property === f.property)
+    && (f.product === 'All' || r.product === f.product)
+    && (f.fcm === 'All' || r.final_churn_month === f.fcm);
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+// Sort "Month Year" strings chronologically (by year, then calendar month).
+function sortMonthYear(arr) {
+  return arr.slice().sort((a, b) => {
+    const [ma, ya] = String(a).split(' ');
+    const [mb, yb] = String(b).split(' ');
+    return (Number(ya) - Number(yb)) || (MONTHS.indexOf(ma) - MONTHS.indexOf(mb));
+  });
+}
+
 // Re-render whatever the active tab shows that depends on the filters.
 function onFilterChange() { renderSummary(); renderBody(); }
 
 function renderSummary() {
   const el = $('#summary');
-  // Filters drive the Dashboard metrics and the bookings table; churn has neither.
-  if (state.tab === 'churn') { el.className = 'summary hidden'; el.innerHTML = ''; return; }
-  el.className = 'summary';
-  const rows = state.rows.bookings;
-  const f = state.filters[state.tab]; // dashboard and bookings have separate filter sets
+  const tab = state.tab;
+  const rows = tab === 'churn' ? state.rows.churn : state.rows.bookings;
+  const f = state.filters[tab];
+  if (!f) { el.className = 'summary hidden'; el.innerHTML = ''; return; }
 
   const distinct = (k) => [...new Set(rows.map((r) => r[k]).filter((v) => v !== null && v !== '' && v !== undefined))];
-  // Months in calendar order (from the schema), restricted to those present in the data.
-  const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
-  const presentMonths = new Set(distinct('booking_month'));
-  const monthVals = ['All', ...monthOrder.filter((m) => presentMonths.has(m))];
-  const yearVals  = ['All', ...distinct('booking_year').sort((a, b) => a - b)];
-  const pmcVals   = ['All', ...distinct('pmc').sort()];
-  const propVals  = ['All', ...distinct('property_name').sort()];
-  const repVals   = ['All', ...distinct('sales_rep').sort()];
-  const catVals   = ['All', ...distinct('bpr_prod_category').sort()];
-
   const sel = (id, label, vals, cur) =>
     `<div class="filter"><label>${label}</label><select id="${id}">` +
     vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('') +
     `</select></div>`;
 
-  // Property Name is only offered on the Bookings tab (too granular for dashboard totals).
-  const filterDefs = [
-    ['month', 'Filter by Booking Month', monthVals, f.month],
-    ['year', 'Filter by Booking Year', yearVals, f.year],
-    ['pmc', 'Filter by PMC', pmcVals, f.pmc],
-  ];
-  if (state.tab === 'bookings') filterDefs.push(['prop', 'Filter by Property Name', propVals, f.prop]);
-  filterDefs.push(['rep', 'Filter by Sales Rep', repVals, f.rep]);
-  filterDefs.push(['cat', 'Filter by BPR Category', catVals, f.cat]);
+  let filterDefs;
+  if (tab === 'churn') {
+    filterDefs = [
+      ['pmcbc', 'Filter by PMC Buying Center', ['All', ...distinct('pmc_buying_center').sort()], f.pmcbc],
+      ['property', 'Filter by Property', ['All', ...distinct('property').sort()], f.property],
+      ['product', 'Filter by Product', ['All', ...distinct('product').sort()], f.product],
+      ['fcm', 'Filter by Final Churn Month', ['All', ...sortMonthYear(distinct('final_churn_month'))], f.fcm],
+    ];
+  } else {
+    // Months in calendar order (from the schema), restricted to those present in the data.
+    const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
+    const presentMonths = new Set(distinct('booking_month'));
+    filterDefs = [
+      ['month', 'Filter by Booking Month', ['All', ...monthOrder.filter((m) => presentMonths.has(m))], f.month],
+      ['year', 'Filter by Booking Year', ['All', ...distinct('booking_year').sort((a, b) => a - b)], f.year],
+      ['pmc', 'Filter by PMC', ['All', ...distinct('pmc').sort()], f.pmc],
+    ];
+    // Property Name is only offered on the Bookings tab (too granular for dashboard totals).
+    if (tab === 'bookings') filterDefs.push(['prop', 'Filter by Property Name', ['All', ...distinct('property_name').sort()], f.prop]);
+    filterDefs.push(['rep', 'Filter by Sales Rep', ['All', ...distinct('sales_rep').sort()], f.rep]);
+    filterDefs.push(['cat', 'Filter by BPR Category', ['All', ...distinct('bpr_prod_category').sort()], f.cat]);
+  }
 
   let filtersHtml = '';
   if (!state.filtersHidden) {
@@ -279,7 +302,7 @@ function renderAll() {
   addBtn.textContent = state.tab === 'bookings' ? '+ New booking' : '+ Add row';
   $('#gridwrap').style.display = isDash ? 'none' : '';
   // View tools: filter toggle only where filters exist; zoom only where a table shows.
-  $('#toggleFilters').style.display = state.tab === 'churn' ? 'none' : '';
+  $('#toggleFilters').style.display = ''; // all three tabs now have filters
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
   $('#zoomGroup').style.display = isDash ? 'none' : '';
   $('#colBtn').style.display = isDash ? 'none' : '';  // column hiding only where a grid shows
