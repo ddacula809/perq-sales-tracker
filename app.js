@@ -406,7 +406,7 @@ function renderAll() {
   $('#zoomGroup').style.display = isGrid ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
   $('#colMenu').hidden = true;
-  if (isEntry && !$('#entryForms').children.length) resetEntryView();
+  if (isEntry && !$('#productLines').children.length) resetEntryView();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
@@ -556,14 +556,16 @@ function wireActions() {
   };
 }
 
-// ---------- New Booking section (multi-entry form) ----------
-// Fields per entry, in order. Offset Amount only appears for License Transfers.
-const ENTRY_KEYS = [
+// ---------- New Booking section (shared details + one row per product) ----------
+// Common booking details, entered once. Each product line below becomes its own booking.
+const SHARED_KEYS = [
   'booking_month', 'booking_year',
   'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center',
-  'pilot_or_ctam', 'pilot_type', 'ctam_type', 'product', 'mql',
-  'contract_term', 'booked_term', 'date_signed', 'mrr', 'offset_amount',
+  'pilot_or_ctam', 'pilot_type', 'ctam_type', 'mql',
+  'contract_term', 'booked_term', 'date_signed',
 ];
+// Per-product fields. Offset Amount only applies (and only shows) on License Transfers.
+const PRODUCT_KEYS = ['product', 'mrr', 'one_time_fee', 'offset_amount'];
 
 // Booking Month/Year default to the dataset's period and "stick" to the last value used.
 let entryDefaults = { booking_month: 'May', booking_year: '2026' };
@@ -582,114 +584,101 @@ function entryFieldHtml(f) {
   return `<div class="entry-field" data-field="${f.key}"${hidden}><label>${f.label}</label>${control}</div>`;
 }
 
-function entryCardHtml() {
-  const defs = state.schema.bookings.editable;
-  const fields = ENTRY_KEYS.map((k) => defs.find((f) => f.key === k)).filter(Boolean).map(entryFieldHtml).join('');
-  return `<div class="entry-card-form" data-entry>
-    <div class="entry-card-head"><span class="entry-card-title"></span>` +
-    `<button type="button" class="entry-remove" title="Remove this entry">✕</button></div>` +
-    `<div class="entry-form">${fields}</div></div>`;
-}
+function fieldDef(key) { return state.schema.bookings.editable.find((f) => f.key === key); }
 
-// Show this card's Offset Amount only when its CTAM Type is License Transfer.
-function setCardOffset(card) {
-  const ctam = card.querySelector('[data-key="ctam_type"]');
-  const field = card.querySelector('[data-field="offset_amount"]');
-  if (!ctam || !field) return;
-  const isLT = ctam.value.trim() === 'License Transfer';
-  field.hidden = !isLT;
-  if (!isLT) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
-}
-
-function applyCardValues(card, vals) {
-  for (const [k, v] of Object.entries(vals)) {
-    const ctl = card.querySelector(`[data-key="${k}"]`);
+function renderSharedFields() {
+  $('#sharedFields').innerHTML = SHARED_KEYS.map(fieldDef).filter(Boolean).map(entryFieldHtml).join('');
+  for (const [k, v] of Object.entries(entryDefaults)) {
+    const ctl = $(`#sharedFields [data-key="${k}"]`);
     if (ctl && v != null && v !== '') ctl.value = v;
   }
 }
 
-function renumberEntries() {
-  const cards = [...$('#entryForms').querySelectorAll('[data-entry]')];
-  cards.forEach((c, i) => { c.querySelector('.entry-card-title').textContent = `Entry ${i + 1}`; });
-  const showRemove = cards.length > 1;
-  cards.forEach((c) => { c.querySelector('.entry-remove').style.visibility = showRemove ? '' : 'hidden'; });
+function productLineHtml() {
+  const fields = PRODUCT_KEYS.map(fieldDef).filter(Boolean).map(entryFieldHtml).join('');
+  return `<div class="product-line" data-product>${fields}` +
+    `<button type="button" class="entry-remove" title="Remove this product">✕</button></div>`;
 }
 
-function addEntryCard() {
-  const container = $('#entryForms');
-  // Carry Booking Month/Year from the last card (or the defaults) into the new one.
-  const cards = container.querySelectorAll('[data-entry]');
-  const vals = { ...entryDefaults };
-  if (cards.length) {
-    const last = cards[cards.length - 1];
-    const m = last.querySelector('[data-key="booking_month"]');
-    const y = last.querySelector('[data-key="booking_year"]');
-    if (m && m.value) vals.booking_month = m.value;
-    if (y && y.value) vals.booking_year = y.value;
-  }
+// Offset Amount shows on every product line only when the shared CTAM Type is License Transfer.
+function setProductOffsets() {
+  const ctam = $('#sharedFields [data-key="ctam_type"]');
+  const isLT = !!ctam && ctam.value.trim() === 'License Transfer';
+  $('#productLines').querySelectorAll('[data-product]').forEach((line) => {
+    const field = line.querySelector('[data-field="offset_amount"]');
+    if (!field) return;
+    field.hidden = !isLT;
+    if (!isLT) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
+  });
+}
+
+function renumberProducts() {
+  const lines = [...$('#productLines').querySelectorAll('[data-product]')];
+  const showRemove = lines.length > 1;
+  lines.forEach((l) => { l.querySelector('.entry-remove').style.visibility = showRemove ? '' : 'hidden'; });
+}
+
+function addProductLine() {
   const tmp = document.createElement('div');
-  tmp.innerHTML = entryCardHtml();
-  const card = tmp.firstElementChild;
-  container.appendChild(card);
-  applyCardValues(card, vals);
-  setCardOffset(card);
-  renumberEntries();
-  return card;
+  tmp.innerHTML = productLineHtml();
+  $('#productLines').appendChild(tmp.firstElementChild);
+  setProductOffsets();
+  renumberProducts();
 }
 
-// Reset to a single empty entry (used on open and after a successful submit).
+// Reset to the empty shared form with a single product line (on open and after submit).
 function resetEntryView() {
-  $('#entryForms').innerHTML = '';
-  addEntryCard();
+  renderSharedFields();
+  $('#productLines').innerHTML = '';
+  addProductLine();
 }
 
 async function submitEntries() {
-  const cards = [...$('#entryForms').querySelectorAll('[data-entry]')];
-  const payloads = [];
-  for (const card of cards) {
-    const payload = {};
-    let filled = false;
-    card.querySelectorAll('[data-key]').forEach((ctl) => {
+  const shared = {};
+  $('#sharedFields').querySelectorAll('[data-key]').forEach((ctl) => { shared[ctl.dataset.key] = ctl.value; });
+  if (!String(shared.property_name || '').trim() && !String(shared.property_id || '').trim()) {
+    toast('Enter the property details first.', true);
+    return;
+  }
+  // One booking per product line, each carrying the shared details.
+  const payloads = [...$('#productLines').querySelectorAll('[data-product]')].map((line) => {
+    const p = { ...shared };
+    line.querySelectorAll('[data-key]').forEach((ctl) => {
       const field = ctl.closest('.entry-field');
       if (field && field.hidden) return; // skip hidden Offset on non-License-Transfers
-      payload[ctl.dataset.key] = ctl.value;
-      // A card counts as filled only if a typed field (not a defaulted dropdown or the
-      // booking period) has a value — so untouched extra cards are ignored.
-      if (ctl.tagName === 'INPUT' && ctl.dataset.key !== 'booking_year' && String(ctl.value).trim() !== '') filled = true;
+      p[ctl.dataset.key] = ctl.value;
     });
-    if (filled) payloads.push(payload);
-  }
-  if (!payloads.length) { toast('Fill in at least one entry first.', true); return; }
+    return p;
+  });
+  if (!payloads.length) { toast('Add at least one product.', true); return; }
   try {
     let added = 0;
-    for (const p of payloads) {
-      const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(p) });
+    for (const payload of payloads) {
+      const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
       state.rows.bookings.push(row);
       added += 1;
-      if (p.booking_month) entryDefaults.booking_month = p.booking_month;
-      if (p.booking_year) entryDefaults.booking_year = p.booking_year;
     }
+    if (shared.booking_month) entryDefaults.booking_month = shared.booking_month;
+    if (shared.booking_year) entryDefaults.booking_year = shared.booking_year;
     $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
-    toast(`Added ${added} booking${added === 1 ? '' : 's'}`);
+    toast(`Added ${added} line item${added === 1 ? '' : 's'}`);
     resetEntryView();
   } catch (err) { toast(err.message, true); }
 }
 
 function wireEntry() {
-  $('#addEntryFormBtn').onclick = () => addEntryCard();
+  $('#addEntryFormBtn').onclick = () => addProductLine();
   $('#submitEntriesBtn').onclick = submitEntries;
-  $('#entryForms').addEventListener('change', (e) => {
-    if (e.target.dataset && e.target.dataset.key === 'ctam_type') {
-      const card = e.target.closest('[data-entry]');
-      if (card) setCardOffset(card);
-    }
+  // Shared CTAM Type change toggles Offset Amount on all product lines.
+  $('#sharedFields').addEventListener('change', (e) => {
+    if (e.target.dataset && e.target.dataset.key === 'ctam_type') setProductOffsets();
   });
-  $('#entryForms').addEventListener('click', (e) => {
+  // Remove a product line (keep at least one).
+  $('#productLines').addEventListener('click', (e) => {
     if (!e.target.closest('.entry-remove')) return;
-    const cards = $('#entryForms').querySelectorAll('[data-entry]');
-    if (cards.length <= 1) return; // always keep at least one entry
-    e.target.closest('[data-entry]').remove();
-    renumberEntries();
+    if ($('#productLines').querySelectorAll('[data-product]').length <= 1) return;
+    e.target.closest('[data-product]').remove();
+    renumberProducts();
   });
 }
 
