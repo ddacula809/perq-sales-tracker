@@ -28,6 +28,7 @@
       <button class="btn solid" id="addRowBtn">+ Add row</button>
       <button class="btn ghost" id="usersBtn" hidden>Users</button>
       <span class="user-chip" id="userChip"></span>
+      <button class="btn ghost" id="changePwBtn" hidden>Change password</button>
       <button class="btn ghost" id="logoutBtn" hidden>Log out</button>
     </div>
   </header>
@@ -86,6 +87,20 @@
       <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" />
       <button class="btn solid" id="loginBtn">Sign in</button>
       <p class="err" id="loginErr"></p>
+    </div>
+  </div>
+
+  <div class="modal" id="passwordModal" hidden>
+    <div class="modal-card">
+      <div class="entry-head">
+        <h2>Change password</h2>
+        <button type="button" class="entry-close" id="pwClose" title="Close">✕</button>
+      </div>
+      <input type="password" id="pwCurrent" placeholder="Current password" autocomplete="current-password" />
+      <input type="password" id="pwNew" placeholder="New password" autocomplete="new-password" />
+      <input type="password" id="pwConfirm" placeholder="Confirm new password" autocomplete="new-password" />
+      <button class="btn solid" id="pwSubmit">Update password</button>
+      <p class="err" id="pwErr"></p>
     </div>
   </div>
 

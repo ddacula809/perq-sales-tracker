@@ -48,6 +48,22 @@ app.use('/api', (req, res, next) => {
 
 app.get('/api/me', (req, res) => res.json({ user: req.user }));
 
+// Self-service password change for the logged-in user.
+app.post('/api/change-password', async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!newPassword || String(newPassword).length < 4) {
+      return res.status(400).json({ error: 'New password must be at least 4 characters.' });
+    }
+    const user = await getUserByUsername(req.user.username);
+    if (!user || !verifyPassword(currentPassword, user.password_hash)) {
+      return res.status(400).json({ error: 'Current password is incorrect.' });
+    }
+    await updateUser(user.id, { password: newPassword });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // 403 unless the current user holds one of the listed roles.
 const requireRole = (...roles) => (req, res, next) =>
   roles.includes(req.user.role) ? next() : res.status(403).json({ error: 'You do not have permission to do that.' });

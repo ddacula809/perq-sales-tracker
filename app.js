@@ -269,6 +269,7 @@ function renderAll() {
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
   $('#usersBtn').hidden = !isAdmin();
+  $('#changePwBtn').hidden = !state.user;
   $('#logoutBtn').hidden = !state.user;
   $('#userChip').innerHTML = state.user
     ? `${escapeHtml(state.user.username)} · <span class="role">${escapeHtml(state.user.role)}</span>` : '';
@@ -620,6 +621,29 @@ function wireAuth() {
   $('#loginUser').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#loginPass').focus(); });
   $('#loginPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   $('#logoutBtn').onclick = logout;
+
+  // Self-service change password.
+  $('#changePwBtn').onclick = () => {
+    ['pwCurrent', 'pwNew', 'pwConfirm'].forEach((id) => { $('#' + id).value = ''; });
+    $('#pwErr').textContent = '';
+    $('#passwordModal').hidden = false;
+    $('#pwCurrent').focus();
+  };
+  $('#pwClose').onclick = () => { $('#passwordModal').hidden = true; };
+  $('#passwordModal').addEventListener('click', (e) => { if (e.target.id === 'passwordModal') $('#passwordModal').hidden = true; });
+  $('#pwSubmit').onclick = changePassword;
+  $('#pwConfirm').addEventListener('keydown', (e) => { if (e.key === 'Enter') changePassword(); });
+}
+
+async function changePassword() {
+  const currentPassword = $('#pwCurrent').value;
+  const newPassword = $('#pwNew').value;
+  if (newPassword !== $('#pwConfirm').value) { $('#pwErr').textContent = 'New passwords do not match.'; return; }
+  try {
+    await api('/api/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) });
+    $('#passwordModal').hidden = true;
+    toast('Password updated');
+  } catch (err) { $('#pwErr').textContent = err.message; }
 }
 
 // ---------- Users admin panel ----------
