@@ -40,6 +40,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="newbooking">New Booking</button>
     <button class="tab" data-tab="bookings">Bookings</button>
     <button class="tab" data-tab="churn">Churn Tracker</button>
     <div class="view-tools">
@@ -68,22 +69,18 @@
     </div>
   </main>
 
-  <div class="toast" id="toast"></div>
-  <div class="cell-tip" id="cellTip" hidden></div>
-
-  <div class="modal" id="entryModal" hidden>
-    <div class="modal-card entry-card">
-      <div class="entry-head">
-        <h2>New Booking</h2>
-        <button type="button" class="entry-close" id="entryClose" title="Close">✕</button>
-      </div>
-      <form id="entryForm" class="entry-form" autocomplete="off"></form>
-      <div class="entry-actions">
-        <button type="button" class="btn ghost" id="entryCancel">Cancel</button>
-        <button type="submit" class="btn solid" form="entryForm">Add booking</button>
+  <main class="entry-view" id="entryView" hidden>
+    <div class="entry-view-inner">
+      <div id="entryForms"></div>
+      <button type="button" class="btn ghost entry-add" id="addEntryFormBtn">+ Add another entry</button>
+      <div class="entry-submit">
+        <button type="button" class="btn solid" id="submitEntriesBtn">Submit bookings</button>
       </div>
     </div>
-  </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <div class="cell-tip" id="cellTip" hidden></div>
 
   <div class="modal" id="loginModal" hidden>
     <div class="modal-card">

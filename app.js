@@ -95,7 +95,7 @@ function fieldsForTab() {
 }
 
 function renderHead() {
-  if (state.tab === 'dashboard') { $('#thead').innerHTML = ''; return; }
+  if (state.tab !== 'bookings' && state.tab !== 'churn') { $('#thead').innerHTML = ''; return; }
   const { cols, computedKeys } = fieldsForTab();
   $('#thead').innerHTML =
     `<tr><th class="rownum">#</th>` +
@@ -121,7 +121,7 @@ function rowInnerHtml(row, i) {
 
 function renderBody() {
   const tbody = $('#tbody');
-  if (state.tab === 'dashboard') { tbody.innerHTML = ''; return; }
+  if (state.tab !== 'bookings' && state.tab !== 'churn') { tbody.innerHTML = ''; return; }
   let rows = state.rows[state.tab] || [];
   if (state.tab === 'bookings') rows = rows.filter((r) => bookingMatch(r, state.filters.bookings));
   else if (state.tab === 'churn') rows = rows.filter((r) => churnMatch(r, state.filters.churn));
@@ -302,7 +302,12 @@ async function loadAll() {
 }
 
 function renderAll() {
-  const isDash = state.tab === 'dashboard';
+  // The New Booking tab is only for users who may create bookings.
+  document.querySelector('[data-tab="newbooking"]').hidden = !canAddDelete();
+  if (state.tab === 'newbooking' && !canAddDelete()) state.tab = 'dashboard';
+
+  const isEntry = state.tab === 'newbooking';
+  const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
   $('#churnUploadBtn').hidden = !(state.tab === 'churn' && canAddDelete());
@@ -311,17 +316,19 @@ function renderAll() {
   $('#logoutBtn').hidden = !state.user;
   $('#userChip').innerHTML = state.user
     ? `${escapeHtml(state.user.username)} · <span class="role">${escapeHtml(state.user.role)}</span>` : '';
-  const addBtn = $('#addRowBtn');
-  // Add row only where there's a grid and the user may create rows.
-  addBtn.style.display = (isDash || !canAddDelete()) ? 'none' : '';
-  addBtn.textContent = state.tab === 'bookings' ? '+ New booking' : '+ Add row';
-  $('#gridwrap').style.display = isDash ? 'none' : '';
-  // View tools: filter toggle only where filters exist; zoom only where a table shows.
-  $('#toggleFilters').style.display = ''; // all three tabs now have filters
+  // Quick "+ Add row" is only used on the Churn grid now (Bookings uses the New Booking tab).
+  $('#addRowBtn').style.display = (state.tab === 'churn' && canAddDelete()) ? '' : 'none';
+  $('#addRowBtn').textContent = '+ Add row';
+  // Sections: grid for Bookings/Churn, the entry form for New Booking, neither on Dashboard.
+  $('#gridwrap').style.display = isGrid ? '' : 'none';
+  $('#entryView').hidden = !isEntry;
+  // View tools: filters where there's a summary; columns/zoom only where a grid shows.
+  $('#toggleFilters').style.display = isEntry ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
-  $('#zoomGroup').style.display = isDash ? 'none' : '';
-  $('#colBtn').style.display = isDash ? 'none' : '';  // column hiding only where a grid shows
+  $('#zoomGroup').style.display = isGrid ? '' : 'none';
+  $('#colBtn').style.display = isGrid ? '' : 'none';
   $('#colMenu').hidden = true;
+  if (isEntry && !$('#entryForms').children.length) resetEntryView();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
@@ -405,13 +412,12 @@ function wireTabs() {
 }
 
 function wireActions() {
+  // Quick blank-row add — only used on the Churn grid (Bookings uses the New Booking tab).
   $('#addRowBtn').onclick = async () => {
-    if (state.tab === 'dashboard' || !canAddDelete()) return; // no grid / no permission
-    // Bookings use the dedicated entry form; churn keeps the quick blank-row add.
-    if (state.tab === 'bookings') { openEntry(); return; }
+    if (state.tab !== 'churn' || !canAddDelete()) return;
     try {
-      const row = await api(`/api/${state.tab}`, { method: 'POST', body: JSON.stringify({}) });
-      state.rows[state.tab].push(row);
+      const row = await api('/api/churn', { method: 'POST', body: JSON.stringify({}) });
+      state.rows.churn.push(row);
       renderBody(); renderSummary();
       $('#scroller').scrollTop = $('#scroller').scrollHeight;
       toast('Row added');
@@ -472,8 +478,8 @@ function wireActions() {
   };
 }
 
-// ---------- New booking entry form ----------
-// Fields shown in the entry form, in order. Offset Amount only appears for License Transfers.
+// ---------- New Booking section (multi-entry form) ----------
+// Fields per entry, in order. Offset Amount only appears for License Transfers.
 const ENTRY_KEYS = [
   'booking_month', 'booking_year',
   'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center',
@@ -481,15 +487,8 @@ const ENTRY_KEYS = [
   'contract_term', 'booked_term', 'date_signed', 'mrr', 'offset_amount',
 ];
 
-// Booking Month/Year default to the dataset's period and "stick" to whatever you last
-// entered, so adding many bookings for the same period doesn't mean re-picking each time.
+// Booking Month/Year default to the dataset's period and "stick" to the last value used.
 let entryDefaults = { booking_month: 'May', booking_year: '2026' };
-function applyEntryDefaults() {
-  for (const [k, v] of Object.entries(entryDefaults)) {
-    const ctl = $(`#entryForm [data-key="${k}"]`);
-    if (ctl && v != null && v !== '') ctl.value = v;
-  }
-}
 
 function entryFieldHtml(f) {
   let control;
@@ -505,69 +504,115 @@ function entryFieldHtml(f) {
   return `<div class="entry-field" data-field="${f.key}"${hidden}><label>${f.label}</label>${control}</div>`;
 }
 
-function renderEntryForm() {
+function entryCardHtml() {
   const defs = state.schema.bookings.editable;
-  $('#entryForm').innerHTML = ENTRY_KEYS
-    .map((k) => defs.find((f) => f.key === k))
-    .filter(Boolean)
-    .map(entryFieldHtml)
-    .join('');
-  applyEntryDefaults();
-  toggleEntryOffset();
+  const fields = ENTRY_KEYS.map((k) => defs.find((f) => f.key === k)).filter(Boolean).map(entryFieldHtml).join('');
+  return `<div class="entry-card-form" data-entry>
+    <div class="entry-card-head"><span class="entry-card-title"></span>` +
+    `<button type="button" class="entry-remove" title="Remove this entry">✕</button></div>` +
+    `<div class="entry-form">${fields}</div></div>`;
 }
 
-// Show the Offset Amount field only when CTAM Type is License Transfer; clear it otherwise.
-function toggleEntryOffset() {
-  const ctam = $('#entryForm [data-key="ctam_type"]');
-  const field = $('#entryForm [data-field="offset_amount"]');
+// Show this card's Offset Amount only when its CTAM Type is License Transfer.
+function setCardOffset(card) {
+  const ctam = card.querySelector('[data-key="ctam_type"]');
+  const field = card.querySelector('[data-field="offset_amount"]');
   if (!ctam || !field) return;
   const isLT = ctam.value.trim() === 'License Transfer';
   field.hidden = !isLT;
   if (!isLT) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
 }
 
-function openEntry() {
-  renderEntryForm();
-  $('#entryModal').hidden = false;
-  const first = $('#entryForm [data-key]');
-  if (first) first.focus();
+function applyCardValues(card, vals) {
+  for (const [k, v] of Object.entries(vals)) {
+    const ctl = card.querySelector(`[data-key="${k}"]`);
+    if (ctl && v != null && v !== '') ctl.value = v;
+  }
 }
-function closeEntry() { $('#entryModal').hidden = true; }
 
-async function submitEntry(e) {
-  e.preventDefault();
-  const payload = {};
-  $('#entryForm').querySelectorAll('[data-key]').forEach((ctl) => {
-    const field = ctl.closest('.entry-field');
-    if (field && field.hidden) return; // skip the hidden Offset field on non-License-Transfers
-    payload[ctl.dataset.key] = ctl.value;
-  });
+function renumberEntries() {
+  const cards = [...$('#entryForms').querySelectorAll('[data-entry]')];
+  cards.forEach((c, i) => { c.querySelector('.entry-card-title').textContent = `Entry ${i + 1}`; });
+  const showRemove = cards.length > 1;
+  cards.forEach((c) => { c.querySelector('.entry-remove').style.visibility = showRemove ? '' : 'hidden'; });
+}
+
+function addEntryCard() {
+  const container = $('#entryForms');
+  // Carry Booking Month/Year from the last card (or the defaults) into the new one.
+  const cards = container.querySelectorAll('[data-entry]');
+  const vals = { ...entryDefaults };
+  if (cards.length) {
+    const last = cards[cards.length - 1];
+    const m = last.querySelector('[data-key="booking_month"]');
+    const y = last.querySelector('[data-key="booking_year"]');
+    if (m && m.value) vals.booking_month = m.value;
+    if (y && y.value) vals.booking_year = y.value;
+  }
+  const tmp = document.createElement('div');
+  tmp.innerHTML = entryCardHtml();
+  const card = tmp.firstElementChild;
+  container.appendChild(card);
+  applyCardValues(card, vals);
+  setCardOffset(card);
+  renumberEntries();
+  return card;
+}
+
+// Reset to a single empty entry (used on open and after a successful submit).
+function resetEntryView() {
+  $('#entryForms').innerHTML = '';
+  addEntryCard();
+}
+
+async function submitEntries() {
+  const cards = [...$('#entryForms').querySelectorAll('[data-entry]')];
+  const payloads = [];
+  for (const card of cards) {
+    const payload = {};
+    let filled = false;
+    card.querySelectorAll('[data-key]').forEach((ctl) => {
+      const field = ctl.closest('.entry-field');
+      if (field && field.hidden) return; // skip hidden Offset on non-License-Transfers
+      payload[ctl.dataset.key] = ctl.value;
+      // A card counts as filled only if a typed field (not a defaulted dropdown or the
+      // booking period) has a value — so untouched extra cards are ignored.
+      if (ctl.tagName === 'INPUT' && ctl.dataset.key !== 'booking_year' && String(ctl.value).trim() !== '') filled = true;
+    });
+    if (filled) payloads.push(payload);
+  }
+  if (!payloads.length) { toast('Fill in at least one entry first.', true); return; }
   try {
-    const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
-    state.rows.bookings.push(row);
-    if (state.tab === 'bookings') {
-      renderBody(); renderSummary();
-      $('#scroller').scrollTop = $('#scroller').scrollHeight;
+    let added = 0;
+    for (const p of payloads) {
+      const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(p) });
+      state.rows.bookings.push(row);
+      added += 1;
+      if (p.booking_month) entryDefaults.booking_month = p.booking_month;
+      if (p.booking_year) entryDefaults.booking_year = p.booking_year;
     }
     $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
-    toast('Booking added');
-    // Carry the booking period forward to the next entry.
-    if (payload.booking_month) entryDefaults.booking_month = payload.booking_month;
-    if (payload.booking_year) entryDefaults.booking_year = payload.booking_year;
-    renderEntryForm(); // reset for the next entry
-    const first = $('#entryForm [data-key]');
-    if (first) first.focus();
+    toast(`Added ${added} booking${added === 1 ? '' : 's'}`);
+    resetEntryView();
   } catch (err) { toast(err.message, true); }
 }
 
 function wireEntry() {
-  $('#entryForm').addEventListener('submit', submitEntry);
-  $('#entryForm').addEventListener('change', (e) => {
-    if (e.target.dataset && e.target.dataset.key === 'ctam_type') toggleEntryOffset();
+  $('#addEntryFormBtn').onclick = () => addEntryCard();
+  $('#submitEntriesBtn').onclick = submitEntries;
+  $('#entryForms').addEventListener('change', (e) => {
+    if (e.target.dataset && e.target.dataset.key === 'ctam_type') {
+      const card = e.target.closest('[data-entry]');
+      if (card) setCardOffset(card);
+    }
   });
-  $('#entryClose').onclick = closeEntry;
-  $('#entryCancel').onclick = closeEntry;
-  $('#entryModal').addEventListener('click', (e) => { if (e.target.id === 'entryModal') closeEntry(); });
+  $('#entryForms').addEventListener('click', (e) => {
+    if (!e.target.closest('.entry-remove')) return;
+    const cards = $('#entryForms').querySelectorAll('[data-entry]');
+    if (cards.length <= 1) return; // always keep at least one entry
+    e.target.closest('[data-entry]').remove();
+    renumberEntries();
+  });
 }
 
 // ---------- View tools: filter toggle + table zoom ----------
