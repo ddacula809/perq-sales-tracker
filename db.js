@@ -3,7 +3,13 @@
 import pg from 'pg';
 import { BOOKING_FIELDS, CHURN_FIELDS } from './schema.js';
 
-const { Pool } = pg;
+const { Pool, types } = pg;
+
+// DATE columns (OID 1082): return the raw 'YYYY-MM-DD' string instead of a JS Date.
+// Without this, pg hands back a Date object that JSON-serializes to a full ISO
+// timestamp, which <input type="date"> can't render (shows blank) and which can
+// timezone-shift. Keep this parser. (See CLAUDE.md "Gotchas".)
+types.setTypeParser(1082, (val) => val);
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
