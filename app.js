@@ -7,7 +7,7 @@ const MONEY = new Set([
 ]);
 
 const state = {
-  tab: 'bookings',
+  tab: 'dashboard',
   schema: null,
   rows: { bookings: [], churn: [] },
   filters: { pmc: 'All', rep: 'All', cat: 'All' },
@@ -50,6 +50,7 @@ function fieldsForTab() {
 }
 
 function renderHead() {
+  if (state.tab === 'dashboard') { $('#thead').innerHTML = ''; return; }
   const { edit, computed } = fieldsForTab();
   const cols = [...edit, ...computed];
   $('#thead').innerHTML =
@@ -71,8 +72,10 @@ function rowInnerHtml(row, i) {
 }
 
 function renderBody() {
-  const rows = state.rows[state.tab];
   const tbody = $('#tbody');
+  if (state.tab === 'dashboard') { tbody.innerHTML = ''; return; }
+  let rows = state.rows[state.tab] || [];
+  if (state.tab === 'bookings') rows = rows.filter(bookingMatch);
   tbody.innerHTML = '';
   rows.forEach((row, i) => {
     const tr = document.createElement('tr');
@@ -108,43 +111,52 @@ function computedCell(f, row) {
 
 function escapeAttr(v) { return String(v).replace(/"/g, '&quot;'); }
 
-// ---------- Summary (bookings only) ----------
+// ---------- Filters + summary metrics ----------
+// PMC / Sales Rep / BPR Category filter, shared by the Dashboard metrics and the
+// bookings grid. True when a booking row passes the current filter selection.
+function bookingMatch(r) {
+  const f = state.filters;
+  return (f.pmc === 'All' || r.pmc === f.pmc)
+    && (f.rep === 'All' || r.sales_rep === f.rep)
+    && (f.cat === 'All' || r.bpr_prod_category === f.cat);
+}
+
+// Re-render whatever the active tab shows that depends on the filters.
+function onFilterChange() { renderSummary(); renderBody(); }
+
 function renderSummary() {
   const el = $('#summary');
-  if (state.tab !== 'bookings') { el.className = 'summary hidden'; el.innerHTML = ''; return; }
+  // Filters drive the Dashboard metrics and the bookings table; churn has neither.
+  if (state.tab === 'churn') { el.className = 'summary hidden'; el.innerHTML = ''; return; }
   el.className = 'summary';
   const rows = state.rows.bookings;
   const uniq = (k) => ['All', ...[...new Set(rows.map((r) => r[k]).filter(Boolean))].sort()];
   const f = state.filters;
+  const opts = (k, cur) => uniq(k).map((o) => `<option${o === cur ? ' selected' : ''}>${o}</option>`).join('');
 
-  const sel = (id, label, key) =>
-    `<div class="filter"><label>${label}</label><select id="${id}">` +
-    uniq(key).map((o) => `<option${o === f[id === 'pmc' ? 'pmc' : id] ? ' selected' : ''}>${o}</option>`).join('') +
-    `</select></div>`;
+  let html =
+    `<div class="filter"><label>Filter by PMC</label><select id="pmc">${opts('pmc', f.pmc)}</select></div>` +
+    `<div class="filter"><label>Filter by Sales Rep</label><select id="rep">${opts('sales_rep', f.rep)}</select></div>` +
+    `<div class="filter"><label>Filter by BPR Category</label><select id="cat">${opts('bpr_prod_category', f.cat)}</select></div>`;
 
-  const match = (r) =>
-    (f.pmc === 'All' || r.pmc === f.pmc) &&
-    (f.rep === 'All' || r.sales_rep === f.rep) &&
-    (f.cat === 'All' || r.bpr_prod_category === f.cat);
+  // Metric cards live on the Dashboard tab only.
+  if (state.tab === 'dashboard') {
+    const filtered = rows.filter(bookingMatch);
+    const sum = (k) => filtered.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+    const totalBooking = sum('company_total_booking');
+    const totalOTF = sum('one_time_fee');
+    const totalComm = sum('commissionable_bookings');
+    html +=
+      metric('Total Company Booking', totalBooking, true) +
+      metric('Total One-Time Fees', totalOTF) +
+      metric('Total Commissionable', totalComm) +
+      metric('Commissionable + OTF', totalComm + totalOTF);
+  }
 
-  const filtered = rows.filter(match);
-  const sum = (k) => filtered.reduce((a, r) => a + (Number(r[k]) || 0), 0);
-  const totalBooking = sum('company_total_booking');
-  const totalOTF = sum('one_time_fee');
-  const totalComm = sum('commissionable_bookings');
-
-  el.innerHTML =
-    `<div class="filter"><label>Filter by PMC</label><select id="pmc">${uniq('pmc').map((o) => `<option${o === f.pmc ? ' selected' : ''}>${o}</option>`).join('')}</select></div>` +
-    `<div class="filter"><label>Filter by Sales Rep</label><select id="rep">${uniq('sales_rep').map((o) => `<option${o === f.rep ? ' selected' : ''}>${o}</option>`).join('')}</select></div>` +
-    `<div class="filter"><label>Filter by BPR Category</label><select id="cat">${uniq('bpr_prod_category').map((o) => `<option${o === f.cat ? ' selected' : ''}>${o}</option>`).join('')}</select></div>` +
-    metric('Total Company Booking', totalBooking, true) +
-    metric('Total One-Time Fees', totalOTF) +
-    metric('Total Commissionable', totalComm) +
-    metric('Commissionable + OTF', totalComm + totalOTF);
-
-  $('#pmc').onchange = (e) => { f.pmc = e.target.value; renderSummary(); };
-  $('#rep').onchange = (e) => { f.rep = e.target.value; renderSummary(); };
-  $('#cat').onchange = (e) => { f.cat = e.target.value; renderSummary(); };
+  el.innerHTML = html;
+  $('#pmc').onchange = (e) => { f.pmc = e.target.value; onFilterChange(); };
+  $('#rep').onchange = (e) => { f.rep = e.target.value; onFilterChange(); };
+  $('#cat').onchange = (e) => { f.cat = e.target.value; onFilterChange(); };
 }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
@@ -161,7 +173,11 @@ async function loadAll() {
 }
 
 function renderAll() {
-  $('#addRowBtn').textContent = state.tab === 'bookings' ? '+ New booking' : '+ Add row';
+  const isDash = state.tab === 'dashboard';
+  const addBtn = $('#addRowBtn');
+  addBtn.style.display = isDash ? 'none' : '';        // no grid to add rows to on the dashboard
+  addBtn.textContent = state.tab === 'bookings' ? '+ New booking' : '+ Add row';
+  $('#gridwrap').style.display = isDash ? 'none' : '';
   renderHead(); renderSummary(); renderBody();
 }
 
@@ -206,7 +222,7 @@ function wireGrid() {
       updateRowInState(state.tab, updated);
       // Changing CTAM Type flips whether the Offset cell is editable — re-render the whole row.
       if (key === 'ctam_type') {
-        const idx = state.rows[state.tab].findIndex((r) => r.id === id);
+        const idx = [...tr.parentNode.children].indexOf(tr); // visible position (grid may be filtered)
         tr.innerHTML = rowInnerHtml(updated, idx);
       } else {
         refreshComputedCells(tr, updated);
@@ -244,6 +260,7 @@ function wireTabs() {
 
 function wireActions() {
   $('#addRowBtn').onclick = async () => {
+    if (state.tab === 'dashboard') return; // dashboard has no grid
     // Bookings use the dedicated entry form; churn keeps the quick blank-row add.
     if (state.tab === 'bookings') { openEntry(); return; }
     try {
