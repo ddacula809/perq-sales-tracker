@@ -13,8 +13,8 @@ const state = {
   // Dashboard and Bookings filter independently: filtering the grid must not move the
   // dashboard totals, and vice versa.
   filters: {
-    dashboard: { month: 'All', year: 'All', pmc: 'All', rep: 'All', cat: 'All' },
-    bookings:  { month: 'All', year: 'All', pmc: 'All', rep: 'All', cat: 'All' },
+    dashboard: { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
+    bookings:  { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
   },
   authKey: localStorage.getItem('perqKey') || '',
 };
@@ -123,6 +123,7 @@ function bookingMatch(r, f) {
   return (f.month === 'All' || r.booking_month === f.month)
     && (f.year === 'All' || String(r.booking_year) === String(f.year))
     && (f.pmc === 'All' || r.pmc === f.pmc)
+    && (f.prop === 'All' || r.property_name === f.prop)
     && (f.rep === 'All' || r.sales_rep === f.rep)
     && (f.cat === 'All' || r.bpr_prod_category === f.cat);
 }
@@ -145,6 +146,7 @@ function renderSummary() {
   const monthVals = ['All', ...monthOrder.filter((m) => presentMonths.has(m))];
   const yearVals  = ['All', ...distinct('booking_year').sort((a, b) => a - b)];
   const pmcVals   = ['All', ...distinct('pmc').sort()];
+  const propVals  = ['All', ...distinct('property_name').sort()];
   const repVals   = ['All', ...distinct('sales_rep').sort()];
   const catVals   = ['All', ...distinct('bpr_prod_category').sort()];
 
@@ -153,12 +155,18 @@ function renderSummary() {
     vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('') +
     `</select></div>`;
 
+  // Property Name is only offered on the Bookings tab (too granular for dashboard totals).
+  const filterDefs = [
+    ['month', 'Filter by Booking Month', monthVals, f.month],
+    ['year', 'Filter by Booking Year', yearVals, f.year],
+    ['pmc', 'Filter by PMC', pmcVals, f.pmc],
+  ];
+  if (state.tab === 'bookings') filterDefs.push(['prop', 'Filter by Property Name', propVals, f.prop]);
+  filterDefs.push(['rep', 'Filter by Sales Rep', repVals, f.rep]);
+  filterDefs.push(['cat', 'Filter by BPR Category', catVals, f.cat]);
+
   let html = '<div class="filters-row">' +
-    sel('month', 'Filter by Booking Month', monthVals, f.month) +
-    sel('year', 'Filter by Booking Year', yearVals, f.year) +
-    sel('pmc', 'Filter by PMC', pmcVals, f.pmc) +
-    sel('rep', 'Filter by Sales Rep', repVals, f.rep) +
-    sel('cat', 'Filter by BPR Category', catVals, f.cat) +
+    filterDefs.map(([id, label, vals, cur]) => sel(id, label, vals, cur)).join('') +
     '</div>';
 
   // Metric cards live on the Dashboard tab only, on their own row below the filters.
@@ -177,7 +185,7 @@ function renderSummary() {
   }
 
   el.innerHTML = html;
-  ['month', 'year', 'pmc', 'rep', 'cat'].forEach((id) => {
+  filterDefs.forEach(([id]) => {
     const ctl = $('#' + id);
     if (ctl) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
   });
