@@ -36,6 +36,65 @@ function rowsFromSheet(ws, fields, headerRowIndex) {
   return out;
 }
 
+// Columns pulled from a churn report upload, matched by header label (not position),
+// since the report's sheet name and column order differ from the Churn Tracker sheet.
+const CHURN_UPLOAD_COLS = [
+  ['Old Value', 'old_value', 'text'],
+  ['New Value', 'new_value', 'text'],
+  ['Edit Date', 'edit_date', 'text'],
+  ['Property ID', 'property_id', 'text'],
+  ['Sage ID', 'sage_id', 'text'],
+  ['PMC Buying Center', 'pmc_buying_center', 'text'],
+  ['Property', 'property', 'text'],
+  ['Product', 'product', 'text'],
+  ['MRR', 'mrr', 'number'],
+  ['Last Date Under Contract', 'last_date_under_contract', 'date'],
+  ['Lost MRR Reason', 'lost_mrr_reason', 'text'],
+  ['Client Success Manager', 'client_success_manager', 'text'],
+];
+
+const normHeader = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
+
+// Parse a churn report (.xlsx) into churn row objects. Reads the first sheet and locates
+// the header row by matching the expected labels, so column position/sheet name don't matter.
+export function parseChurnUpload(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('The uploaded file has no sheets.');
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+
+  const wantNorm = CHURN_UPLOAD_COLS.map(([label]) => normHeader(label));
+  let headerIdx = -1;
+  let best = 0;
+  for (let i = 0; i < Math.min(aoa.length, 25); i++) {
+    const present = new Set((aoa[i] || []).map(normHeader));
+    const matches = wantNorm.filter((l) => present.has(l)).length;
+    if (matches > best) { best = matches; headerIdx = i; }
+  }
+  if (headerIdx < 0 || best < 6) {
+    throw new Error('Could not find the expected churn columns (Old Value, New Value, Property ID, …) in the file.');
+  }
+
+  const header = (aoa[headerIdx] || []).map(normHeader);
+  const colOf = {};
+  for (const [label, key] of CHURN_UPLOAD_COLS) colOf[key] = header.indexOf(normHeader(label));
+
+  const out = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const obj = {};
+    let hasContent = false;
+    for (const [, key, type] of CHURN_UPLOAD_COLS) {
+      const ci = colOf[key];
+      const v = ci >= 0 ? coerce(row[ci], type) : null;
+      obj[key] = v;
+      if (v !== null && v !== '') hasContent = true;
+    }
+    if (hasContent) out.push(obj);
+  }
+  return out;
+}
+
 export function parseWorkbook(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const result = { bookings: [], churn: [] };

@@ -305,6 +305,7 @@ function renderAll() {
   const isDash = state.tab === 'dashboard';
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
+  $('#churnUploadBtn').hidden = !(state.tab === 'churn' && canAddDelete());
   $('#usersBtn').hidden = !isAdmin();
   $('#changePwBtn').hidden = !state.user;
   $('#logoutBtn').hidden = !state.user;
@@ -431,6 +432,26 @@ function wireActions() {
       const data = await res.json();
       await loadAll();
       toast(`Imported ${data.imported.bookings} bookings, ${data.imported.churn} churn rows`);
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+
+  // Append churn rows from an uploaded report (duplicates skipped server-side).
+  $('#churnUploadFile').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Uploading…');
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/churn/upload', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Upload failed');
+      const data = await res.json();
+      state.rows.churn = await api('/api/churn');
+      renderAll();
+      $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+      toast(`Added ${data.added}, skipped ${data.skipped} duplicate${data.skipped === 1 ? '' : 's'}`);
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };

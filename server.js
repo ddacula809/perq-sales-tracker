@@ -8,7 +8,7 @@ import {
   getUserByUsername, listUsers, createUser, updateUser, deleteUser, getUserById, countAdmins,
 } from './db.js';
 import { computeBooking, computeChurn } from './compute.js';
-import { parseWorkbook } from './importer.js';
+import { parseWorkbook, parseChurnUpload } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
@@ -161,6 +161,40 @@ app.delete('/api/users/:id', requireRole('admin'), async (req, res, next) => {
     }
     await deleteUser(id);
     res.status(204).end();
+  } catch (e) { next(e); }
+});
+
+// ---- Churn upload: append rows from a churn report, skipping duplicates ----
+// A row is a duplicate if New Value + Property ID + Property + MRR + Last Date Under
+// Contract already exist (in the table or earlier in the same file).
+app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const incoming = parseChurnUpload(req.file.buffer);
+    const existing = await listRows('churn');
+    const numKey = (v) => {
+      const n = Number(String(v ?? '').replace(/[$,]/g, ''));
+      return Number.isFinite(n) ? n : '';
+    };
+    const keyOf = (r) => [
+      String(r.new_value ?? '').trim().toLowerCase(),
+      String(r.property_id ?? '').trim().toLowerCase(),
+      String(r.property ?? '').trim().toLowerCase(),
+      numKey(r.mrr),
+      String(r.last_date_under_contract ?? '').slice(0, 10),
+    ].join('|');
+
+    const seen = new Set(existing.map(keyOf));
+    let added = 0;
+    let skipped = 0;
+    for (const row of incoming) {
+      const k = keyOf(row);
+      if (seen.has(k)) { skipped += 1; continue; }
+      seen.add(k);
+      await insertRow('churn', row);
+      added += 1;
+    }
+    res.json({ added, skipped, total: incoming.length });
   } catch (e) { next(e); }
 });
 
