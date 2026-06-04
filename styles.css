@@ -250,6 +250,7 @@ tbody td.del button:hover { color: var(--neg); }
 .entry-field input:focus, .entry-field select:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft);
 }
+.entry-field select:disabled { background: var(--paper); color: var(--ink-soft); cursor: not-allowed; }
 .entry-actions {
   display: flex; justify-content: flex-end; gap: 8px;
   border-top: 1px solid var(--line); padding-top: 14px;

@@ -592,6 +592,21 @@ function renderSharedFields() {
     const ctl = $(`#sharedFields [data-key="${k}"]`);
     if (ctl && v != null && v !== '') ctl.value = v;
   }
+  updatePilotType();
+}
+
+// Pilot Type only applies to Pilots — grey it out and blank it unless "Pilot" is chosen.
+function updatePilotType() {
+  const poc = $('#sharedFields [data-key="pilot_or_ctam"]');
+  const pt = $('#sharedFields [data-key="pilot_type"]');
+  if (!poc || !pt) return;
+  if (poc.value.trim() === 'Pilot') {
+    pt.disabled = false;
+    if (pt.selectedIndex < 0) pt.selectedIndex = 0;
+  } else {
+    pt.selectedIndex = -1; // show blank; value becomes '' so CTAM bookings have no Pilot Type
+    pt.disabled = true;
+  }
 }
 
 function productLineHtml() {
@@ -669,9 +684,11 @@ async function submitEntries() {
 function wireEntry() {
   $('#addEntryFormBtn').onclick = () => addProductLine();
   $('#submitEntriesBtn').onclick = submitEntries;
-  // Shared CTAM Type change toggles Offset Amount on all product lines.
+  // Shared-field changes: CTAM Type toggles product Offset; Pilot/CTAM gates Pilot Type.
   $('#sharedFields').addEventListener('change', (e) => {
-    if (e.target.dataset && e.target.dataset.key === 'ctam_type') setProductOffsets();
+    const key = e.target.dataset && e.target.dataset.key;
+    if (key === 'ctam_type') setProductOffsets();
+    if (key === 'pilot_or_ctam') updatePilotType();
   });
   // Remove a product line (keep at least one).
   $('#productLines').addEventListener('click', (e) => {
