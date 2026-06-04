@@ -84,6 +84,12 @@ async function backfillBookingPeriod() {
   await pool.query(`UPDATE bookings SET booking_year = 2026  WHERE booking_year IS NULL`);
 }
 
+// Fix the product-name typo "AI Lead Captur Agent" -> "AI Lead Capture Agent" in existing data.
+async function fixLeadCaptureTypo() {
+  await pool.query(`UPDATE bookings SET product = 'AI Lead Capture Agent' WHERE product = 'AI Lead Captur Agent'`);
+  await pool.query(`UPDATE churn    SET product = 'AI Lead Capture Agent' WHERE product = 'AI Lead Captur Agent'`);
+}
+
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings (
@@ -115,6 +121,7 @@ export async function initDb() {
   await ensureColumns('churn', CHURN_FIELDS);
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
+  await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);
   await ensureAdmin();
 }
 

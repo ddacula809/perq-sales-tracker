@@ -24,7 +24,7 @@ function monthYear(d) {
 export function bprCategory(product) {
   const p = (product || '').trim();
   if (!p) return '';
-  if (['AI Lead Captur Agent', 'AI Leasing Agent', 'Performance Reporting Agent'].includes(p)) return 'Software';
+  if (['AI Lead Capture Agent', 'AI Leasing Agent', 'Performance Reporting Agent'].includes(p)) return 'Software';
   if (p === 'Pulse Data Hub') return 'Pulse';
   if (['Property Website', 'Corporate Website'].includes(p)) return 'Website';
   if (['Google Search Management', 'SEO'].includes(p)) return 'Digital Advertising';
