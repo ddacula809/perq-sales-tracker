@@ -51,29 +51,38 @@ function fmtNum(v) {
 }
 
 // ---------- Rendering ----------
+// Churn billing section — shown at the very end (after the computed columns) and tinted blue.
+const BILLING_KEYS = new Set(['template_deleted', 'completed', 'notes']);
+
+// Ordered display columns for the active tab, plus a lookup of which keys are computed.
 function fieldsForTab() {
   const s = state.schema[state.tab];
-  return { edit: s.editable, computed: s.computed, all: [...s.editable, ...s.computed] };
+  const computedKeys = new Set(s.computed.map((f) => f.key));
+  let cols = [...s.editable, ...s.computed];
+  // Churn: move the billing fields to the very end, after the computed churn columns.
+  if (state.tab === 'churn') {
+    const isBilling = (c) => BILLING_KEYS.has(c.key);
+    cols = [...cols.filter((c) => !isBilling(c)), ...cols.filter(isBilling)];
+  }
+  return { cols, computedKeys, computed: s.computed };
 }
 
 function renderHead() {
   if (state.tab === 'dashboard') { $('#thead').innerHTML = ''; return; }
-  const { edit, computed } = fieldsForTab();
-  const cols = [...edit, ...computed];
+  const { cols, computedKeys } = fieldsForTab();
   $('#thead').innerHTML =
     `<tr><th class="rownum">#</th>` +
     cols.map((f) => {
-      const isComp = computed.includes(f);
-      return `<th class="${isComp ? 'computed' : ''}" title="${f.label}">${f.label}</th>`;
+      const cls = computedKeys.has(f.key) ? 'computed' : (BILLING_KEYS.has(f.key) ? 'billing' : '');
+      return `<th class="${cls}" title="${f.label}">${f.label}</th>`;
     }).join('') +
     `<th class="del"></th></tr>`;
 }
 
 function rowInnerHtml(row, i) {
-  const { edit, computed } = fieldsForTab();
+  const { cols, computedKeys } = fieldsForTab();
   let html = `<td class="rownum">${i + 1}</td>`;
-  for (const f of edit) html += editCell(f, row);
-  for (const f of computed) html += computedCell(f, row);
+  for (const f of cols) html += computedKeys.has(f.key) ? computedCell(f, row) : editCell(f, row);
   html += `<td class="del"><button title="Delete row" data-del="${row.id}">✕</button></td>`;
   return html;
 }
@@ -98,15 +107,16 @@ function editCell(f, row) {
   if (f.key === 'offset_amount' && (row.ctam_type || '').trim() !== 'License Transfer') {
     return `<td class="num offset-na"><span class="na">—</span></td>`;
   }
+  const billing = BILLING_KEYS.has(f.key) ? ' billing' : '';
   const numClass = f.type === 'number' ? ' num' : '';
   if (f.type === 'select') {
     const opts = f.options.map((o) =>
       `<option value="${escapeAttr(o)}"${o === val ? ' selected' : ''}>${o || '—'}</option>`).join('');
-    return `<td><select data-key="${f.key}">${opts}</select></td>`;
+    return `<td class="${billing.trim()}"><select data-key="${f.key}">${opts}</select></td>`;
   }
   const inputType = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
   const step = f.type === 'number' ? ' step="any"' : '';
-  return `<td class="${numClass.trim()}"><input type="${inputType}"${step} data-key="${f.key}" value="${escapeAttr(val)}" /></td>`;
+  return `<td class="${(numClass + billing).trim()}"><input type="${inputType}"${step} data-key="${f.key}" value="${escapeAttr(val)}" /></td>`;
 }
 
 function computedCell(f, row) {

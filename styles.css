@@ -9,6 +9,8 @@
   --accent-soft: #fbe6d6;
   --compute-bg: #eef3ee;    /* tint for read-only computed cells */
   --compute-ink: #2f5d3a;
+  --billing-bg: #e7eef8;    /* tint for the churn billing section (blue) */
+  --billing-ink: #1e3a64;
   --neg: #b91c1c;
   --ok: #15803d;
   --shadow: 0 1px 0 rgba(0,0,0,.04), 0 8px 24px -16px rgba(0,0,0,.35);
@@ -112,6 +114,7 @@ thead th {
   border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line);
 }
 thead th.computed { background: #dde7dd; color: var(--compute-ink); }
+thead th.billing { background: #d4e1f3; color: var(--billing-ink); }
 thead th.rownum, tbody td.rownum {
   position: sticky; left: 0; z-index: 2; min-width: 46px; text-align: right;
   background: #efe9dc; color: var(--ink-soft); font-family: 'IBM Plex Mono', monospace;
@@ -140,6 +143,7 @@ tbody td.computed {
   padding: 7px 10px; font-weight: 500;
 }
 tbody td.computed.neg { color: var(--neg); }
+tbody td.billing { background: var(--billing-bg) !important; }
 tbody td.offset-na { text-align: right; }
 tbody td.offset-na .na { display: inline-block; padding: 7px 10px; color: var(--ink-soft); opacity: .5; }
 tbody td.del {
