@@ -68,10 +68,11 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
 
 /* Summary */
 .summary {
-  display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 22px;
+  display: flex; flex-direction: column; gap: 12px; padding: 14px 22px;
   border-bottom: 1px solid var(--line); background: var(--paper);
 }
 .summary.hidden { display: none; }
+.filters-row, .metrics-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .filter, .metric {
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   padding: 9px 13px; box-shadow: var(--shadow);

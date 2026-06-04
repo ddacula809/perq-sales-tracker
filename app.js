@@ -10,7 +10,12 @@ const state = {
   tab: 'dashboard',
   schema: null,
   rows: { bookings: [], churn: [] },
-  filters: { pmc: 'All', rep: 'All', cat: 'All' },
+  // Dashboard and Bookings filter independently: filtering the grid must not move the
+  // dashboard totals, and vice versa.
+  filters: {
+    dashboard: { month: 'All', year: 'All', pmc: 'All', rep: 'All', cat: 'All' },
+    bookings:  { month: 'All', year: 'All', pmc: 'All', rep: 'All', cat: 'All' },
+  },
   authKey: localStorage.getItem('perqKey') || '',
 };
 
@@ -75,7 +80,7 @@ function renderBody() {
   const tbody = $('#tbody');
   if (state.tab === 'dashboard') { tbody.innerHTML = ''; return; }
   let rows = state.rows[state.tab] || [];
-  if (state.tab === 'bookings') rows = rows.filter(bookingMatch);
+  if (state.tab === 'bookings') rows = rows.filter((r) => bookingMatch(r, state.filters.bookings));
   tbody.innerHTML = '';
   rows.forEach((row, i) => {
     const tr = document.createElement('tr');
@@ -112,11 +117,12 @@ function computedCell(f, row) {
 function escapeAttr(v) { return String(v).replace(/"/g, '&quot;'); }
 
 // ---------- Filters + summary metrics ----------
-// PMC / Sales Rep / BPR Category filter, shared by the Dashboard metrics and the
-// bookings grid. True when a booking row passes the current filter selection.
-function bookingMatch(r) {
-  const f = state.filters;
-  return (f.pmc === 'All' || r.pmc === f.pmc)
+// True when a booking row passes the given filter selection (f = one filter set,
+// e.g. state.filters.dashboard or state.filters.bookings).
+function bookingMatch(r, f) {
+  return (f.month === 'All' || r.booking_month === f.month)
+    && (f.year === 'All' || String(r.booking_year) === String(f.year))
+    && (f.pmc === 'All' || r.pmc === f.pmc)
     && (f.rep === 'All' || r.sales_rep === f.rep)
     && (f.cat === 'All' || r.bpr_prod_category === f.cat);
 }
@@ -130,33 +136,51 @@ function renderSummary() {
   if (state.tab === 'churn') { el.className = 'summary hidden'; el.innerHTML = ''; return; }
   el.className = 'summary';
   const rows = state.rows.bookings;
-  const uniq = (k) => ['All', ...[...new Set(rows.map((r) => r[k]).filter(Boolean))].sort()];
-  const f = state.filters;
-  const opts = (k, cur) => uniq(k).map((o) => `<option${o === cur ? ' selected' : ''}>${o}</option>`).join('');
+  const f = state.filters[state.tab]; // dashboard and bookings have separate filter sets
 
-  let html =
-    `<div class="filter"><label>Filter by PMC</label><select id="pmc">${opts('pmc', f.pmc)}</select></div>` +
-    `<div class="filter"><label>Filter by Sales Rep</label><select id="rep">${opts('sales_rep', f.rep)}</select></div>` +
-    `<div class="filter"><label>Filter by BPR Category</label><select id="cat">${opts('bpr_prod_category', f.cat)}</select></div>`;
+  const distinct = (k) => [...new Set(rows.map((r) => r[k]).filter((v) => v !== null && v !== '' && v !== undefined))];
+  // Months in calendar order (from the schema), restricted to those present in the data.
+  const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
+  const presentMonths = new Set(distinct('booking_month'));
+  const monthVals = ['All', ...monthOrder.filter((m) => presentMonths.has(m))];
+  const yearVals  = ['All', ...distinct('booking_year').sort((a, b) => a - b)];
+  const pmcVals   = ['All', ...distinct('pmc').sort()];
+  const repVals   = ['All', ...distinct('sales_rep').sort()];
+  const catVals   = ['All', ...distinct('bpr_prod_category').sort()];
 
-  // Metric cards live on the Dashboard tab only.
+  const sel = (id, label, vals, cur) =>
+    `<div class="filter"><label>${label}</label><select id="${id}">` +
+    vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('') +
+    `</select></div>`;
+
+  let html = '<div class="filters-row">' +
+    sel('month', 'Filter by Booking Month', monthVals, f.month) +
+    sel('year', 'Filter by Booking Year', yearVals, f.year) +
+    sel('pmc', 'Filter by PMC', pmcVals, f.pmc) +
+    sel('rep', 'Filter by Sales Rep', repVals, f.rep) +
+    sel('cat', 'Filter by BPR Category', catVals, f.cat) +
+    '</div>';
+
+  // Metric cards live on the Dashboard tab only, on their own row below the filters.
   if (state.tab === 'dashboard') {
-    const filtered = rows.filter(bookingMatch);
+    const filtered = rows.filter((r) => bookingMatch(r, f));
     const sum = (k) => filtered.reduce((a, r) => a + (Number(r[k]) || 0), 0);
     const totalBooking = sum('company_total_booking');
     const totalOTF = sum('one_time_fee');
     const totalComm = sum('commissionable_bookings');
-    html +=
+    html += '<div class="metrics-row">' +
       metric('Total Company Booking', totalBooking, true) +
       metric('Total One-Time Fees', totalOTF) +
       metric('Total Commissionable', totalComm) +
-      metric('Commissionable + OTF', totalComm + totalOTF);
+      metric('Commissionable + OTF', totalComm + totalOTF) +
+      '</div>';
   }
 
   el.innerHTML = html;
-  $('#pmc').onchange = (e) => { f.pmc = e.target.value; onFilterChange(); };
-  $('#rep').onchange = (e) => { f.rep = e.target.value; onFilterChange(); };
-  $('#cat').onchange = (e) => { f.cat = e.target.value; onFilterChange(); };
+  ['month', 'year', 'pmc', 'rep', 'cat'].forEach((id) => {
+    const ctl = $('#' + id);
+    if (ctl) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
+  });
 }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
