@@ -261,6 +261,18 @@ function renderSummary() {
       metric('Total Commissionable', totalComm) +
       metric('Commissionable + OTF', totalComm + totalOTF) +
       '</div>';
+
+    // Company Total Booking summed per BPR product category.
+    const byCat = {};
+    for (const r of filtered) {
+      const c = (r.bpr_prod_category || '').trim() || 'Uncategorized';
+      byCat[c] = (byCat[c] || 0) + (Number(r.company_total_booking) || 0);
+    }
+    const catCards = Object.keys(byCat).sort().map((c) => metric(c, byCat[c])).join('');
+    if (catCards) {
+      metricsHtml += '<div class="metrics-title">Booking Per Product Category</div>' +
+        `<div class="metrics-row">${catCards}</div>`;
+    }
   }
 
   // Nothing to show (filters hidden and not the dashboard) — collapse the whole bar.
