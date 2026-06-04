@@ -210,9 +210,12 @@ app.post('/api/import', requireRole('admin'), upload.single('file'), async (req,
 });
 
 // ---- Export: download current data as .xlsx ----
-app.get('/api/export', async (_req, res, next) => {
+app.get('/api/export', async (req, res, next) => {
   try {
-    const bookings = await listRows('bookings');
+    let bookings = await listRows('bookings');
+    const { month, year } = req.query;
+    if (month) bookings = bookings.filter((r) => r.booking_month === month);
+    if (year) bookings = bookings.filter((r) => String(r.booking_year) === String(year));
     const churn = await listRows('churn');
     const buf = buildWorkbook(bookings, churn);
     const stamp = new Date().toISOString().slice(0, 10);

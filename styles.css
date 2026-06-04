@@ -227,6 +227,13 @@ tbody td.del button:hover { color: var(--neg); }
 .modal-card .btn { width: 100%; justify-content: center; }
 .err { color: var(--neg); font-size: 12px; min-height: 14px; }
 
+/* Export dialog */
+#exportModal select {
+  width: 100%; padding: 9px; border: 1px solid var(--line-strong); border-radius: 7px;
+  font: inherit; margin-bottom: 12px; background: #fff; color: var(--ink);
+}
+.export-label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .06em; }
+
 /* New booking entry form */
 .entry-card { width: 680px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }
 .entry-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }

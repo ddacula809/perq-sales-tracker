@@ -89,6 +89,21 @@
   <div class="toast" id="toast"></div>
   <div class="cell-tip" id="cellTip" hidden></div>
 
+  <div class="modal" id="exportModal" hidden>
+    <div class="modal-card">
+      <div class="entry-head">
+        <h2>Export</h2>
+        <button type="button" class="entry-close" id="exportClose" title="Close">✕</button>
+      </div>
+      <p>Choose the booking period to export. Churn Tracker is always included in full.</p>
+      <label class="export-label">Booking Month</label>
+      <select id="exportMonth"></select>
+      <label class="export-label">Booking Year</label>
+      <select id="exportYear"></select>
+      <button class="btn solid" id="exportConfirm">Export .xlsx</button>
+    </div>
+  </div>
+
   <div class="modal" id="loginModal" hidden>
     <div class="modal-card">
       <h2>Sign in</h2>

@@ -554,20 +554,43 @@ function wireActions() {
     e.target.value = '';
   };
 
-  // Export sends the auth token via a fetch->blob download.
-  $('#exportBtn').onclick = async (e) => {
-    e.preventDefault();
-    try {
-      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
-      const res = await fetch('/api/export', { headers });
-      if (!res.ok) throw new Error('Export failed');
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `PERQ_Sales_Export_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      a.click(); URL.revokeObjectURL(a.href);
-    } catch (err) { toast(err.message, true); }
-  };
+  // Export opens a dialog to pick the booking period first.
+  $('#exportBtn').onclick = (e) => { e.preventDefault(); openExport(); };
+  $('#exportClose').onclick = () => { $('#exportModal').hidden = true; };
+  $('#exportModal').addEventListener('click', (e) => { if (e.target.id === 'exportModal') $('#exportModal').hidden = true; });
+  $('#exportConfirm').onclick = doExport;
+}
+
+// Populate the export dialog's Month/Year options from the bookings and show it.
+function openExport() {
+  const rows = state.rows.bookings;
+  const monthVals = ['All', ...MONTHS.filter((m) => rows.some((r) => r.booking_month === m))];
+  const yearVals = ['All', ...[...new Set(rows.map((r) => r.booking_year).filter((v) => v != null && v !== ''))].sort((a, b) => a - b)];
+  $('#exportMonth').innerHTML = monthVals.map((m) => `<option>${m}</option>`).join('');
+  $('#exportYear').innerHTML = yearVals.map((y) => `<option>${y}</option>`).join('');
+  $('#exportModal').hidden = false;
+}
+
+async function doExport() {
+  const month = $('#exportMonth').value;
+  const year = $('#exportYear').value;
+  const params = new URLSearchParams();
+  if (month && month !== 'All') params.set('month', month);
+  if (year && year !== 'All') params.set('year', year);
+  try {
+    const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+    const res = await fetch(`/api/export?${params.toString()}`, { headers });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const label = [month !== 'All' ? month : '', year !== 'All' ? year : ''].filter(Boolean).join('_')
+      || new Date().toISOString().slice(0, 10);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `PERQ_Sales_Export_${label}.xlsx`.replace(/\s+/g, '_');
+    a.click();
+    URL.revokeObjectURL(a.href);
+    $('#exportModal').hidden = true;
+  } catch (err) { toast(err.message, true); }
 }
 
 // ---------- New Booking section (shared details + one row per product) ----------
