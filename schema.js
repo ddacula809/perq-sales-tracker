@@ -83,3 +83,15 @@ export const CHURN_COMPUTED = [
 
 export const BOOKING_SHEET = 'May 2026';
 export const CHURN_SHEET = 'Churn Tracker';
+
+// Billing-section field keys per table (the blue columns). Used to tint/reorder them in
+// the UI and to restrict what a "billing" role user is allowed to edit on the server.
+export const BOOKING_BILLING_KEYS = [
+  'billing_trigger', 'recurring_billing_status', 'implementation_billing_status',
+  'completed_by', 'completed_date', 'sage_id',
+];
+export const CHURN_BILLING_KEYS = ['template_deleted', 'completed', 'notes'];
+
+// User roles. admin: full access + user management. standard: edit all data.
+// billing: edit only the billing columns. viewer: read-only.
+export const USER_ROLES = ['admin', 'standard', 'billing', 'viewer'];

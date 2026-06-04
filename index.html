@@ -26,6 +26,9 @@
       </label>
       <a class="btn ghost" id="exportBtn" href="/api/export">Export .xlsx</a>
       <button class="btn solid" id="addRowBtn">+ Add row</button>
+      <button class="btn ghost" id="usersBtn" hidden>Users</button>
+      <span class="user-chip" id="userChip"></span>
+      <button class="btn ghost" id="logoutBtn" hidden>Log out</button>
     </div>
   </header>
 
@@ -75,13 +78,39 @@
     </div>
   </div>
 
-  <div class="modal" id="authModal" hidden>
+  <div class="modal" id="loginModal" hidden>
     <div class="modal-card">
-      <h2>Access key required</h2>
-      <p>This instance is protected. Enter the shared access key.</p>
-      <input type="password" id="authInput" placeholder="Access key" />
-      <button class="btn solid" id="authSubmit">Unlock</button>
-      <p class="err" id="authErr"></p>
+      <h2>Sign in</h2>
+      <p>PERQ Sales Tracker</p>
+      <input type="text" id="loginUser" placeholder="Username" autocomplete="username" />
+      <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" />
+      <button class="btn solid" id="loginBtn">Sign in</button>
+      <p class="err" id="loginErr"></p>
+    </div>
+  </div>
+
+  <div class="modal" id="usersModal" hidden>
+    <div class="modal-card users-card">
+      <div class="entry-head">
+        <h2>Users</h2>
+        <button type="button" class="entry-close" id="usersClose" title="Close">✕</button>
+      </div>
+      <div class="users-list" id="usersList"></div>
+      <form id="addUserForm" class="add-user" autocomplete="off">
+        <h3>Add user</h3>
+        <div class="add-user-row">
+          <input type="text" id="newUserName" placeholder="Username" autocomplete="off" />
+          <input type="password" id="newUserPass" placeholder="Password" autocomplete="new-password" />
+          <select id="newUserRole">
+            <option value="standard">Standard</option>
+            <option value="admin">Admin</option>
+            <option value="billing">Billing</option>
+            <option value="viewer">Viewer</option>
+          </select>
+          <button type="submit" class="btn solid">Add</button>
+        </div>
+        <p class="err" id="addUserErr"></p>
+      </form>
     </div>
   </div>
 

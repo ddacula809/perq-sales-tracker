@@ -16,7 +16,8 @@ const state = {
     dashboard: { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
     bookings:  { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All' },
   },
-  authKey: localStorage.getItem('perqKey') || '',
+  token: localStorage.getItem('perqToken') || '',
+  user: null, // { id, username, role }
   filtersHidden: localStorage.getItem('perqFiltersHidden') === '1',
   zoom: parseFloat(localStorage.getItem('perqZoom')) || 1,
   // Hidden columns per tab, e.g. { bookings: ['notes'], churn: [...] }.
@@ -26,12 +27,28 @@ const state = {
 const $ = (s) => document.querySelector(s);
 const api = async (url, opts = {}) => {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-  if (state.authKey) headers['x-app-key'] = state.authKey;
+  if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
   const res = await fetch(url, { ...opts, headers });
-  if (res.status === 401) { showAuth(); throw new Error('Unauthorized'); }
+  if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
   if (!res.ok && res.status !== 204) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
   return res.status === 204 ? null : res.json();
 };
+
+function escapeHtml(v) {
+  return String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// ---------- Roles / permissions (UX mirror of server enforcement) ----------
+function role() { return state.user ? state.user.role : null; }
+function isAdmin() { return role() === 'admin'; }
+function canAddDelete() { return role() === 'admin' || role() === 'standard'; }
+function canImport() { return role() === 'admin'; }
+function canEditField(f) {
+  const r = role();
+  if (r === 'admin' || r === 'standard') return true;
+  if (r === 'billing') return isBilling(f.key);
+  return false; // viewer (or not logged in)
+}
 
 function toast(msg, isErr = false) {
   const t = $('#toast');
@@ -89,8 +106,13 @@ function renderHead() {
 function rowInnerHtml(row, i) {
   const { cols, computedKeys } = fieldsForTab();
   let html = `<td class="rownum">${i + 1}</td>`;
-  for (const f of cols) html += computedKeys.has(f.key) ? computedCell(f, row) : editCell(f, row);
-  html += `<td class="del"><button title="Delete row" data-del="${row.id}">✕</button></td>`;
+  for (const f of cols) {
+    if (computedKeys.has(f.key)) html += computedCell(f, row);
+    else if (canEditField(f)) html += editCell(f, row);
+    else html += readonlyCell(f, row);
+  }
+  const del = canAddDelete() ? `<button title="Delete row" data-del="${row.id}">✕</button>` : '';
+  html += `<td class="del">${del}</td>`;
   return html;
 }
 
@@ -131,6 +153,15 @@ function computedCell(f, row) {
   const isNeg = typeof raw === 'number' && raw < 0;
   const text = MONEY.has(f.key) ? fmtMoney(raw) : (f.type === 'number' ? fmtNum(raw) : (raw ?? ''));
   return `<td class="computed${isNeg ? ' neg' : ''}" data-comp="${f.key}" data-col="${f.key}">${text}</td>`;
+}
+
+// A field the current user can see but not edit: render the value as static text.
+function readonlyCell(f, row) {
+  const raw = row[f.key];
+  const billing = isBilling(f.key) ? ' billing' : '';
+  const numClass = f.type === 'number' ? ' num' : '';
+  const text = MONEY.has(f.key) ? fmtMoney(raw) : (f.type === 'number' ? fmtNum(raw) : (raw ?? ''));
+  return `<td class="ro${numClass}${billing}" data-col="${f.key}">${escapeHtml(text)}</td>`;
 }
 
 function escapeAttr(v) { return String(v).replace(/"/g, '&quot;'); }
@@ -235,8 +266,15 @@ async function loadAll() {
 
 function renderAll() {
   const isDash = state.tab === 'dashboard';
+  // Account / role-based controls.
+  $('#importBtn').style.display = canImport() ? '' : 'none';
+  $('#usersBtn').hidden = !isAdmin();
+  $('#logoutBtn').hidden = !state.user;
+  $('#userChip').innerHTML = state.user
+    ? `${escapeHtml(state.user.username)} · <span class="role">${escapeHtml(state.user.role)}</span>` : '';
   const addBtn = $('#addRowBtn');
-  addBtn.style.display = isDash ? 'none' : '';        // no grid to add rows to on the dashboard
+  // Add row only where there's a grid and the user may create rows.
+  addBtn.style.display = (isDash || !canAddDelete()) ? 'none' : '';
   addBtn.textContent = state.tab === 'bookings' ? '+ New booking' : '+ Add row';
   $('#gridwrap').style.display = isDash ? 'none' : '';
   // View tools: filter toggle only where filters exist; zoom only where a table shows.
@@ -328,7 +366,7 @@ function wireTabs() {
 
 function wireActions() {
   $('#addRowBtn').onclick = async () => {
-    if (state.tab === 'dashboard') return; // dashboard has no grid
+    if (state.tab === 'dashboard' || !canAddDelete()) return; // no grid / no permission
     // Bookings use the dedicated entry form; churn keeps the quick blank-row add.
     if (state.tab === 'bookings') { openEntry(); return; }
     try {
@@ -348,7 +386,7 @@ function wireActions() {
     fd.append('file', file);
     try {
       toast('Importing…');
-      const headers = state.authKey ? { 'x-app-key': state.authKey } : {};
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
       const res = await fetch('/api/import', { method: 'POST', body: fd, headers });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Import failed');
       const data = await res.json();
@@ -358,11 +396,11 @@ function wireActions() {
     e.target.value = '';
   };
 
-  // Export respects the auth key via a fetch->blob download.
+  // Export sends the auth token via a fetch->blob download.
   $('#exportBtn').onclick = async (e) => {
     e.preventDefault();
     try {
-      const headers = state.authKey ? { 'x-app-key': state.authKey } : {};
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
       const res = await fetch('/api/export', { headers });
       if (!res.ok) throw new Error('Export failed');
       const blob = await res.blob();
@@ -543,27 +581,128 @@ function wireColumns() {
   });
 }
 
-// ---------- Auth ----------
-function showAuth() { $('#authModal').hidden = false; }
+// ---------- Login / logout ----------
+function showLogin() { $('#loginModal').hidden = false; $('#loginUser').focus(); }
+function hideLogin() { $('#loginModal').hidden = true; }
+
+function logout() {
+  state.token = '';
+  state.user = null;
+  localStorage.removeItem('perqToken');
+  $('#usersModal').hidden = true;
+  showLogin();
+}
+
+async function doLogin() {
+  const username = $('#loginUser').value.trim();
+  const password = $('#loginPass').value;
+  // Login intentionally bypasses api() so a 401 shows an error instead of triggering logout.
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) throw new Error('bad');
+    const { token, user } = await res.json();
+    state.token = token; state.user = user;
+    localStorage.setItem('perqToken', token);
+    $('#loginErr').textContent = '';
+    $('#loginPass').value = '';
+    hideLogin();
+    await loadAll();
+  } catch {
+    $('#loginErr').textContent = 'Invalid username or password.';
+  }
+}
+
 function wireAuth() {
-  $('#authSubmit').onclick = async () => {
-    state.authKey = $('#authInput').value.trim();
-    localStorage.setItem('perqKey', state.authKey);
-    try { await loadAll(); $('#authModal').hidden = true; }
-    catch { $('#authErr').textContent = 'Invalid key.'; }
-  };
-  $('#authInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#authSubmit').click(); });
+  $('#loginBtn').onclick = doLogin;
+  $('#loginUser').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#loginPass').focus(); });
+  $('#loginPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  $('#logoutBtn').onclick = logout;
+}
+
+// ---------- Users admin panel ----------
+const ROLE_LABELS = { admin: 'Admin', standard: 'Standard', billing: 'Billing', viewer: 'Viewer' };
+
+async function openUsers() { $('#usersModal').hidden = false; await renderUsersList(); }
+
+async function renderUsersList() {
+  try {
+    const users = await api('/api/users');
+    $('#usersList').innerHTML = users.map((u) => {
+      const opts = Object.keys(ROLE_LABELS).map((r) =>
+        `<option value="${r}"${r === u.role ? ' selected' : ''}>${ROLE_LABELS[r]}</option>`).join('');
+      return `<div class="user-row">
+        <span class="user-name">${escapeHtml(u.username)}</span>
+        <select data-role-for="${u.id}">${opts}</select>
+        <button type="button" class="view-btn" data-pw-user="${u.id}">Reset password</button>
+        <button type="button" class="view-btn danger" data-del-user="${u.id}">Delete</button>
+      </div>`;
+    }).join('');
+  } catch (e) { $('#usersList').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+}
+
+function wireUsers() {
+  $('#usersBtn').onclick = openUsers;
+  $('#usersClose').onclick = () => { $('#usersModal').hidden = true; };
+  $('#usersModal').addEventListener('click', (e) => { if (e.target.id === 'usersModal') $('#usersModal').hidden = true; });
+
+  $('#addUserForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = $('#newUserName').value.trim();
+    const password = $('#newUserPass').value;
+    const role = $('#newUserRole').value;
+    try {
+      await api('/api/users', { method: 'POST', body: JSON.stringify({ username, password, role }) });
+      $('#newUserName').value = ''; $('#newUserPass').value = ''; $('#addUserErr').textContent = '';
+      toast('User added');
+      renderUsersList();
+    } catch (err) { $('#addUserErr').textContent = err.message; }
+  });
+
+  // Change a user's role.
+  $('#usersList').addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-role-for]');
+    if (!sel) return;
+    try {
+      await api(`/api/users/${sel.dataset.roleFor}`, { method: 'PATCH', body: JSON.stringify({ role: sel.value }) });
+      toast('Role updated');
+    } catch (err) { toast(err.message, true); }
+    renderUsersList();
+  });
+
+  // Reset password / delete.
+  $('#usersList').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-del-user]');
+    if (del) {
+      if (!confirm('Delete this user?')) return;
+      try { await api(`/api/users/${del.dataset.delUser}`, { method: 'DELETE' }); toast('User deleted'); renderUsersList(); }
+      catch (err) { toast(err.message, true); }
+      return;
+    }
+    const pw = e.target.closest('[data-pw-user]');
+    if (pw) {
+      const np = prompt('New password for this user:');
+      if (!np) return;
+      try { await api(`/api/users/${pw.dataset.pwUser}`, { method: 'PATCH', body: JSON.stringify({ password: np }) }); toast('Password reset'); }
+      catch (err) { toast(err.message, true); }
+    }
+  });
 }
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireEntry(); wireView(); wireColumns();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns();
   applyZoom();
-  const { required } = await fetch('/api/auth-required').then((r) => r.json()).catch(() => ({ required: false }));
-  try {
-    await loadAll();
-  } catch {
-    if (required) showAuth();
+  if (state.token) {
+    try {
+      const { user } = await api('/api/me');
+      state.user = user;
+      await loadAll();
+      return;
+    } catch { /* token missing/expired — fall through to login */ }
   }
+  showLogin();
 }
 boot();

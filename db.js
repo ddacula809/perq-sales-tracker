@@ -2,6 +2,7 @@
 // on boot, so a fresh Railway Postgres is ready with no manual migration.
 import pg from 'pg';
 import { BOOKING_FIELDS, CHURN_FIELDS } from './schema.js';
+import { hashPassword } from './auth.js';
 
 const { Pool, types } = pg;
 
@@ -100,10 +101,77 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'standard',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username))');
   await ensureColumns('bookings', BOOKING_FIELDS);
   await ensureColumns('churn', CHURN_FIELDS);
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
+  await ensureAdmin();
+}
+
+// Seed the first admin if there are no users yet, so a fresh deploy isn't locked out.
+// Configurable via ADMIN_USERNAME / ADMIN_PASSWORD env vars (defaults: admin / admin).
+async function ensureAdmin() {
+  const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM users');
+  if (rows[0].n > 0) return;
+  const username = (process.env.ADMIN_USERNAME || 'admin').trim();
+  const password = process.env.ADMIN_PASSWORD || 'admin';
+  await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)',
+    [username, hashPassword(password), 'admin']
+  );
+  console.log(`Seeded initial admin "${username}". Log in and change the password right away.`);
+}
+
+// ---- User accounts ----
+export async function getUserByUsername(username) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE lower(username)=lower($1)', [username]);
+  return rows[0];
+}
+export async function listUsers() {
+  const { rows } = await pool.query('SELECT id, username, role, created_at FROM users ORDER BY username ASC');
+  return rows;
+}
+export async function createUser({ username, password, role }) {
+  const { rows } = await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role, created_at',
+    [username, hashPassword(password), role]
+  );
+  return rows[0];
+}
+export async function updateUser(id, { role, password }) {
+  const sets = [];
+  const vals = [];
+  if (role) { vals.push(role); sets.push(`role=$${vals.length}`); }
+  if (password) { vals.push(hashPassword(password)); sets.push(`password_hash=$${vals.length}`); }
+  if (!sets.length) {
+    const { rows } = await pool.query('SELECT id, username, role, created_at FROM users WHERE id=$1', [id]);
+    return rows[0];
+  }
+  vals.push(id);
+  const { rows } = await pool.query(
+    `UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING id, username, role, created_at`,
+    vals
+  );
+  return rows[0];
+}
+export async function deleteUser(id) { await pool.query('DELETE FROM users WHERE id=$1', [id]); }
+export async function getUserById(id) {
+  const { rows } = await pool.query('SELECT id, username, role, created_at FROM users WHERE id=$1', [id]);
+  return rows[0];
+}
+export async function countAdmins() {
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM users WHERE role='admin'`);
+  return rows[0].n;
 }
 
 const TABLES = {
