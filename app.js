@@ -574,16 +574,18 @@ function openExport() {
 async function doExport() {
   const month = $('#exportMonth').value;
   const year = $('#exportYear').value;
+  const scope = $('#exportScope').value;
   const params = new URLSearchParams();
   if (month && month !== 'All') params.set('month', month);
   if (year && year !== 'All') params.set('year', year);
+  if (scope === 'commission') params.set('scope', 'commission');
   try {
     const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
     const res = await fetch(`/api/export?${params.toString()}`, { headers });
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();
-    const label = [month !== 'All' ? month : '', year !== 'All' ? year : ''].filter(Boolean).join('_')
-      || new Date().toISOString().slice(0, 10);
+    const label = ([month !== 'All' ? month : '', year !== 'All' ? year : ''].filter(Boolean).join('_')
+      || new Date().toISOString().slice(0, 10)) + (scope === 'commission' ? '_Commission' : '');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `PERQ_Sales_Export_${label}.xlsx`.replace(/\s+/g, '_');

@@ -217,7 +217,11 @@ app.get('/api/export', async (req, res, next) => {
     if (month) bookings = bookings.filter((r) => r.booking_month === month);
     if (year) bookings = bookings.filter((r) => String(r.booking_year) === String(year));
     const churn = await listRows('churn');
-    const buf = buildWorkbook(bookings, churn);
+    // "For Sales Commission" export drops the billing (blue) columns from both tabs.
+    const opts = req.query.scope === 'commission'
+      ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set(CHURN_BILLING_KEYS) }
+      : {};
+    const buf = buildWorkbook(bookings, churn, opts);
     const stamp = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="PERQ_Sales_Export_${stamp}.xlsx"`);

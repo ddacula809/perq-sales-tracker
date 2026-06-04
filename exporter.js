@@ -7,35 +7,46 @@ import {
 } from './schema.js';
 import { computeBooking, computeChurn } from './compute.js';
 
-// Build a sheet as an array-of-arrays placing each value at its original Excel column.
-function buildAoa(rows, editFields, computedFields, computeFn) {
-  const allCols = [...editFields, ...computedFields].sort((a, b) => a.excel - b.excel);
-  const maxCol = Math.max(...allCols.map((c) => c.excel));
+// Build a sheet as an array-of-arrays. Columns keep their original Excel position; when
+// some are excluded (`exclude` set of keys), the rest are re-packed to be contiguous
+// (no blank gaps where the removed columns were).
+function buildAoa(rows, editFields, computedFields, computeFn, exclude = new Set()) {
+  const edit = editFields.filter((f) => !exclude.has(f.key));
+  const comp = computedFields.filter((f) => !exclude.has(f.key));
+  const allCols = [...edit, ...comp].sort((a, b) => a.excel - b.excel);
+  const repack = exclude.size > 0;
+  const colAt = new Map();
+  allCols.forEach((c, i) => colAt.set(c.key, repack ? i : c.excel));
+  const maxCol = repack ? Math.max(0, allCols.length - 1) : Math.max(...allCols.map((c) => c.excel));
   const aoa = [];
 
   // Header on the first row.
   const header = new Array(maxCol + 1).fill('');
-  for (const c of allCols) header[c.excel] = c.label;
+  for (const c of allCols) header[colAt.get(c.key)] = c.label;
   aoa.push(header);
 
   for (const r of rows) {
     const computed = computeFn(r);
     const line = new Array(maxCol + 1).fill(null);
-    for (const f of editFields) line[f.excel] = r[f.key] ?? null;
-    for (const f of computedFields) line[f.excel] = computed[f.key] ?? null;
+    for (const f of edit) line[colAt.get(f.key)] = r[f.key] ?? null;
+    for (const f of comp) line[colAt.get(f.key)] = computed[f.key] ?? null;
     aoa.push(line);
   }
   return aoa;
 }
 
-export function buildWorkbook(bookings, churn) {
+// opts.excludeBookingKeys / opts.excludeChurnKeys: sets of field keys to omit (e.g. the
+// billing columns for a "sales commission" export).
+export function buildWorkbook(bookings, churn, opts = {}) {
   const wb = XLSX.utils.book_new();
+  const bExclude = opts.excludeBookingKeys || new Set();
+  const cExclude = opts.excludeChurnKeys || new Set();
 
-  const bAoa = buildAoa(bookings, BOOKING_FIELDS, BOOKING_COMPUTED, computeBooking);
+  const bAoa = buildAoa(bookings, BOOKING_FIELDS, BOOKING_COMPUTED, computeBooking, bExclude);
   const bWs = XLSX.utils.aoa_to_sheet(bAoa);
   XLSX.utils.book_append_sheet(wb, bWs, BOOKING_SHEET);
 
-  const cAoa = buildAoa(churn, CHURN_FIELDS, CHURN_COMPUTED, computeChurn);
+  const cAoa = buildAoa(churn, CHURN_FIELDS, CHURN_COMPUTED, computeChurn, cExclude);
   const cWs = XLSX.utils.aoa_to_sheet(cAoa);
   XLSX.utils.book_append_sheet(wb, cWs, CHURN_SHEET);
 
