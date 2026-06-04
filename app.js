@@ -586,6 +586,40 @@ function setColWidth(key, px) {
 }
 function saveColWidths() { localStorage.setItem('perqColWidths', JSON.stringify(state.colWidths)); }
 
+// ---------- Hover popup for long Notes cells ----------
+function wireCellTip() {
+  const tip = $('#cellTip');
+  const tbody = $('#tbody');
+  const position = (e) => {
+    const pad = 14;
+    const r = tip.getBoundingClientRect();
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
+    if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
+    tip.style.left = `${Math.max(8, x)}px`;
+    tip.style.top = `${Math.max(8, y)}px`;
+  };
+  const noteText = (cell) => {
+    const ctl = cell.querySelector('input, textarea, select');
+    return ((ctl ? ctl.value : cell.textContent) || '').trim();
+  };
+  tbody.addEventListener('mouseover', (e) => {
+    const cell = e.target.closest('[data-col="notes"]');
+    const text = cell ? noteText(cell) : '';
+    if (!text) { tip.hidden = true; return; }
+    tip.textContent = text;
+    tip.hidden = false;
+    position(e);
+  });
+  tbody.addEventListener('mousemove', (e) => {
+    if (tip.hidden) return;
+    if (e.target.closest('[data-col="notes"]')) position(e);
+    else tip.hidden = true;
+  });
+  tbody.addEventListener('mouseleave', () => { tip.hidden = true; });
+}
+
 function wireResize() {
   let active = null; // { key, startX, startW }
   $('#thead').addEventListener('mousedown', (e) => {
@@ -785,7 +819,7 @@ function wireUsers() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip();
   applyZoom();
   if (state.token) {
     try {

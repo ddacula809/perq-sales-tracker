@@ -189,6 +189,15 @@ tbody td.del button {
 }
 tbody td.del button:hover { color: var(--neg); }
 
+/* Hover popup for long cell text (e.g. Notes) */
+.cell-tip {
+  position: fixed; z-index: 200; max-width: 360px;
+  background: var(--ink); color: #fff; padding: 9px 12px; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.45; box-shadow: var(--shadow);
+  white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none;
+}
+.cell-tip[hidden] { display: none; }
+
 /* Toast */
 .toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px);
