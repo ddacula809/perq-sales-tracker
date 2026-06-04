@@ -631,21 +631,23 @@ function renderSharedFields() {
     const ctl = $(`#sharedFields [data-key="${k}"]`);
     if (ctl && v != null && v !== '') ctl.value = v;
   }
-  updatePilotType();
+  updatePilotCtam();
 }
 
-// Pilot Type only applies to Pilots — grey it out and blank it unless "Pilot" is chosen.
-function updatePilotType() {
+// Pilot Type applies only to Pilots and CTAM Type only to CTAMs — grey out and blank the
+// field that doesn't apply, based on the Pilot or CTAM choice.
+function setSharedSelect(sel, enabled) {
+  if (!sel) return;
+  if (enabled) { sel.disabled = false; if (sel.selectedIndex < 0) sel.selectedIndex = 0; }
+  else { sel.selectedIndex = -1; sel.disabled = true; } // blank (value '') + greyed
+}
+function updatePilotCtam() {
   const poc = $('#sharedFields [data-key="pilot_or_ctam"]');
-  const pt = $('#sharedFields [data-key="pilot_type"]');
-  if (!poc || !pt) return;
-  if (poc.value.trim() === 'Pilot') {
-    pt.disabled = false;
-    if (pt.selectedIndex < 0) pt.selectedIndex = 0;
-  } else {
-    pt.selectedIndex = -1; // show blank; value becomes '' so CTAM bookings have no Pilot Type
-    pt.disabled = true;
-  }
+  if (!poc) return;
+  const v = poc.value.trim();
+  setSharedSelect($('#sharedFields [data-key="pilot_type"]'), v === 'Pilot');
+  setSharedSelect($('#sharedFields [data-key="ctam_type"]'), v === 'CTAM');
+  setProductOffsets(); // CTAM Type may have changed → refresh product Offset visibility
 }
 
 function productLineHtml() {
@@ -727,7 +729,7 @@ function wireEntry() {
   $('#sharedFields').addEventListener('change', (e) => {
     const key = e.target.dataset && e.target.dataset.key;
     if (key === 'ctam_type') setProductOffsets();
-    if (key === 'pilot_or_ctam') updatePilotType();
+    if (key === 'pilot_or_ctam') updatePilotCtam();
   });
   // Remove a product line (keep at least one).
   $('#productLines').addEventListener('click', (e) => {
