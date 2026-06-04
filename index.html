@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PERQ Sales Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark">▰</span>
+      <div>
+        <h1>PERQ Sales Tracker</h1>
+        <p class="sub">Bookings &amp; Churn — live operational ledger</p>
+      </div>
+    </div>
+    <div class="actions">
+      <label class="btn ghost" id="importBtn">
+        Import .xlsx
+        <input type="file" id="importFile" accept=".xlsx" hidden />
+      </label>
+      <a class="btn ghost" id="exportBtn" href="/api/export">Export .xlsx</a>
+      <button class="btn solid" id="addRowBtn">+ Add row</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="bookings">May 2026 Bookings</button>
+    <button class="tab" data-tab="churn">Churn Tracker</button>
+    <span class="status" id="status"></span>
+  </nav>
+
+  <section class="summary" id="summary"></section>
+
+  <main class="gridwrap">
+    <div class="scroller" id="scroller">
+      <table id="grid">
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal" id="authModal" hidden>
+    <div class="modal-card">
+      <h2>Access key required</h2>
+      <p>This instance is protected. Enter the shared access key.</p>
+      <input type="password" id="authInput" placeholder="Access key" />
+      <button class="btn solid" id="authSubmit">Unlock</button>
+      <p class="err" id="authErr"></p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
