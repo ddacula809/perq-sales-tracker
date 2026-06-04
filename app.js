@@ -394,9 +394,9 @@ async function loadAll() {
 }
 
 function renderAll() {
-  // The New Booking tab is only for users who may create bookings.
-  document.querySelector('[data-tab="newbooking"]').hidden = !canAddDelete();
-  if (state.tab === 'newbooking' && !canAddDelete()) state.tab = 'dashboard';
+  // The New Booking tab is admin-only.
+  document.querySelector('[data-tab="newbooking"]').hidden = !isAdmin();
+  if (state.tab === 'newbooking' && !isAdmin()) state.tab = 'dashboard';
 
   const isEntry = state.tab === 'newbooking';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
