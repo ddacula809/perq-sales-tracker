@@ -43,6 +43,38 @@ async function ensureColumns(table, fields) {
   }
 }
 
+// Run a one-time data repair, tracked so it executes exactly once across reboots.
+async function runOnce(name, fn) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name TEXT PRIMARY KEY,
+      run_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  const { rowCount } = await pool.query('SELECT 1 FROM schema_migrations WHERE name=$1', [name]);
+  if (rowCount) return;
+  await fn();
+  await pool.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
+}
+
+// When offset_amount became an editable field, the new column was added as NULL on
+// existing rows — dropping the original computed offset (= MRR for License Transfers)
+// and changing company_total_booking. Restore that original value once, only for rows
+// the original formula treated as License Transfers (matches formulaColumn): CTAM Type
+// = License Transfer and Pilot Type not one of the pilot/conversion buckets. Rows where
+// an offset has since been entered are skipped (offset_amount IS NULL guard).
+async function backfillOffsetAmount() {
+  await pool.query(`
+    UPDATE bookings
+       SET offset_amount = mrr
+     WHERE offset_amount IS NULL
+       AND mrr IS NOT NULL
+       AND ctam_type = 'License Transfer'
+       AND COALESCE(pilot_type, '') NOT IN
+           ('New - Paid', 'New - Free', 'Conversion', 'Pilot Expansion', 'Second Signature');
+  `);
+}
+
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings (
@@ -62,6 +94,7 @@ export async function initDb() {
   `);
   await ensureColumns('bookings', BOOKING_FIELDS);
   await ensureColumns('churn', CHURN_FIELDS);
+  await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
 }
 
 const TABLES = {
