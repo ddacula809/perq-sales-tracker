@@ -69,27 +69,20 @@ function fieldsForTab() {
   return { cols, computedKeys, computed: s.computed };
 }
 
-// Like fieldsForTab, but with the user's hidden columns removed (for rendering the grid).
-function visibleCols() {
-  const { cols, computedKeys } = fieldsForTab();
-  const hidden = state.hiddenCols[state.tab] || [];
-  return { cols: cols.filter((f) => !hidden.includes(f.key)), computedKeys };
-}
-
 function renderHead() {
   if (state.tab === 'dashboard') { $('#thead').innerHTML = ''; return; }
-  const { cols, computedKeys } = visibleCols();
+  const { cols, computedKeys } = fieldsForTab();
   $('#thead').innerHTML =
     `<tr><th class="rownum">#</th>` +
     cols.map((f) => {
       const cls = computedKeys.has(f.key) ? 'computed' : (BILLING_KEYS.has(f.key) ? 'billing' : '');
-      return `<th class="${cls}" title="${f.label}">${f.label}</th>`;
+      return `<th class="${cls}" data-col="${f.key}" title="${f.label}">${f.label}</th>`;
     }).join('') +
     `<th class="del"></th></tr>`;
 }
 
 function rowInnerHtml(row, i) {
-  const { cols, computedKeys } = visibleCols();
+  const { cols, computedKeys } = fieldsForTab();
   let html = `<td class="rownum">${i + 1}</td>`;
   for (const f of cols) html += computedKeys.has(f.key) ? computedCell(f, row) : editCell(f, row);
   html += `<td class="del"><button title="Delete row" data-del="${row.id}">✕</button></td>`;
@@ -114,25 +107,25 @@ function editCell(f, row) {
   const val = row[f.key] ?? '';
   // Offset Amount only applies to License Transfers; otherwise show a non-editable dash.
   if (f.key === 'offset_amount' && (row.ctam_type || '').trim() !== 'License Transfer') {
-    return `<td class="num offset-na"><span class="na">—</span></td>`;
+    return `<td class="num offset-na" data-col="${f.key}"><span class="na">—</span></td>`;
   }
   const billing = BILLING_KEYS.has(f.key) ? ' billing' : '';
   const numClass = f.type === 'number' ? ' num' : '';
   if (f.type === 'select') {
     const opts = f.options.map((o) =>
       `<option value="${escapeAttr(o)}"${o === val ? ' selected' : ''}>${o || '—'}</option>`).join('');
-    return `<td class="${billing.trim()}"><select data-key="${f.key}">${opts}</select></td>`;
+    return `<td class="${billing.trim()}" data-col="${f.key}"><select data-key="${f.key}">${opts}</select></td>`;
   }
   const inputType = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
   const step = f.type === 'number' ? ' step="any"' : '';
-  return `<td class="${(numClass + billing).trim()}"><input type="${inputType}"${step} data-key="${f.key}" value="${escapeAttr(val)}" /></td>`;
+  return `<td class="${(numClass + billing).trim()}" data-col="${f.key}"><input type="${inputType}"${step} data-key="${f.key}" value="${escapeAttr(val)}" /></td>`;
 }
 
 function computedCell(f, row) {
   const raw = row[f.key];
   const isNeg = typeof raw === 'number' && raw < 0;
   const text = MONEY.has(f.key) ? fmtMoney(raw) : (f.type === 'number' ? fmtNum(raw) : (raw ?? ''));
-  return `<td class="computed${isNeg ? ' neg' : ''}" data-comp="${f.key}">${text}</td>`;
+  return `<td class="computed${isNeg ? ' neg' : ''}" data-comp="${f.key}" data-col="${f.key}">${text}</td>`;
 }
 
 function escapeAttr(v) { return String(v).replace(/"/g, '&quot;'); }
@@ -248,6 +241,7 @@ function renderAll() {
   $('#colBtn').style.display = isDash ? 'none' : '';  // column hiding only where a grid shows
   $('#colMenu').hidden = true;
   renderHead(); renderSummary(); renderBody();
+  applyColHide();
 }
 
 function updateRowInState(table, updated) {
@@ -498,6 +492,13 @@ function wireView() {
 // ---------- Columns show/hide ----------
 function saveHiddenCols() { localStorage.setItem('perqHiddenCols', JSON.stringify(state.hiddenCols)); }
 
+// Hide columns via a single CSS rule (no grid rebuild) — instant regardless of row count.
+function applyColHide() {
+  const hidden = state.hiddenCols[state.tab] || [];
+  const selector = hidden.map((k) => `#grid [data-col="${k}"]`).join(',');
+  $('#colHideStyle').textContent = selector ? `${selector}{display:none!important;}` : '';
+}
+
 function renderColMenu() {
   const { cols } = fieldsForTab();
   const hidden = state.hiddenCols[state.tab] || [];
@@ -522,14 +523,14 @@ function wireColumns() {
     if (cb.checked && i >= 0) hidden.splice(i, 1);
     else if (!cb.checked && i < 0) hidden.push(cb.dataset.col);
     saveHiddenCols();
-    renderHead(); renderBody();
+    applyColHide();
   });
   // "Show all" resets visibility for the current tab.
   $('#colMenu').addEventListener('click', (e) => {
     if (e.target.id !== 'colShowAll') return;
     state.hiddenCols[state.tab] = [];
     saveHiddenCols();
-    renderColMenu(); renderHead(); renderBody();
+    renderColMenu(); applyColHide();
   });
   // Click outside closes the menu.
   document.addEventListener('click', (e) => {
