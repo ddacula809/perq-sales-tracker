@@ -106,7 +106,7 @@ export const SALES_SUPPORT_FIELDS = [
   { key: 'product_category', label: 'Product',        type: 'select', options: BPR_CATEGORIES },
   { key: 'section',          label: 'Section',        type: 'select', options: SALES_SUPPORT_SECTIONS },
   { key: 'pmc',              label: 'PMC',            type: 'text' },
-  { key: 'booking_type',     label: 'Booking Type',   type: 'select', options: ['', 'Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
+  { key: 'booking_type',     label: 'Booking Type',   type: 'select', options: ['', 'Pilot', 'Conversion', 'Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
   { key: 'account_owner',    label: 'Account Owner',  type: 'select', options: ['', 'Kathryn', 'Doug', 'House/CSM', 'Caleb', 'Kirk', 'Scott', 'Cindy', 'Michelle'] },
   { key: 'q2_target',        label: 'Q2 Target',      type: 'number' },
   { key: 'apr_target',       label: 'April 2026 Target', type: 'number' },
