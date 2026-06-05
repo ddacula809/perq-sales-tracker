@@ -34,6 +34,7 @@ const state = {
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
+  ssBarCollapsed: localStorage.getItem('perqSsBarCollapsed') === '1', // Sales Support toolbar collapsed
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   pendingBookings: [], // new-booking payloads awaiting confirmation
@@ -1225,6 +1226,45 @@ function ssCell(row, key) {
   return `<td class="${numCls.trim()}" data-col="${key}"><input type="${f.type === 'number' ? 'number' : 'text'}"${step} data-ss-key="${key}" value="${escapeAttr(val)}" /></td>`;
 }
 
+// Sum one numeric column across a section's rows. Computed actuals are derived from
+// Bookings (same as the cells); stored money/number columns sum row values.
+function ssGroupSubtotal(groupRows, key) {
+  const p = viewedPeriodObj();
+  const months = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const year = p ? p.year : null;
+  if (key === 'm1_actual' || key === 'm2_actual' || key === 'm3_actual') {
+    const idx = { m1_actual: 0, m2_actual: 1, m3_actual: 2 }[key];
+    return groupRows.reduce((a, r) => a + ssActual(r, months[idx], year), 0);
+  }
+  if (key === 'q_actual') {
+    return groupRows.reduce((a, r) => a + months.reduce((s, mn) => s + ssActual(r, mn, year), 0), 0);
+  }
+  return groupRows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
+}
+
+// A bold subtotal row for a section: sums every numeric column (targets, actuals,
+// Worst/Accurate/Best); non-numeric columns are blank except a "Subtotal" label.
+function ssSubtotalRowHtml(cols, groupRows, editCol) {
+  const cells = cols.map(([k], i) => {
+    if (SS_MONEY.has(k)) {
+      const cls = SS_COMPUTED.has(k) ? 'ss-actual' : 'num';
+      return `<td class="${cls}" data-col="${k}">${fmtMoney(ssGroupSubtotal(groupRows, k))}</td>`;
+    }
+    if (i === 0) return `<td class="ss-subtotal-label" data-col="${k}">Subtotal</td>`;
+    return `<td data-col="${k}"></td>`;
+  }).join('');
+  return `<tr class="ss-subtotal-row">${cells}${editCol ? '<td></td>' : ''}</tr>`;
+}
+
+// Show/hide the Sales Support toolbar (quarter, filters, close/open) via the toggle.
+function applySsBar() {
+  const collapsed = state.ssBarCollapsed;
+  const bar = $('#salesBar');
+  if (bar) bar.hidden = collapsed;
+  const btn = $('#ssBarToggle');
+  if (btn) btn.textContent = collapsed ? '▾ Show controls' : '▴ Hide controls';
+}
+
 // Build the Sales Support filter dropdowns (Account Owner / Product / Section)
 // from the schema field options, preserving the current selection.
 function ssFilterOptionsHtml(values, current) {
@@ -1260,6 +1300,7 @@ function renderSalesSupport() {
   $('#ssOpenQuarter').disabled = !onLatest;
   $('#ssOpenQuarter').title = onLatest ? '' : 'Switch to the most recent quarter to open a new one.';
 
+  applySsBar();
   const cols = ssColumns();
   const editCol = ssEditable();
   $('#ssHead').innerHTML = '<tr>' +
@@ -1287,15 +1328,23 @@ function renderSalesSupport() {
   const colCount = cols.length + (editCol ? 1 : 0);
   let html = '';
   let group = null;
+  let groupRows = []; // rows of the current section, for the subtotal
   let alt = 0; // alternating-row counter, reset at each section for clean striping
+  const flushSubtotal = () => { if (group !== null && groupRows.length) html += ssSubtotalRowHtml(cols, groupRows, editCol); };
   for (const row of rows) {
     const g = `${row.product_category || '—'}  ·  ${row.section || '—'}`;
-    if (g !== group) { group = g; alt = 0; html += `<tr class="ss-group"><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`; }
+    if (g !== group) {
+      flushSubtotal();        // close out the previous section with its subtotal
+      group = g; alt = 0; groupRows = [];
+      html += `<tr class="ss-group"><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`;
+    }
+    groupRows.push(row);
     const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
     const cls = (alt % 2) ? 'ss-alt' : '';
     alt += 1;
     html += `<tr data-ss-id="${row.id}" class="${cls}">${cols.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
   }
+  flushSubtotal(); // subtotal for the final section
   if (!rows.length) {
     const msg = !viewed ? `No quarters yet.${isAdmin() ? ' Use “Open New Quarter”.' : ''}`
       : editCol ? 'No rows yet. Use “+ Add row”.'
@@ -1355,6 +1404,11 @@ async function submitSsForm(e) {
 
 function wireSalesSupport() {
   $('#ssAddRow').onclick = () => { if (ssEditable()) openSsForm(); };
+  $('#ssBarToggle').onclick = () => {
+    state.ssBarCollapsed = !state.ssBarCollapsed;
+    localStorage.setItem('perqSsBarCollapsed', state.ssBarCollapsed ? '1' : '0');
+    applySsBar();
+  };
   $('#ssPeriod').onchange = (e) => { state.salesPeriod = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssFilterOwner').onchange = (e) => { state.ssFilters.owner = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssFilterProduct').onchange = (e) => { state.ssFilters.product = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
