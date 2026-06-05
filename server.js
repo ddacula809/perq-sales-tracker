@@ -50,7 +50,15 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-app.get('/api/me', (req, res) => res.json({ user: req.user }));
+// Read the user fresh from the DB so role/account_owner changes apply without re-login
+// (and so older tokens that predate the account_owner field still resolve it).
+app.get('/api/me', async (req, res, next) => {
+  try {
+    const u = await getUserById(req.user.id);
+    if (!u) return res.status(401).json({ error: 'Unauthorized' });
+    res.json({ user: { id: u.id, username: u.username, role: u.role, account_owner: u.account_owner || null } });
+  } catch (e) { next(e); }
+});
 
 // Self-service password change for the logged-in user.
 app.post('/api/change-password', async (req, res, next) => {
