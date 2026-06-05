@@ -1,4 +1,4 @@
-# PERQ Sales Tracker
+# PERQ Revenue Desk
 
 A web app that replaces the **May 2026 Bookings** and **Churn Tracker** tabs of the
 PERQ sales workbook with a shared, team-editable ledger backed by PostgreSQL.

@@ -284,7 +284,7 @@ app.get('/api/export', async (req, res, next) => {
     const buf = buildWorkbook(bookings, churn, opts);
     const stamp = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="PERQ_Sales_Export_${stamp}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="PERQ_Revenue_Desk_Export_${stamp}.xlsx"`);
     res.send(buf);
   } catch (e) { next(e); }
 });
@@ -307,5 +307,5 @@ app.use((err, _req, res, _next) => {
 
 const PORT = process.env.PORT || 3000;
 initDb()
-  .then(() => app.listen(PORT, () => console.log(`PERQ Sales Tracker listening on :${PORT}`)))
+  .then(() => app.listen(PORT, () => console.log(`PERQ Revenue Desk listening on :${PORT}`)))
   .catch((e) => { console.error('DB init failed:', e); process.exit(1); });

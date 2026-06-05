@@ -1,4 +1,4 @@
-// app.js — PERQ Sales Tracker frontend (vanilla JS, no build step).
+// app.js — PERQ Revenue Desk frontend (vanilla JS, no build step).
 
 const MONEY = new Set([
   'mrr', 'rerate_old_mrr', 'one_time_fee', 'month1', 'month2', 'month3',
@@ -768,7 +768,7 @@ async function doExport() {
       || new Date().toISOString().slice(0, 10)) + (scope === 'commission' ? '_Commission' : '');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `PERQ_Sales_Export_${label}.xlsx`.replace(/\s+/g, '_');
+    a.download = `PERQ_Revenue_Desk_Export_${label}.xlsx`.replace(/\s+/g, '_');
     a.click();
     URL.revokeObjectURL(a.href);
     $('#exportModal').hidden = true;

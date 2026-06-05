@@ -1,7 +1,7 @@
 {
-  "name": "perq-sales-tracker",
+  "name": "perq-revenue-desk",
   "version": "1.0.0",
-  "description": "Web app replacing the May 2026 bookings and Churn Tracker tabs of the PERQ sales workbook.",
+  "description": "PERQ Revenue Desk — bookings, churn, sales forecasting, and billing in one operational app (replaces the PERQ sales workbook).",
   "type": "module",
   "main": "server.js",
   "engines": {
