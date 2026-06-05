@@ -1175,11 +1175,14 @@ function renderSalesSupport() {
   const colCount = cols.length + (editCol ? 1 : 0);
   let html = '';
   let group = null;
+  let alt = 0; // alternating-row counter, reset at each section for clean striping
   for (const row of rows) {
     const g = `${row.product_category || '—'}  ·  ${row.section || '—'}`;
-    if (g !== group) { group = g; html += `<tr class="ss-group"><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`; }
+    if (g !== group) { group = g; alt = 0; html += `<tr class="ss-group"><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`; }
     const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
-    html += `<tr data-ss-id="${row.id}">${cols.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
+    const cls = (alt % 2) ? 'ss-alt' : '';
+    alt += 1;
+    html += `<tr data-ss-id="${row.id}" class="${cls}">${cols.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
   }
   if (!rows.length) {
     const msg = !viewed ? `No quarters yet.${isAdmin() ? ' Use “Open New Quarter”.' : ''}`

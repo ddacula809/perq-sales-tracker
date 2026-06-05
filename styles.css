@@ -325,6 +325,8 @@ tbody td.del button:hover { color: var(--neg); }
   text-align: right; padding: 7px 10px; font-weight: 500;
 }
 #ssTable td.num { text-align: right; }
+/* Zebra striping for legibility (Linen stripe; computed cyan cells keep their tint). */
+#ssTable tbody tr.ss-alt td:not(.ss-actual) { background: var(--paper); }
 #ssTable td input, #ssTable td select {
   font: inherit; border: none; background: transparent; padding: 7px 9px; width: 100%;
   min-width: 90px; color: var(--ink); outline: none;
