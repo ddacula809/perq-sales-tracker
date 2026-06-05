@@ -440,7 +440,7 @@ function renderAll() {
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
   $('#toggleFilters').style.display = (isEntry || isSales) ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
-  $('#zoomGroup').style.display = isGrid ? '' : 'none';
+  $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
   $('#colMenu').hidden = true;
   if (isEntry && !$('#productLines').children.length) resetEntryView();
@@ -824,27 +824,27 @@ function ssPmcOptions(current) {
 
 function ssCell(row, key) {
   if (key === 'apr_actual' || key === 'may_actual' || key === 'jun_actual') {
-    return `<td class="ss-actual">${fmtMoney(ssActual(row, SS_MONTHS.find((m) => m.akey === key)))}</td>`;
+    return `<td class="ss-actual" data-col="${key}">${fmtMoney(ssActual(row, SS_MONTHS.find((m) => m.akey === key)))}</td>`;
   }
   if (key === 'q2_actual') {
-    return `<td class="ss-actual">${fmtMoney(SS_MONTHS.reduce((a, m) => a + ssActual(row, m), 0))}</td>`;
+    return `<td class="ss-actual" data-col="${key}">${fmtMoney(SS_MONTHS.reduce((a, m) => a + ssActual(row, m), 0))}</td>`;
   }
   const f = ssFieldDef(key);
   const val = row[key] ?? '';
   const numCls = f.type === 'number' ? ' num' : '';
   if (!canAddDelete()) { // read-only
     const text = SS_MONEY.has(key) ? fmtMoney(row[key]) : (f.type === 'number' ? fmtNum(row[key]) : (row[key] ?? ''));
-    return `<td class="${numCls.trim()}">${escapeHtml(text)}</td>`;
+    return `<td class="${numCls.trim()}" data-col="${key}">${escapeHtml(text)}</td>`;
   }
   if (f.type === 'select') {
     const opts = f.options.map((o) => `<option value="${escapeAttr(o)}"${o === val ? ' selected' : ''}>${o || '—'}</option>`).join('');
-    return `<td><select data-ss-key="${key}">${opts}</select></td>`;
+    return `<td data-col="${key}"><select data-ss-key="${key}">${opts}</select></td>`;
   }
   if (key === 'pmc') {
-    return `<td><select data-ss-key="pmc">${ssPmcOptions(val)}</select></td>`;
+    return `<td data-col="pmc"><select data-ss-key="pmc">${ssPmcOptions(val)}</select></td>`;
   }
   const step = f.type === 'number' ? ' step="any"' : '';
-  return `<td class="${numCls.trim()}"><input type="${f.type === 'number' ? 'number' : 'text'}"${step} data-ss-key="${key}" value="${escapeAttr(val)}" /></td>`;
+  return `<td class="${numCls.trim()}" data-col="${key}"><input type="${f.type === 'number' ? 'number' : 'text'}"${step} data-ss-key="${key}" value="${escapeAttr(val)}" /></td>`;
 }
 
 function renderSalesSupport() {
@@ -852,7 +852,7 @@ function renderSalesSupport() {
 
   const editCol = canAddDelete();
   $('#ssHead').innerHTML = '<tr>' +
-    SS_COLS.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}">${label}</th>`).join('') +
+    SS_COLS.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}" data-col="${k}">${label}<span class="col-resize"></span></th>`).join('') +
     (editCol ? '<th></th>' : '') + '</tr>';
 
   const cats = ssFieldDef('product_category').options;
@@ -1091,6 +1091,7 @@ function wireReconcile() {
 // ---------- View tools: filter toggle + table zoom ----------
 function applyZoom() {
   $('#grid').style.zoom = state.zoom;
+  $('#ssTable').style.zoom = state.zoom;
   $('#zoomLevel').textContent = Math.round(state.zoom * 100) + '%';
 }
 
@@ -1124,10 +1125,11 @@ function applyColHide() {
 // Widths are applied via one generated CSS rule per resized column, keyed off data-col.
 function applyColWidths() {
   const widths = state.colWidths[state.tab] || {};
+  const t = state.tab === 'salessupport' ? '#ssTable' : '#grid';
   let css = '';
   for (const [key, px] of Object.entries(widths)) {
-    css += `#grid [data-col="${key}"]{width:${px}px;min-width:${px}px;max-width:${px}px;overflow:hidden;text-overflow:ellipsis;}`;
-    css += `#grid [data-col="${key}"] input,#grid [data-col="${key}"] select{min-width:0;}`;
+    css += `${t} [data-col="${key}"]{width:${px}px;min-width:${px}px;max-width:${px}px;overflow:hidden;text-overflow:ellipsis;}`;
+    css += `${t} [data-col="${key}"] input,${t} [data-col="${key}"] select{min-width:0;}`;
   }
   $('#colWidthStyle').textContent = css;
 }
@@ -1173,7 +1175,8 @@ function wireCellTip() {
 
 function wireResize() {
   let active = null; // { key, startX, startW }
-  $('#thead').addEventListener('mousedown', (e) => {
+  // Listen on document so both the main grid (#grid) and Sales Support (#ssTable) work.
+  document.addEventListener('mousedown', (e) => {
     const handle = e.target.closest('.col-resize');
     if (!handle) return;
     const th = handle.closest('th');
