@@ -1619,8 +1619,8 @@ function logout() {
   state.token = '';
   state.user = null;
   localStorage.removeItem('perqToken');
-  $('#usersModal').hidden = true;
-  showLogin();
+  // Reload to a clean login screen (clears all logged-in UI/state reliably).
+  location.reload();
 }
 
 async function doLogin() {
