@@ -109,6 +109,8 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
   transition: transform .06s ease, filter .15s ease, background .15s ease, border-color .15s ease;
 }
 .btn:hover { transform: translateY(-1px); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn:disabled:hover { transform: none; filter: none; }
 .btn.ghost { background: transparent; border-color: var(--plum); color: var(--plum); }
 .btn.ghost:hover { background: var(--plum-soft); }
 .btn.solid {

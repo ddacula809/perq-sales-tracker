@@ -1252,7 +1252,13 @@ function renderSalesSupport() {
   pill.style.display = viewed ? '' : 'none';
   $('#ssAddRow').style.display = ssEditable() ? '' : 'none';
   $('#ssCloseQuarter').hidden = !(isAdmin() && viewed && viewed.status === 'open');
+  // Open New Quarter only applies on the most recent quarter (it creates the next one).
+  // If a later quarter already exists, disable it so you can't open ahead from an older quarter.
   $('#ssOpenQuarter').hidden = !isAdmin();
+  const latest = periods.length ? periods[periods.length - 1] : null; // periods are oldest→newest
+  const onLatest = !!(viewed && latest && viewed.period === latest.period);
+  $('#ssOpenQuarter').disabled = !onLatest;
+  $('#ssOpenQuarter').title = onLatest ? '' : 'Switch to the most recent quarter to open a new one.';
 
   const cols = ssColumns();
   const editCol = ssEditable();
