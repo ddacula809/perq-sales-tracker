@@ -126,6 +126,15 @@ export async function initDb() {
   `);
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username))');
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      booking_id INTEGER,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      dismissed BOOLEAN NOT NULL DEFAULT false
+    );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sales_periods (
       period TEXT PRIMARY KEY,
       quarter INTEGER NOT NULL,
@@ -182,6 +191,18 @@ export async function createPeriod(quarter, year) {
 export async function getRowPeriod(table, id) {
   const { rows } = await pool.query(`SELECT period FROM ${table} WHERE id=$1`, [id]);
   return rows[0] ? rows[0].period : null;
+}
+
+// ---- Notifications (e.g. GoLive date changes, for billing users) ----
+export async function listNotifications() {
+  const { rows } = await pool.query('SELECT id, booking_id, message, created_at FROM notifications WHERE dismissed = false ORDER BY created_at DESC, id DESC');
+  return rows;
+}
+export async function createNotification(bookingId, message) {
+  await pool.query('INSERT INTO notifications (booking_id, message) VALUES ($1, $2)', [bookingId, message]);
+}
+export async function dismissNotification(id) {
+  await pool.query('UPDATE notifications SET dismissed = true WHERE id=$1', [id]);
 }
 
 // Seed the first admin if there are no users yet, so a fresh deploy isn't locked out.

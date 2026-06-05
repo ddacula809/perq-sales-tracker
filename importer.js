@@ -148,6 +148,55 @@ export function parseBookingReconcile(buffer) {
   return out;
 }
 
+// Coerce a Go Live Date cell to 'YYYY-MM-DD'. Handles Date objects, Excel date serials
+// (e.g. 46156), and date strings.
+function coerceExcelDate(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === 'number') {
+    const d = new Date(Math.round((v - 25569) * 86400000)); // Excel serial -> epoch ms
+    return isNaN(d) ? null : d.toISOString().slice(0, 10);
+  }
+  const d = new Date(v);
+  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+}
+
+// Parse a GoLives report into { property_id, product, mrr, golive_date } rows, matching
+// the header labels (the report's GoLive column is "Go Live Date").
+export function parseGolives(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('The uploaded file has no sheets.');
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+  const cols = [['Property ID', 'property_id'], ['Product', 'product'], ['MRR', 'mrr'], ['Go Live Date', 'golive_date']];
+  const wantNorm = cols.map(([l]) => normHeader(l));
+  let headerIdx = -1;
+  let best = 0;
+  for (let i = 0; i < Math.min(aoa.length, 25); i++) {
+    const present = new Set((aoa[i] || []).map(normHeader));
+    const matches = wantNorm.filter((l) => present.has(l)).length;
+    if (matches > best) { best = matches; headerIdx = i; }
+  }
+  if (headerIdx < 0 || best < 3) {
+    throw new Error('Could not find the expected columns (Property ID, Product, MRR, Go Live Date) in the file.');
+  }
+  const header = (aoa[headerIdx] || []).map(normHeader);
+  const colOf = {};
+  for (const [l, k] of cols) colOf[k] = header.indexOf(normHeader(l));
+  const out = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const obj = {
+      property_id: colOf.property_id >= 0 ? coerce(row[colOf.property_id], 'text') : null,
+      product: colOf.product >= 0 ? coerce(row[colOf.product], 'text') : null,
+      mrr: colOf.mrr >= 0 ? coerce(row[colOf.mrr], 'number') : null,
+      golive_date: colOf.golive_date >= 0 ? coerceExcelDate(row[colOf.golive_date]) : null,
+    };
+    if (obj.property_id || obj.product || obj.golive_date) out.push(obj);
+  }
+  return out;
+}
+
 export function parseWorkbook(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const result = { bookings: [], churn: [] };

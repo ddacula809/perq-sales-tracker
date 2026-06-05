@@ -35,6 +35,7 @@ const state = {
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   pendingBookings: [], // new-booking payloads awaiting confirmation
+  notifications: [],   // billing notifications (e.g. GoLive changes)
 };
 
 const $ = (s) => document.querySelector(s);
@@ -531,6 +532,7 @@ async function loadAll() {
   const openP = state.salesPeriods.find((p) => p.status === 'open');
   state.salesPeriod = openP ? openP.period
     : (state.salesPeriods.length ? state.salesPeriods[state.salesPeriods.length - 1].period : '');
+  state.notifications = (isAdmin() || role() === 'billing') ? await api('/api/notifications') : [];
   renderAll();
   $('#status').textContent =
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
@@ -555,7 +557,10 @@ function renderAll() {
   // In the More PERQs menu these are role-gated only (work from any tab).
   $('#churnUploadBtn').hidden = !canAddDelete();
   $('#reconcileBtn').hidden = !canAddDelete();
+  $('#golivesBtn').hidden = !canAddDelete();
   $('#usersBtn').hidden = !isAdmin();
+  $('#notifWrap').hidden = !canBilling;
+  $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
   $('#changePwBtn').hidden = !state.user;
   $('#logoutBtn').hidden = !state.user;
   $('#userChip').innerHTML = state.user
@@ -731,6 +736,27 @@ function wireActions() {
       renderAll();
       $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
       toast(`Added ${data.added}, skipped ${data.skipped} duplicate${data.skipped === 1 ? '' : 's'}`);
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+
+  // Upload GoLives report -> set/update booking GoLive dates; notify billing on changes.
+  $('#golivesFile').onchange = async (e) => {
+    $('#moreMenu').hidden = true;
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Uploading GoLives…');
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/bookings/golives', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Upload failed');
+      const data = await res.json();
+      state.rows.bookings = await api('/api/bookings');
+      if (isAdmin() || role() === 'billing') state.notifications = await api('/api/notifications');
+      renderAll();
+      toast(`GoLives — set ${data.updated}, changed ${data.changed}, unchanged ${data.unchanged}, not found ${data.notFound}`);
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };
@@ -1691,9 +1717,57 @@ function wireUsers() {
   });
 }
 
+// ---------- Notifications ----------
+function renderNotifMenu() {
+  const list = state.notifications || [];
+  $('#notifMenu').innerHTML = list.length
+    ? list.map((n) => `<div class="notif-item" data-go="${n.booking_id}"><span class="notif-msg">${escapeHtml(n.message)}</span><button type="button" class="notif-x" data-dismiss="${n.id}" title="Dismiss">✕</button></div>`).join('')
+    : '<div class="notif-empty">No notifications</div>';
+}
+
+function wireNotifications() {
+  $('#notifBtn').onclick = () => { renderNotifMenu(); const m = $('#notifMenu'); m.hidden = !m.hidden; };
+  document.addEventListener('click', (e) => { if (!e.target.closest('.notif-wrap')) $('#notifMenu').hidden = true; });
+  $('#notifMenu').addEventListener('click', async (e) => {
+    const dis = e.target.closest('[data-dismiss]');
+    if (dis) {
+      e.stopPropagation();
+      try {
+        state.notifications = await api(`/api/notifications/${dis.dataset.dismiss}/dismiss`, { method: 'POST' });
+        renderNotifMenu();
+        $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
+    const item = e.target.closest('[data-go]');
+    if (item) { $('#notifMenu').hidden = true; gotoBooking(item.dataset.go); }
+  });
+}
+
+// Navigate to a specific booking line item: open Bookings, clear filters, page to it, flash it.
+function gotoBooking(id) {
+  state.tab = 'bookings';
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'bookings'));
+  Object.keys(state.filters.bookings).forEach((k) => { state.filters.bookings[k] = 'All'; });
+  const rows = currentRows('bookings');
+  const idx = rows.findIndex((r) => String(r.id) === String(id));
+  if (idx >= 0) {
+    const size = state.pageSize === 'all' ? (rows.length || 1) : Number(state.pageSize);
+    state.page.bookings = Math.floor(idx / size) + 1;
+  }
+  closeSidebar();
+  renderAll();
+  const tr = $(`#tbody tr[data-id="${id}"]`);
+  if (tr) {
+    tr.scrollIntoView({ block: 'center' });
+    tr.classList.add('row-flash');
+    setTimeout(() => tr.classList.remove('row-flash'), 2500);
+  }
+}
+
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications();
   applyZoom();
   if (state.token) {
     try {

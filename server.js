@@ -7,9 +7,10 @@ import {
   initDb, listRows, insertRow, updateRow, deleteRow, replaceAll, pool,
   getUserByUsername, listUsers, createUser, updateUser, deleteUser, getUserById, countAdmins,
   listPeriods, getOpenPeriod, closeAllOpenPeriods, latestPeriod, createPeriod, getRowPeriod,
+  listNotifications, createNotification, dismissNotification,
 } from './db.js';
 import { computeBooking, computeChurn } from './compute.js';
-import { parseWorkbook, parseChurnUpload, parseBookingReconcile } from './importer.js';
+import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
@@ -254,6 +255,57 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
     }
     res.json({ added, skipped, total: incoming.length });
   } catch (e) { next(e); }
+});
+
+// ---- GoLives: update booking GoLive dates from a report; notify billing on changes ----
+app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const incoming = parseGolives(req.file.buffer);
+    const bookings = await listRows('bookings');
+    const norm = (v) => String(v ?? '').trim().toLowerCase();
+    const numKey = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : ''; };
+    const key = (r) => `${norm(r.property_id)}|${norm(r.product)}|${numKey(r.mrr)}`;
+    const byKey = new Map();
+    for (const b of bookings) {
+      const k = key(b);
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(b);
+    }
+    let updated = 0;
+    let changed = 0;
+    let unchanged = 0;
+    let notFound = 0;
+    for (const row of incoming) {
+      if (!row.golive_date) continue;
+      const matches = byKey.get(key(row));
+      if (!matches || !matches.length) { notFound += 1; continue; }
+      const next = String(row.golive_date).slice(0, 10);
+      for (const b of matches) {
+        const cur = b.golive_date ? String(b.golive_date).slice(0, 10) : '';
+        if (!cur) {
+          await updateRow('bookings', b.id, { golive_date: next });
+          updated += 1;
+        } else if (cur === next) {
+          unchanged += 1;
+        } else {
+          await updateRow('bookings', b.id, { golive_date: next });
+          const who = b.property_name || b.property_id || 'a property';
+          await createNotification(b.id, `GoLive date changed for ${who} (${b.product || 'product'}) from ${cur} to ${next}`);
+          changed += 1;
+        }
+      }
+    }
+    res.json({ updated, changed, unchanged, notFound, total: incoming.length });
+  } catch (e) { next(e); }
+});
+
+// ---- Notifications (admin + billing) ----
+app.get('/api/notifications', requireRole('admin', 'billing'), async (_req, res, next) => {
+  try { res.json(await listNotifications()); } catch (e) { next(e); }
+});
+app.post('/api/notifications/:id/dismiss', requireRole('admin', 'billing'), async (req, res, next) => {
+  try { await dismissNotification(Number(req.params.id)); res.json(await listNotifications()); } catch (e) { next(e); }
 });
 
 // ---- Reconcile: parse an uploaded bookings file; the client diffs it against current data ----

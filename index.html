@@ -39,10 +39,18 @@
             Reconcile .xlsx
             <input type="file" id="reconcileFile" accept=".xlsx" hidden />
           </label>
+          <label class="more-item" id="golivesBtn" hidden>
+            Upload GoLives .xlsx
+            <input type="file" id="golivesFile" accept=".xlsx" hidden />
+          </label>
         </div>
       </div>
       <button class="btn solid" id="addRowBtn">+ Add row</button>
       <button class="btn ghost" id="usersBtn" hidden>Users</button>
+      <div class="notif-wrap" id="notifWrap" hidden>
+        <button class="btn ghost" id="notifBtn" title="Notifications">🔔<span class="notif-count" id="notifCount"></span></button>
+        <div class="notif-menu" id="notifMenu" hidden></div>
+      </div>
       <span class="user-chip" id="userChip"></span>
       <button class="btn ghost" id="changePwBtn" hidden>Change password</button>
       <button class="btn ghost" id="logoutBtn" hidden>Log out</button>
