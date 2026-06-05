@@ -289,6 +289,14 @@ tbody td.del button:hover { color: var(--neg); }
   white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none;
 }
 .cell-tip[hidden] { display: none; }
+/* Structured breakdown (Sales Support Actual hover) */
+.cell-tip .tip-head { font-weight: 700; margin-bottom: 5px; padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,.22); white-space: normal; }
+.cell-tip .tip-row { display: flex; justify-content: space-between; gap: 16px; white-space: normal; }
+.cell-tip .tip-row + .tip-row { margin-top: 2px; }
+.cell-tip .tip-prop em { font-style: normal; opacity: .65; font-size: 11px; }
+.cell-tip .tip-amt { font-family: 'Fira Mono', monospace; white-space: nowrap; }
+.cell-tip .tip-total { margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.22); font-weight: 700; }
+#ssTable td.ss-actual { cursor: help; }
 
 /* Billing Dashboard */
 .billing-view { flex: 1; min-height: 0; overflow: auto; background: var(--paper); }

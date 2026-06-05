@@ -1205,6 +1205,39 @@ function ssActual(row, monthName, year) {
   }
   return sum;
 }
+// The individual bookings that make up a Sales Support "Actual" cell (same match as ssActual).
+function ssActualBreakdown(row, key) {
+  const p = viewedPeriodObj();
+  const year = p ? p.year : null;
+  const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const monthsForKey = { m1_actual: [qm[0]], m2_actual: [qm[1]], m3_actual: [qm[2]], q_actual: qm };
+  const months = new Set((monthsForKey[key] || []).filter(Boolean));
+  const pmc = String(row.pmc || '').trim().toLowerCase();
+  const cat = String(row.product_category || '').trim();
+  if (!pmc || !cat || !months.size) return [];
+  const pilotOnly = String(row.section || '').trim() === 'Pilot / New Logo';
+  return state.rows.bookings.filter((b) =>
+    String(b.pmc || '').trim().toLowerCase() === pmc
+    && (b.bpr_prod_category || '') === cat
+    && months.has(b.booking_month)
+    && reconNum(b.booking_year) === year
+    && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot'));
+}
+
+// Hover-tooltip HTML for an Actual cell: the properties booked + their amounts + the total.
+function ssActualTipHtml(row, key) {
+  const list = ssActualBreakdown(row, key);
+  if (!list.length) return '';
+  const total = list.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0);
+  const items = list.map((b) =>
+    `<div class="tip-row"><span class="tip-prop">${escapeHtml(b.property_name || b.property_id || '—')}`
+    + `${b.product ? ` <em>${escapeHtml(b.product)}</em>` : ''}</span>`
+    + `<span class="tip-amt">${escapeHtml(fmtMoney(b.company_total_booking))}</span></div>`).join('');
+  const head = `${escapeHtml(row.pmc || '—')} · ${escapeHtml(row.product_category || '')} · ${list.length} booking${list.length === 1 ? '' : 's'}`;
+  return `<div class="tip-head">${head}</div>${items}`
+    + `<div class="tip-row tip-total"><span>Actual</span><span class="tip-amt">${escapeHtml(fmtMoney(total))}</span></div>`;
+}
+
 const ssFieldDef = (key) => state.schema.sales_support.editable.find((f) => f.key === key);
 
 // Freeze the leading columns (through PMC) so they stay visible when scrolling right.
@@ -1784,6 +1817,31 @@ function wireCellTip() {
     else tip.hidden = true;
   });
   tbody.addEventListener('mouseleave', () => { tip.hidden = true; });
+
+  // Sales Support: hovering an "Actual" cell shows the properties booked + amounts behind it.
+  const ssBody = $('#ssBody');
+  const ACTUAL_COLS = new Set(['m1_actual', 'm2_actual', 'm3_actual', 'q_actual']);
+  const ssActualHit = (e) => {
+    const cell = e.target.closest('[data-col]');
+    if (!cell || !ACTUAL_COLS.has(cell.dataset.col)) return null;
+    const tr = cell.closest('[data-ss-id]'); // skip the subtotal row (no id)
+    if (!tr) return null;
+    const row = state.rows.sales_support.find((r) => String(r.id) === tr.dataset.ssId);
+    return row ? { col: cell.dataset.col, row } : null;
+  };
+  ssBody.addEventListener('mouseover', (e) => {
+    const hit = ssActualHit(e);
+    const html = hit ? ssActualTipHtml(hit.row, hit.col) : '';
+    if (!html) { tip.hidden = true; return; }
+    tip.innerHTML = html;
+    tip.hidden = false;
+    position(e);
+  });
+  ssBody.addEventListener('mousemove', (e) => {
+    if (tip.hidden) return;
+    if (ssActualHit(e)) position(e); else tip.hidden = true;
+  });
+  ssBody.addEventListener('mouseleave', () => { tip.hidden = true; });
 }
 
 function wireResize() {
