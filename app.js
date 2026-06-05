@@ -1171,7 +1171,7 @@ function ssColumns() {
   const q = p ? `Q${p.quarter}` : 'Q';
   const y = p ? p.year : '';
   const m = p ? QUARTER_MONTHS[p.quarter] : ['Month 1', 'Month 2', 'Month 3'];
-  return [
+  const cols = [
     ['product_category', 'Product'], ['section', 'Section'], ['pmc', 'PMC'],
     ['booking_type', 'Booking Type'], ['account_owner', 'Account Owner'],
     ['q2_target', `${q} Target`],
@@ -1181,6 +1181,8 @@ function ssColumns() {
     ['q_actual', `${q} Actual`],
     ['worst', 'Worst'], ['accurate', 'Accurate'], ['best', 'Best'], ['notes', 'Notes'],
   ];
+  // A tagged salesperson's rows are all their own — the Account Owner column is redundant.
+  return isSales() ? cols.filter(([k]) => k !== 'account_owner') : cols;
 }
 const ssLabels = () => Object.fromEntries(ssColumns());
 
