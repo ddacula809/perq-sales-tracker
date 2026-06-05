@@ -429,6 +429,7 @@ function renderAll() {
   const isEntry = state.tab === 'newbooking';
   const isSales = state.tab === 'salessupport';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
+  $('#currentTab').textContent = TAB_LABELS[state.tab] || '';
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
   // In the More PERQs menu these are role-gated only (work from any tab).
@@ -525,12 +526,31 @@ function wireGrid() {
   });
 }
 
+const TAB_LABELS = {
+  dashboard: 'Dashboard', salessupport: 'Sales Support', newbooking: 'New Booking',
+  bookings: 'Bookings', churn: 'Churn Tracker',
+};
+
+function closeSidebar() {
+  $('#sidebar').classList.remove('open');
+  $('#sidebarBackdrop').hidden = true;
+}
+
+function wireSidebar() {
+  $('#menuBtn').onclick = () => {
+    const open = $('#sidebar').classList.toggle('open');
+    $('#sidebarBackdrop').hidden = !open;
+  };
+  $('#sidebarBackdrop').onclick = closeSidebar;
+}
+
 function wireTabs() {
   document.querySelectorAll('.tab').forEach((t) => {
     t.onclick = () => {
       document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
       t.classList.add('active');
       state.tab = t.dataset.tab;
+      closeSidebar();
       renderAll();
     };
   });
@@ -1448,7 +1468,7 @@ function wireUsers() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport();
   applyZoom();
   if (state.token) {
     try {

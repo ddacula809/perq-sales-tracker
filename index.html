@@ -15,6 +15,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
+      <button class="menu-btn" id="menuBtn" aria-label="Menu" title="Menu">☰</button>
       <span class="mark">▰</span>
       <div>
         <h1>PERQ Sales Tracker</h1>
@@ -48,12 +49,17 @@
     </div>
   </header>
 
-  <nav class="tabs">
+  <aside class="sidebar" id="sidebar">
     <button class="tab active" data-tab="dashboard">Dashboard</button>
     <button class="tab" data-tab="salessupport">Sales Support</button>
     <button class="tab" data-tab="newbooking">New Booking</button>
     <button class="tab" data-tab="bookings">Bookings</button>
     <button class="tab" data-tab="churn">Churn Tracker</button>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+
+  <nav class="tabs">
+    <span class="current-tab" id="currentTab"></span>
     <div class="view-tools">
       <button class="view-btn" id="toggleFilters">Hide filters</button>
       <div class="col-menu-wrap">
