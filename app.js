@@ -596,8 +596,9 @@ async function loadAll() {
   state.rows.churn = await api('/api/churn');
   state.rows.sales_support = await api('/api/sales_support');
   state.salesPeriods = await api('/api/sales_periods');
-  const openP = state.salesPeriods.find((p) => p.status === 'open');
-  state.salesPeriod = openP ? openP.period
+  // Default to the latest open quarter (periods are listed oldest→newest); else the latest period.
+  const openPeriods = state.salesPeriods.filter((p) => p.status === 'open');
+  state.salesPeriod = openPeriods.length ? openPeriods[openPeriods.length - 1].period
     : (state.salesPeriods.length ? state.salesPeriods[state.salesPeriods.length - 1].period : '');
   state.notifications = (isAdmin() || role() === 'billing') ? await api('/api/notifications') : [];
   // Salesforce Recon Data (admin-only tab) + its Account Name list for the Sales Support PMC dropdown.
@@ -1335,6 +1336,7 @@ async function submitSsForm(e) {
     if (SS_MONEY.has(ctl.dataset.ssKey)) v = parseMoney(v);
     payload[ctl.dataset.ssKey] = v;
   });
+  payload.period = state.salesPeriod; // add to the quarter currently being viewed
   try {
     const row = await api('/api/sales_support', { method: 'POST', body: JSON.stringify(payload) });
     state.rows.sales_support.push(row);
@@ -1352,15 +1354,17 @@ function wireSalesSupport() {
   $('#ssFilterProduct').onchange = (e) => { state.ssFilters.product = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssFilterSection').onchange = (e) => { state.ssFilters.section = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssCloseQuarter').onclick = async () => {
-    if (!confirm('Close (archive) the current open quarter? It becomes read-only.')) return;
+    const period = state.salesPeriod;
+    if (!period) return;
+    if (!confirm(`Are you sure you want to close ${period}?\n\nAfter you confirm, this quarter will be locked and archived.`)) return;
     try {
-      state.salesPeriods = await api('/api/sales_periods/close', { method: 'POST' });
+      state.salesPeriods = await api('/api/sales_periods/close', { method: 'POST', body: JSON.stringify({ period }) });
       renderSalesSupport(); ssApplyFreeze();
-      toast('Quarter closed');
+      toast(`${period} closed and archived`);
     } catch (err) { toast(err.message, true); }
   };
   $('#ssOpenQuarter').onclick = async () => {
-    if (!confirm('Open a new quarter? Any open quarter will be archived first.')) return;
+    if (!confirm('Open a new quarter? The current quarter stays open until you close it.')) return;
     try {
       const data = await api('/api/sales_periods/open', { method: 'POST' });
       state.salesPeriods = data.periods;

@@ -7,6 +7,7 @@ import {
   initDb, listRows, insertRow, updateRow, deleteRow, replaceAll, pool,
   getUserByUsername, listUsers, createUser, updateUser, deleteUser, getUserById, countAdmins,
   listPeriods, getOpenPeriod, closeAllOpenPeriods, latestPeriod, createPeriod, getRowPeriod,
+  getPeriod, closePeriod,
   listNotifications, createNotification, dismissNotification,
 } from './db.js';
 import { computeBooking, computeChurn } from './compute.js';
@@ -134,12 +135,21 @@ app.post('/api/bookings/preview', requireRole('admin', 'standard'), (req, res) =
 app.get('/api/sales_periods', async (_req, res, next) => {
   try { res.json(await listPeriods()); } catch (e) { next(e); }
 });
-app.post('/api/sales_periods/close', requireRole('admin'), async (_req, res, next) => {
-  try { await closeAllOpenPeriods(); res.json(await listPeriods()); } catch (e) { next(e); }
+// Close (archive + lock) one specific quarter. Only that quarter is affected.
+app.post('/api/sales_periods/close', requireRole('admin'), async (req, res, next) => {
+  try {
+    const period = (req.body && req.body.period) ? String(req.body.period) : null;
+    if (!period) return res.status(400).json({ error: 'No quarter specified.' });
+    const p = await getPeriod(period);
+    if (!p) return res.status(404).json({ error: 'Unknown quarter.' });
+    if (p.status !== 'open') return res.status(400).json({ error: 'That quarter is already archived.' });
+    await closePeriod(period);
+    res.json(await listPeriods());
+  } catch (e) { next(e); }
 });
+// Open a new quarter. Existing open quarters are left open (closing is now explicit).
 app.post('/api/sales_periods/open', requireRole('admin'), async (_req, res, next) => {
   try {
-    await closeAllOpenPeriods();
     const last = await latestPeriod();
     let q = last ? last.quarter + 1 : 1;
     let y = last ? last.year : new Date().getFullYear();
@@ -178,25 +188,40 @@ app.get('/api/sales_support', async (_req, res, next) => {
 });
 app.post('/api/sales_support', requireRole('admin', 'standard'), async (req, res, next) => {
   try {
-    const open = await getOpenPeriod();
-    if (!open) return res.status(400).json({ error: 'No open quarter. Open a new quarter first.' });
-    res.status(201).json(await insertRow('sales_support', { ...(req.body || {}), period: open.period }));
+    const body = req.body || {};
+    // Add to the quarter the client is viewing (must be open); fall back to the latest open.
+    let period = body.period ? String(body.period) : null;
+    if (period) {
+      const p = await getPeriod(period);
+      if (!p) return res.status(400).json({ error: 'Unknown quarter.' });
+      if (p.status !== 'open') return res.status(403).json({ error: 'This quarter is archived (read-only).' });
+    } else {
+      const open = await getOpenPeriod();
+      if (!open) return res.status(400).json({ error: 'No open quarter. Open a new quarter first.' });
+      period = open.period;
+    }
+    res.status(201).json(await insertRow('sales_support', { ...body, period }));
   } catch (e) { next(e); }
 });
+// A sales_support row is editable while its own quarter is open (multiple quarters may be open).
+async function ssRowEditable(id) {
+  const rowPeriod = await getRowPeriod('sales_support', id);
+  if (!rowPeriod) return { ok: false, code: 404, error: 'Not found' };
+  const p = await getPeriod(rowPeriod);
+  if (!p || p.status !== 'open') return { ok: false, code: 403, error: 'This quarter is archived (read-only).' };
+  return { ok: true };
+}
 app.patch('/api/sales_support/:id', requireRole('admin', 'standard'), async (req, res, next) => {
   try {
-    const open = await getOpenPeriod();
-    const rowPeriod = await getRowPeriod('sales_support', Number(req.params.id));
-    if (!rowPeriod) return res.status(404).json({ error: 'Not found' });
-    if (!open || rowPeriod !== open.period) return res.status(403).json({ error: 'This quarter is archived (read-only).' });
+    const chk = await ssRowEditable(Number(req.params.id));
+    if (!chk.ok) return res.status(chk.code).json({ error: chk.error });
     res.json(await updateRow('sales_support', Number(req.params.id), req.body || {}));
   } catch (e) { next(e); }
 });
 app.delete('/api/sales_support/:id', requireRole('admin', 'standard'), async (req, res, next) => {
   try {
-    const open = await getOpenPeriod();
-    const rowPeriod = await getRowPeriod('sales_support', Number(req.params.id));
-    if (!open || rowPeriod !== open.period) return res.status(403).json({ error: 'This quarter is archived (read-only).' });
+    const chk = await ssRowEditable(Number(req.params.id));
+    if (!chk.ok) return res.status(chk.code).json({ error: chk.error });
     await deleteRow('sales_support', Number(req.params.id));
     res.status(204).end();
   } catch (e) { next(e); }

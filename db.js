@@ -96,6 +96,12 @@ async function fixGoogleBookingsTypo() {
   await pool.query(`UPDATE churn    SET product = 'AI Google Bookings Agent' WHERE product = 'AI Google Booking Agent'`);
 }
 
+// One-time: reopen Q2 2026, which was auto-archived when a new quarter was opened
+// (before closing became an explicit, confirmed action).
+async function reopenQ2_2026() {
+  await pool.query(`UPDATE sales_periods SET status='open', closed_at=NULL WHERE period='Q2 2026'`);
+}
+
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings (
@@ -169,6 +175,7 @@ export async function initDb() {
   await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);
   await runOnce('fix_google_bookings_typo_v1', fixGoogleBookingsTypo);
   await runOnce('sales_periods_init_v1', initSalesPeriods);
+  await runOnce('reopen_q2_2026_v1', reopenQ2_2026);
   await ensureAdmin();
 }
 
@@ -192,6 +199,15 @@ export async function getOpenPeriod() {
 }
 export async function closeAllOpenPeriods() {
   await pool.query(`UPDATE sales_periods SET status='closed', closed_at=now() WHERE status='open'`);
+}
+export async function getPeriod(period) {
+  const { rows } = await pool.query('SELECT * FROM sales_periods WHERE period=$1', [period]);
+  return rows[0];
+}
+export async function closePeriod(period) {
+  const { rows } = await pool.query(
+    `UPDATE sales_periods SET status='closed', closed_at=now() WHERE period=$1 RETURNING *`, [period]);
+  return rows[0];
 }
 export async function latestPeriod() {
   const { rows } = await pool.query('SELECT * FROM sales_periods ORDER BY year DESC, quarter DESC LIMIT 1');
