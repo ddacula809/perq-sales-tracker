@@ -292,8 +292,8 @@ function renderSummary() {
   if (!f) { el.className = 'summary hidden'; el.innerHTML = ''; return; }
 
   const distinct = (k) => [...new Set(rows.map((r) => r[k]).filter((v) => v !== null && v !== '' && v !== undefined))];
-  const sel = (id, label, vals, cur) =>
-    `<div class="filter"><label>${label}</label><select id="${id}">` +
+  const sel = (id, label, vals, cur, disabled) =>
+    `<div class="filter"><label>${label}</label><select id="${id}"${disabled ? ' disabled' : ''}>` +
     vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('') +
     `</select></div>`;
 
@@ -325,10 +325,19 @@ function renderSummary() {
     }
   }
 
+  // A tagged salesperson's Sales Rep filter is locked to their own name (Dashboard + Bookings).
+  const lockRep = isSales() && salesOwner();
   let filtersHtml = '';
   if (!state.filtersHidden) {
     filtersHtml = '<div class="filters-row">' +
-      filterDefs.map(([id, label, vals, cur]) => sel(id, label, vals, cur)).join('') +
+      filterDefs.map(([id, label, vals, cur]) => {
+        if (id === 'rep' && lockRep) {
+          const me = salesOwner();
+          const v = vals.includes(me) ? vals : ['All', me, ...vals.filter((x) => x !== 'All')];
+          return sel(id, label, v, me, true);
+        }
+        return sel(id, label, vals, cur);
+      }).join('') +
       '</div>';
   }
 
@@ -625,8 +634,13 @@ async function loadAll() {
   state.rows.salesforce_recon = isAdmin() ? await api('/api/salesforce_recon') : [];
   state.sfPmcs = ['admin', 'standard', 'sales_admin', 'sales'].includes(role())
     ? await api('/api/salesforce_recon/pmcs') : [];
-  // A tagged salesperson's Sales Support view defaults (and locks) to their own Account Owner.
-  if (isSales() && salesOwner()) state.ssFilters.owner = salesOwner();
+  // A tagged salesperson is scoped to their own name: Sales Support owner filter + the
+  // Sales Rep filter on both the Dashboard and Bookings all lock to their Account Owner.
+  if (isSales() && salesOwner()) {
+    state.ssFilters.owner = salesOwner();
+    state.filters.dashboard.rep = salesOwner();
+    state.filters.bookings.rep = salesOwner();
+  }
   renderAll();
   $('#status').textContent =
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
