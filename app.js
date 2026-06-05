@@ -574,8 +574,7 @@ function renderAll() {
   $('#usersBtn').hidden = !isAdmin();
   $('#notifWrap').hidden = !canBilling;
   $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
-  $('#changePwBtn').hidden = !state.user;
-  $('#logoutBtn').hidden = !state.user;
+  $('#userWrap').hidden = !state.user;
   $('#userChip').innerHTML = state.user
     ? `${escapeHtml(state.user.username)} · <span class="role">${escapeHtml(state.user.role)}</span>` : '';
   // Quick "+ Add row" is only used on the Churn grid now (Bookings uses the New Booking tab).
@@ -1652,8 +1651,13 @@ function wireAuth() {
   $('#loginPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   $('#logoutBtn').onclick = logout;
 
+  // User dropdown (username/role -> Change password / Log out).
+  $('#userBtn').onclick = () => { const m = $('#userMenu'); m.hidden = !m.hidden; };
+  document.addEventListener('click', (e) => { if (!e.target.closest('.user-wrap')) $('#userMenu').hidden = true; });
+
   // Self-service change password.
   $('#changePwBtn').onclick = () => {
+    $('#userMenu').hidden = true;
     ['pwCurrent', 'pwNew', 'pwConfirm'].forEach((id) => { $('#' + id).value = ''; });
     $('#pwErr').textContent = '';
     $('#passwordModal').hidden = false;

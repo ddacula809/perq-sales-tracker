@@ -51,9 +51,13 @@
         <button class="btn ghost" id="notifBtn" title="Notifications">🔔<span class="notif-count" id="notifCount"></span></button>
         <div class="notif-menu" id="notifMenu" hidden></div>
       </div>
-      <span class="user-chip" id="userChip"></span>
-      <button class="btn ghost" id="changePwBtn" hidden>Change password</button>
-      <button class="btn ghost" id="logoutBtn" hidden>Log out</button>
+      <div class="more-wrap user-wrap" id="userWrap" hidden>
+        <button class="btn ghost user-btn" id="userBtn"><span class="user-chip" id="userChip"></span> ▾</button>
+        <div class="more-menu" id="userMenu" hidden>
+          <button type="button" class="more-item" id="changePwBtn">Change password</button>
+          <button type="button" class="more-item" id="logoutBtn">Log out</button>
+        </div>
+      </div>
     </div>
   </header>
 

@@ -98,6 +98,8 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
   padding: 0 4px; white-space: nowrap;
 }
 .user-chip .role { color: var(--accent); font-weight: 600; text-transform: capitalize; }
+.user-btn { color: var(--ink-soft); }
+.user-btn .user-chip { padding-left: 0; }
 
 .btn {
   font: inherit; font-weight: 600; font-size: 12px;
