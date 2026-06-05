@@ -7,7 +7,7 @@ import {
   initDb, listRows, insertRow, updateRow, deleteRow, replaceAll, pool,
   getUserByUsername, listUsers, createUser, updateUser, deleteUser, getUserById, countAdmins,
   listPeriods, getOpenPeriod, closeAllOpenPeriods, latestPeriod, createPeriod, getRowPeriod,
-  getPeriod, closePeriod,
+  getPeriod, closePeriod, reconcileOwnerNames,
   listNotifications, createNotification, dismissNotification,
 } from './db.js';
 import { computeBooking, computeChurn } from './compute.js';
@@ -76,14 +76,31 @@ const BILLING_KEYS = { bookings: BOOKING_BILLING_KEYS, churn: CHURN_BILLING_KEYS
 
 const withComputed = (row, fn) => ({ ...row, ...fn(row) });
 
+// Owner dropdown options = Salesforce Recon Account Owner full names + any original
+// options that have no Recon match (e.g. "House/CSM", "Doug") + blank if originally allowed.
+function ownerOptions(originalOptions, reconOwners) {
+  const firsts = new Set(reconOwners.map((n) => n.split(/\s+/)[0].toLowerCase()));
+  const keepLegacy = originalOptions.filter((o) => o && !firsts.has(o.split(/\s+/)[0].toLowerCase()));
+  const sorted = [...reconOwners].sort((a, b) => a.localeCompare(b));
+  return [...(originalOptions.includes('') ? [''] : []), ...sorted, ...keepLegacy];
+}
+
 // ---- Schema (drives the frontend forms) ----
-app.get('/api/schema', (_req, res) => {
-  res.json({
-    bookings: { editable: BOOKING_FIELDS, computed: BOOKING_COMPUTED, billing: BOOKING_BILLING_KEYS },
-    churn: { editable: CHURN_FIELDS, computed: CHURN_COMPUTED, billing: CHURN_BILLING_KEYS },
-    sales_support: { editable: SALES_SUPPORT_FIELDS },
-    salesforce_recon: { editable: SALESFORCE_RECON_FIELDS },
-  });
+app.get('/api/schema', async (_req, res, next) => {
+  try {
+    const recon = await listRows('salesforce_recon');
+    const owners = [...new Set(recon.map((r) => String(r.account_owner ?? '').trim()).filter(Boolean))];
+    const bookingFields = BOOKING_FIELDS.map((f) =>
+      f.key === 'sales_rep' ? { ...f, options: ownerOptions(f.options, owners) } : f);
+    const ssFields = SALES_SUPPORT_FIELDS.map((f) =>
+      f.key === 'account_owner' ? { ...f, options: ownerOptions(f.options, owners) } : f);
+    res.json({
+      bookings: { editable: bookingFields, computed: BOOKING_COMPUTED, billing: BOOKING_BILLING_KEYS },
+      churn: { editable: CHURN_FIELDS, computed: CHURN_COMPUTED, billing: CHURN_BILLING_KEYS },
+      sales_support: { editable: ssFields },
+      salesforce_recon: { editable: SALESFORCE_RECON_FIELDS },
+    });
+  } catch (e) { next(e); }
 });
 
 // ---- Generic CRUD wired to both tables (with role-based authorization) ----
@@ -180,6 +197,10 @@ app.post('/api/salesforce_recon/import', requireRole('admin'), upload.single('fi
     await replaceAll('salesforce_recon', rows);
     res.json({ imported: rows.length });
   } catch (e) { next(e); }
+});
+// Re-clean Sales Rep / Account Owner names against the current Recon master (admin).
+app.post('/api/salesforce_recon/reconcile-owners', requireRole('admin'), async (_req, res, next) => {
+  try { await reconcileOwnerNames(); res.json({ ok: true }); } catch (e) { next(e); }
 });
 
 // ---- Sales Support rows: edits allowed only within the open quarter ----

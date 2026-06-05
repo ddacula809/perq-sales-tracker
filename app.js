@@ -567,6 +567,18 @@ function renderSfRecon() {
 }
 
 function wireSfRecon() {
+  $('#sfreconReconcile').onclick = async () => {
+    if (!confirm('Update Sales Rep (Bookings) and Account Owner (Sales Support) names to match the Salesforce Recon data?')) return;
+    try {
+      toast('Reconciling names…');
+      await api('/api/salesforce_recon/reconcile-owners', { method: 'POST' });
+      state.rows.bookings = await api('/api/bookings');
+      state.rows.sales_support = await api('/api/sales_support');
+      renderAll();
+      showResult('Names reconciled',
+        '<ul class="result-list"><li>Sales Rep and Account Owner names now match the Salesforce Recon data.</li></ul>');
+    } catch (err) { toast(err.message, true); }
+  };
   $('#sfreconFile').onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -580,10 +592,12 @@ function wireSfRecon() {
       const data = await res.json();
       state.rows.salesforce_recon = await api('/api/salesforce_recon');
       state.sfPmcs = await api('/api/salesforce_recon/pmcs');
+      state.schema = await api('/api/schema'); // refresh owner dropdown options
       renderAll();
       showResult('Salesforce Recon import complete',
         '<ul class="result-list">'
         + `<li><strong>${fmtNum(data.imported)}</strong> record(s) imported (replaced all existing)</li>`
+        + '<li>Use <strong>Reconcile Sales Rep names</strong> to update existing Bookings &amp; Sales Support to the new names.</li>'
         + '</ul>');
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
@@ -962,8 +976,16 @@ function autofillFromSfRecon() {
   if (!match) return false;
   const nameCtl = $('#sharedFields [data-key="property_name"]');
   const pmcCtl = $('#sharedFields [data-key="pmc"]');
+  const repCtl = $('#sharedFields [data-key="sales_rep"]');
   if (nameCtl) nameCtl.value = match.property_name || '';
   if (pmcCtl) pmcCtl.value = match.account_name || '';
+  // Sales Rep = the property's Account Owner (full name, e.g. "Kirk Flatter").
+  if (repCtl && match.account_owner) {
+    if (![...repCtl.options].some((o) => o.value === match.account_owner)) {
+      repCtl.add(new Option(match.account_owner, match.account_owner)); // ensure it's selectable
+    }
+    repCtl.value = match.account_owner;
+  }
   return true;
 }
 

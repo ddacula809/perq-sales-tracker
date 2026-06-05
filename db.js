@@ -102,6 +102,41 @@ async function reopenQ2_2026() {
   await pool.query(`UPDATE sales_periods SET status='open', closed_at=NULL WHERE period='Q2 2026'`);
 }
 
+// Reconcile Sales Rep / Account Owner names against the Salesforce Recon master so they
+// read exactly as written there (e.g. "Kirk" -> "Kirk Flatter"). Idempotent.
+//   A) Bookings: set sales_rep from the property's Account Owner (match Property ID).
+//   B) First-name -> full-name map (built from Recon) for anything else, in both tables.
+export async function reconcileOwnerNames() {
+  await pool.query(`
+    UPDATE bookings b
+    SET sales_rep = sub.account_owner
+    FROM (
+      SELECT DISTINCT ON (TRIM(property_id_18)) TRIM(property_id_18) AS pid, account_owner
+      FROM salesforce_recon
+      WHERE account_owner IS NOT NULL AND TRIM(account_owner) <> '' AND property_id_18 IS NOT NULL
+      ORDER BY TRIM(property_id_18)
+    ) sub
+    WHERE TRIM(b.property_id) = sub.pid
+      AND COALESCE(TRIM(b.sales_rep), '') <> sub.account_owner
+  `);
+  const { rows } = await pool.query(
+    `SELECT DISTINCT TRIM(account_owner) AS owner FROM salesforce_recon
+     WHERE account_owner IS NOT NULL AND TRIM(account_owner) <> ''`);
+  const map = new Map();
+  const ambiguous = new Set();
+  for (const r of rows) {
+    const full = r.owner;
+    const first = full.split(/\s+/)[0].toLowerCase();
+    if (map.has(first) && map.get(first) !== full) ambiguous.add(first);
+    else map.set(first, full);
+  }
+  for (const a of ambiguous) map.delete(a); // skip first names that map to more than one person
+  for (const [first, full] of map) {
+    await pool.query(`UPDATE bookings      SET sales_rep     = $1 WHERE lower(trim(sales_rep))     = $2`, [full, first]);
+    await pool.query(`UPDATE sales_support SET account_owner = $1 WHERE lower(trim(account_owner)) = $2`, [full, first]);
+  }
+}
+
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings (
@@ -176,6 +211,7 @@ export async function initDb() {
   await runOnce('fix_google_bookings_typo_v1', fixGoogleBookingsTypo);
   await runOnce('sales_periods_init_v1', initSalesPeriods);
   await runOnce('reopen_q2_2026_v1', reopenQ2_2026);
+  await runOnce('reconcile_owner_names_v1', reconcileOwnerNames);
   await ensureAdmin();
 }
 
