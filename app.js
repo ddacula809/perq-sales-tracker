@@ -1651,6 +1651,9 @@ function wireAuth() {
   $('#loginPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   $('#logoutBtn').onclick = logout;
 
+  // Forgot password -> reveal the "ask an admin" note (admin resets via Users panel).
+  $('#forgotLink').onclick = (e) => { e.preventDefault(); $('#forgotHelp').hidden = !$('#forgotHelp').hidden; };
+
   // User dropdown (username/role -> Change password / Log out).
   $('#userBtn').onclick = () => { const m = $('#userMenu'); m.hidden = !m.hidden; };
   document.addEventListener('click', (e) => { if (!e.target.closest('.user-wrap')) $('#userMenu').hidden = true; });
