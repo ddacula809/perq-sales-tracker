@@ -1702,7 +1702,7 @@ async function renderUsersList() {
 }
 
 function wireUsers() {
-  $('#usersBtn').onclick = openUsers;
+  $('#usersBtn').onclick = () => { $('#userMenu').hidden = true; openUsers(); };
   $('#usersClose').onclick = () => { $('#usersModal').hidden = true; };
   $('#usersModal').addEventListener('click', (e) => { if (e.target.id === 'usersModal') $('#usersModal').hidden = true; });
 
