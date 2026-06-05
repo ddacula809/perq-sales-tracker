@@ -38,6 +38,8 @@ const state = {
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   pendingBookings: [], // new-booking payloads awaiting confirmation
+  pendingShared: {},   // shared booking details for the confirm dialog
+  pendingOffsets: [],  // per-line License Transfer offset selections (null or {churnId, amount})
   notifications: [],   // billing notifications (e.g. GoLive changes)
 };
 
@@ -388,6 +390,7 @@ function renderSummary() {
       churnByMonth[m] = (churnByMonth[m] || 0) + a;
     };
     for (const r of state.rows.churn) {
+      if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
       addChurn(r.prorated_churn_month, r.prorated_churn_amount);
       addChurn(r.final_churn_month, r.final_churn_amount);
     }
@@ -671,6 +674,7 @@ function renderAll() {
   $('#churnUploadBtn').hidden = !canAddDelete();
   $('#reconcileBtn').hidden = !canAddDelete();
   $('#golivesBtn').hidden = !canAddDelete();
+  $('#offsetReviewBtn').hidden = !canAddDelete();
   $('#usersBtn').hidden = !isAdmin();
   $('#notifWrap').hidden = !canBilling;
   $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
@@ -1071,56 +1075,194 @@ async function submitEntries() {
   if (!payloads.length) { toast('Add at least one product.', true); return; }
   // Preview the computed values, then ask for confirmation before creating anything.
   try {
-    const { rows } = await api('/api/bookings/preview', { method: 'POST', body: JSON.stringify({ rows: payloads }) });
+    await api('/api/bookings/preview', { method: 'POST', body: JSON.stringify({ rows: payloads }) });
     state.pendingBookings = payloads;
-    openBookingConfirm(rows, shared);
+    state.pendingShared = shared;
+    state.pendingOffsets = payloads.map(() => null);
+    $('#confirmModal').hidden = false;
+    await renderConfirm();
   } catch (err) { toast(err.message, true); }
 }
 
-function openBookingConfirm(computed, shared) {
+// Churn quarter (its Prorated Churn Month) — the same-quarter basis for License Transfer offsets.
+function churnQuarterLabel(c) {
+  let m = String(c.prorated_churn_month || '').trim();
+  if (!m || m === '-') m = String(c.final_invoice_month || '').trim(); // end-of-month churns
+  if (!m || m === '-') return null;
+  const info = monthYearQuarter(m);
+  return info ? info.label : null;
+}
+// Churns eligible to offset: same PMC, same quarter, not already a Contraction.
+function eligibleChurns(pmc, quarterLabel) {
+  if (!pmc || !quarterLabel) return [];
+  const p = String(pmc).trim().toLowerCase();
+  return state.rows.churn.filter((c) =>
+    String(c.pmc_buying_center || '').trim().toLowerCase() === p
+    && String(c.classification || '') !== 'Contraction'
+    && churnQuarterLabel(c) === quarterLabel);
+}
+const churnDropAmt = (c) => Math.abs(Number(c && c.mrr) || 0); // monthly MRR that dropped
+
+// Renders the confirm dialog. Re-runs whenever an offset selection changes so the
+// computed Company Total / Commissionable reflect the License Transfer offset.
+async function renderConfirm() {
+  const shared = state.pendingShared || {};
+  const base = state.pendingBookings || [];
+  const offsets = state.pendingOffsets || [];
+  const qInfo = monthYearQuarter(`${shared.booking_month || ''} ${shared.booking_year || ''}`);
+  const qLabel = qInfo ? qInfo.label : null;
+  const elig = eligibleChurns(shared.pmc, qLabel);
+  // Effective payloads: apply each chosen offset as a License Transfer.
+  const eff = base.map((p, i) => offsets[i]
+    ? { ...p, pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: offsets[i].amount }
+    : p);
+  let computed;
+  try { ({ rows: computed } = await api('/api/bookings/preview', { method: 'POST', body: JSON.stringify({ rows: eff }) })); }
+  catch (err) { toast(err.message, true); return; }
+
   const m = fmtMoney;
   const sum = (k) => computed.reduce((a, r) => a + (Number(r[k]) || 0), 0);
   const period = `${shared.booking_month || ''} ${shared.booking_year || ''}`.trim();
   const prop = shared.property_name || shared.property_id || '—';
   const meta = `<strong>${escapeHtml(prop)}</strong>`
     + (period ? ` · ${escapeHtml(period)}` : '')
-    + (shared.sales_rep ? ` · ${escapeHtml(shared.sales_rep)}` : '')
-    + (shared.ctam_type ? ` · ${escapeHtml(shared.ctam_type)}` : '')
-    + (shared.pilot_type ? ` · ${escapeHtml(shared.pilot_type)}` : '');
-  const body = computed.map((r) =>
-    `<tr><td>${escapeHtml(r.product || '—')}</td><td class="num">${m(r.mrr)}</td>`
-    + `<td class="num">${m(r.company_total_booking)}</td><td class="num">${m(r.commissionable_bookings)}</td>`
-    + `<td class="num">${m(r.one_time_fee)}</td></tr>`).join('');
-  $('#confirmSummary').innerHTML =
-    `<p class="confirm-meta">${meta}</p>`
+    + (shared.sales_rep ? ` · ${escapeHtml(shared.sales_rep)}` : '');
+  const body = computed.map((r, i) =>
+    `<tr><td>${escapeHtml(r.product || '—')}${offsets[i] ? ' <span class="lt-badge">License Transfer</span>' : ''}</td>`
+    + `<td class="num">${m(r.mrr)}</td><td class="num">${m(r.company_total_booking)}</td>`
+    + `<td class="num">${m(r.commissionable_bookings)}</td><td class="num">${m(r.one_time_fee)}</td></tr>`).join('');
+  let html = `<p class="confirm-meta">${meta}</p>`
     + '<table class="confirm-table"><thead><tr><th>Product</th><th class="num">MRR</th>'
     + '<th class="num">Company Total Booking</th><th class="num">Commissionable</th><th class="num">One-Time Fee</th></tr></thead>'
     + `<tbody>${body}</tbody>`
     + `<tfoot><tr><th>Total (${computed.length})</th><th class="num">${m(sum('mrr'))}</th>`
     + `<th class="num">${m(sum('company_total_booking'))}</th><th class="num">${m(sum('commissionable_bookings'))}</th>`
     + `<th class="num">${m(sum('one_time_fee'))}</th></tr></tfoot></table>`;
-  $('#confirmModal').hidden = false;
+
+  // Offset section — a churn dropped this quarter under this PMC that can offset a line.
+  if (elig.length) {
+    const lines = base.map((p, i) => {
+      const usedByOthers = new Set(offsets.map((o, j) => (o && j !== i) ? String(o.churnId) : null).filter(Boolean));
+      const opts = elig.filter((c) => !usedByOthers.has(String(c.id)));
+      const sel = offsets[i] ? String(offsets[i].churnId) : '';
+      const optionHtml = ['<option value="">No offset</option>'].concat(opts.map((c) =>
+        `<option value="${c.id}"${sel === String(c.id) ? ' selected' : ''}>${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo</option>`)).join('');
+      const amtHtml = offsets[i]
+        ? `<label class="offset-amt-l">Offset <input type="text" class="offset-amt" data-offset-amt="${i}" value="${escapeAttr(m(offsets[i].amount))}" /></label>` : '';
+      return `<div class="offset-line"><span class="offset-prod">${escapeHtml(p.product || `Line ${i + 1}`)}</span>`
+        + `<select class="offset-sel" data-offset-line="${i}">${optionHtml}</select>${amtHtml}</div>`;
+    }).join('');
+    html += `<div class="offset-box"><div class="offset-title">License Transfer offset available — ${escapeHtml(shared.pmc || '')} · ${escapeHtml(qLabel || '')}</div>`
+      + lines
+      + '<p class="offset-note">Selecting a churn tags that line as a License Transfer (offset applied) and reclassifies the churn as a Contraction.</p></div>';
+  }
+  $('#confirmSummary').innerHTML = html;
 }
 
 async function confirmBookings() {
-  const payloads = state.pendingBookings || [];
-  if (!payloads.length) { $('#confirmModal').hidden = true; return; }
+  const base = state.pendingBookings || [];
+  const offsets = state.pendingOffsets || [];
+  if (!base.length) { $('#confirmModal').hidden = true; return; }
   try {
     let added = 0;
-    for (const payload of payloads) {
+    let offsetCount = 0;
+    for (let i = 0; i < base.length; i++) {
+      const off = offsets[i];
+      const payload = off
+        ? { ...base[i], pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: off.amount }
+        : base[i];
       const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
-      state.rows.bookings.push(row);
+      if (off) {
+        await api('/api/bookings/apply-offset', { method: 'POST', body: JSON.stringify({ bookingId: row.id, churnId: off.churnId, offsetAmount: off.amount }) });
+        offsetCount += 1;
+      }
       added += 1;
     }
-    const last = payloads[payloads.length - 1];
+    // Reload so the offset bookings and the contracted churns are reflected everywhere.
+    state.rows.bookings = await api('/api/bookings');
+    state.rows.churn = await api('/api/churn');
+    const last = base[base.length - 1];
     if (last.booking_month) entryDefaults.booking_month = last.booking_month;
     if (last.booking_year) entryDefaults.booking_year = last.booking_year;
-    state.pendingBookings = [];
+    state.pendingBookings = []; state.pendingOffsets = [];
     $('#confirmModal').hidden = true;
     $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
-    toast(`Added ${added} line item${added === 1 ? '' : 's'}`);
+    toast(`Added ${added} line item${added === 1 ? '' : 's'}${offsetCount ? `, ${offsetCount} offset` : ''}`);
     resetEntryView();
   } catch (err) { toast(err.message, true); }
+}
+
+// ---------- License Transfer offset review (existing bookings) ----------
+// Bookings (not yet offset) that have an eligible churn in the same quarter + PMC.
+function offsetCandidates() {
+  const out = [];
+  for (const b of state.rows.bookings) {
+    if (b.offset_churn_id) continue; // already offset
+    const bq = monthYearQuarter(`${b.booking_month || ''} ${b.booking_year || ''}`);
+    if (!bq) continue;
+    const churns = eligibleChurns(b.pmc, bq.label);
+    if (churns.length) out.push({ booking: b, churns });
+  }
+  return out;
+}
+function renderOffsetReview() {
+  const m = fmtMoney;
+  const cands = offsetCandidates();
+  if (!cands.length) {
+    $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC + quarter) available to offset.</p>';
+    return;
+  }
+  const rows = cands.map(({ booking: b, churns }) => {
+    const opts = churns.map((c) =>
+      `<option value="${c.id}" data-mrr="${Number(c.mrr) || 0}">${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo</option>`).join('');
+    const period = `${b.booking_month || ''} ${b.booking_year || ''}`.trim();
+    const lineMrr = parseMoney(b.mrr) || 0;
+    const firstMrr = Number(churns[0] && churns[0].mrr) || 0;
+    const def = Math.min(lineMrr || firstMrr, firstMrr || lineMrr);
+    return `<tr data-booking="${b.id}">
+      <td>${escapeHtml(b.property_name || b.property_id || '—')}<div class="muted-sm">${escapeHtml(b.pmc || '')} · ${escapeHtml(period)}</div></td>
+      <td>${escapeHtml(b.product || '—')}</td>
+      <td class="num">${m(b.mrr)}</td>
+      <td><select class="offset-sel" data-churn-sel>${opts}</select></td>
+      <td class="num"><input type="text" class="offset-amt" data-amt value="${escapeAttr(m(def))}" /></td>
+      <td><button type="button" class="btn solid" data-apply-offset>Apply</button></td>
+    </tr>`;
+  }).join('');
+  $('#offsetBody').innerHTML = `<table class="recon-table"><thead><tr>`
+    + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th class="num">Offset</th><th></th>'
+    + `</tr></thead><tbody>${rows}</tbody></table>`;
+}
+function wireOffsetReview() {
+  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; $('#offsetModal').hidden = false; renderOffsetReview(); };
+  $('#offsetClose').onclick = () => { $('#offsetModal').hidden = true; };
+  $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
+  // Changing the churn re-suggests the offset = min(booking MRR, churned MRR).
+  $('#offsetBody').addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-churn-sel]');
+    if (!sel) return;
+    const tr = sel.closest('[data-booking]');
+    const b = state.rows.bookings.find((x) => String(x.id) === tr.dataset.booking);
+    const churnMrr = Number(sel.selectedOptions[0] && sel.selectedOptions[0].dataset.mrr) || 0;
+    const lineMrr = parseMoney(b && b.mrr) || 0;
+    const amtInput = tr.querySelector('[data-amt]');
+    if (amtInput) amtInput.value = fmtMoney(Math.min(lineMrr || churnMrr, churnMrr || lineMrr));
+  });
+  $('#offsetBody').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-apply-offset]');
+    if (!btn) return;
+    const tr = btn.closest('[data-booking]');
+    const bookingId = Number(tr.dataset.booking);
+    const churnId = Number(tr.querySelector('[data-churn-sel]').value);
+    const offsetAmount = parseMoney(tr.querySelector('[data-amt]').value);
+    try {
+      await api('/api/bookings/apply-offset', { method: 'POST', body: JSON.stringify({ bookingId, churnId, offsetAmount }) });
+      state.rows.bookings = await api('/api/bookings');
+      state.rows.churn = await api('/api/churn');
+      renderOffsetReview();
+      renderAll();
+      toast('Offset applied');
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 function wireEntry() {
@@ -1131,6 +1273,28 @@ function wireEntry() {
   $('#confirmCancel').onclick = () => { $('#confirmModal').hidden = true; };
   $('#confirmClose').onclick = () => { $('#confirmModal').hidden = true; };
   $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confirmModal') $('#confirmModal').hidden = true; });
+  // Offset controls inside the confirm dialog (re-renders to show updated computed values).
+  $('#confirmSummary').addEventListener('change', (e) => {
+    const selEl = e.target.closest('[data-offset-line]');
+    if (selEl) {
+      const i = Number(selEl.dataset.offsetLine);
+      const churnId = selEl.value;
+      if (!churnId) { state.pendingOffsets[i] = null; }
+      else {
+        const c = state.rows.churn.find((x) => String(x.id) === String(churnId));
+        const lineMrr = parseMoney(state.pendingBookings[i].mrr) || 0;
+        const churnMrr = Number(c && c.mrr) || 0;
+        state.pendingOffsets[i] = { churnId: Number(churnId), amount: Math.min(lineMrr || churnMrr, churnMrr || lineMrr) };
+      }
+      renderConfirm();
+      return;
+    }
+    const amtEl = e.target.closest('[data-offset-amt]');
+    if (amtEl) {
+      const i = Number(amtEl.dataset.offsetAmt);
+      if (state.pendingOffsets[i]) { state.pendingOffsets[i].amount = parseMoney(amtEl.value); renderConfirm(); }
+    }
+  });
   // Shared-field changes: CTAM Type toggles product Offset; Pilot/CTAM gates Pilot Type.
   $('#sharedFields').addEventListener('change', (e) => {
     const key = e.target.dataset && e.target.dataset.key;
@@ -2138,7 +2302,7 @@ function gotoRow(tab, id) {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview();
   applyZoom();
   if (state.token) {
     try {

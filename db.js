@@ -206,6 +206,8 @@ export async function initDb() {
   await ensureColumns('churn', CHURN_FIELDS);
   await ensureColumns('sales_support', SALES_SUPPORT_FIELDS);
   await ensureColumns('salesforce_recon', SALESFORCE_RECON_FIELDS);
+  // Link from a License Transfer booking to the churn it offset (kept out of the schema/grid).
+  await pool.query('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offset_churn_id integer');
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
   await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);
@@ -213,6 +215,9 @@ export async function initDb() {
   await runOnce('sales_periods_init_v1', initSalesPeriods);
   await runOnce('reopen_q2_2026_v1', reopenQ2_2026);
   await runOnce('reconcile_owner_names_v1', reconcileOwnerNames);
+  await runOnce('churn_classification_default_v1', async () => {
+    await pool.query(`UPDATE churn SET classification='Churn' WHERE classification IS NULL OR classification=''`);
+  });
   await ensureAdmin();
 }
 

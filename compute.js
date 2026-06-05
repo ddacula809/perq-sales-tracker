@@ -152,4 +152,15 @@ export function computeChurn(r) {
   };
 }
 
+// Quarter helpers for the License Transfer offset rule (same-quarter matching).
+export function quarterFromMonthName(monthName, year) {
+  const i = MONTHS.indexOf(String(monthName || '').trim());
+  if (i < 0 || year === null || year === undefined || year === '') return null;
+  return { q: Math.floor(i / 3) + 1, year: Number(year) };
+}
+export function quarterFromMonthYear(my) {
+  const [m, y] = String(my || '').trim().split(' ');
+  return quarterFromMonthName(m, y);
+}
+
 export { monthYear, num };

@@ -10,7 +10,7 @@ import {
   getPeriod, closePeriod, reconcileOwnerNames,
   listNotifications, createNotification, dismissNotification,
 } from './db.js';
-import { computeBooking, computeChurn } from './compute.js';
+import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
@@ -153,6 +153,55 @@ function crud(table, computeFn) {
 }
 crud('bookings', computeBooking);
 crud('churn', computeChurn);
+
+// ---- License Transfer offset: a booking offsets a same-PMC, same-quarter churn ----
+// Tags the booking as a License Transfer with the offset, reclassifies the churn as a
+// Contraction (excluded from churn totals), and stamps cross-reference notes on both.
+const norm = (v) => String(v ?? '').trim().toLowerCase();
+const appendNote = (existing, addition) => {
+  const cur = String(existing || '').trim();
+  if (!addition || cur.includes(addition)) return cur;
+  return cur ? `${cur} | ${addition}` : addition;
+};
+app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (req, res, next) => {
+  try {
+    const { bookingId, churnId, offsetAmount } = req.body || {};
+    const booking = (await pool.query('SELECT * FROM bookings WHERE id=$1', [Number(bookingId)])).rows[0];
+    const churn = (await pool.query('SELECT * FROM churn WHERE id=$1', [Number(churnId)])).rows[0];
+    if (!booking || !churn) return res.status(404).json({ error: 'Booking or churn not found.' });
+    if (norm(booking.pmc) !== norm(churn.pmc_buying_center)) {
+      return res.status(400).json({ error: 'The booking and churn are under different PMCs.' });
+    }
+    if (String(churn.classification || '') === 'Contraction') {
+      return res.status(400).json({ error: 'That churn has already been used to offset a booking.' });
+    }
+    const cComp = computeChurn(churn);
+    const cMonth = (cComp.prorated_churn_month && cComp.prorated_churn_month !== '-')
+      ? cComp.prorated_churn_month : cComp.final_invoice_month;
+    const cQ = quarterFromMonthYear(cMonth);
+    const bQ = quarterFromMonthName(booking.booking_month, booking.booking_year);
+    if (!cQ || !bQ || cQ.q !== bQ.q || cQ.year !== bQ.year) {
+      return res.status(400).json({ error: 'The churn and the booking are not in the same quarter.' });
+    }
+    const amt = Number(String(offsetAmount ?? '').replace(/[$,]/g, ''));
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'Enter a valid offset amount.' });
+
+    const churnProp = churn.property || churn.pmc_buying_center || 'churned property';
+    const bookingProp = booking.property_name || booking.property_id || 'booking';
+    const bNote = appendNote(booking.notes, `Offset by ${churnProp} (License Transfer)`);
+    await pool.query(
+      `UPDATE bookings SET pilot_or_ctam='CTAM', ctam_type='License Transfer',
+         offset_amount=$1, offset_churn_id=$2, notes=$3, updated_at=now() WHERE id=$4`,
+      [amt, churn.id, bNote, booking.id]);
+    const cNote = appendNote(churn.notes,
+      `Used to offset ${bookingProp} (${`${booking.booking_month || ''} ${booking.booking_year || ''}`.trim()})`);
+    await updateRow('churn', churn.id, { classification: 'Contraction', notes: cNote });
+
+    const b2 = (await pool.query('SELECT * FROM bookings WHERE id=$1', [booking.id])).rows[0];
+    const c2 = (await pool.query('SELECT * FROM churn WHERE id=$1', [churn.id])).rows[0];
+    res.json({ booking: withComputed(b2, computeBooking), churn: withComputed(c2, computeChurn) });
+  } catch (e) { next(e); }
+});
 
 // Preview booking rows (compute formula columns) without saving — for the confirm dialog.
 app.post('/api/bookings/preview', requireRole('admin', 'standard'), (req, res) => {

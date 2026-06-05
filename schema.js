@@ -70,6 +70,9 @@ export const CHURN_FIELDS = [
   { key: 'template_deleted',         label: 'Template Deleted',      excel: 19, type: 'text' },
   { key: 'completed',                label: 'Completed',             excel: 20, type: 'select', options: ['', 'CM', 'Invoice', 'No Action needed'] },
   { key: 'notes',                    label: 'Notes',                 excel: 21, type: 'text' },
+  // Churn vs Contraction. A churn used to offset a License Transfer booking is reclassified
+  // as 'Contraction' and excluded from churn totals. Set via the offset flow.
+  { key: 'classification',           label: 'Classification',        excel: 22, type: 'select', options: ['', 'Churn', 'Contraction'] },
 ];
 
 export const CHURN_COMPUTED = [

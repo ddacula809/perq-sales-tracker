@@ -43,6 +43,7 @@
             Upload GoLives .xlsx
             <input type="file" id="golivesFile" accept=".xlsx" hidden />
           </label>
+          <button type="button" class="more-item" id="offsetReviewBtn" hidden>License Transfer offsets</button>
         </div>
       </div>
       <button class="btn solid" id="addRowBtn">+ Add row</button>
@@ -167,6 +168,17 @@
 
   <div class="toast" id="toast"></div>
   <div class="cell-tip" id="cellTip" hidden></div>
+
+  <div class="modal" id="offsetModal" hidden>
+    <div class="modal-card reconcile-card">
+      <div class="entry-head">
+        <h2>License Transfer offsets</h2>
+        <button type="button" class="entry-close" id="offsetClose" title="Close">✕</button>
+      </div>
+      <p class="recon-note">Bookings that have a churn in the same quarter and PMC available to offset. Applying tags the booking as a License Transfer (offset applied) and reclassifies the churn as a Contraction. Only churns within the same quarter as the booking are offered.</p>
+      <div id="offsetBody"></div>
+    </div>
+  </div>
 
   <div class="modal" id="reconcileModal" hidden>
     <div class="modal-card reconcile-card">
