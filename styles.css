@@ -359,6 +359,12 @@ tr.ss-group td {
 .modal-card .btn { width: 100%; justify-content: center; }
 .err { color: var(--neg); font-size: 12px; min-height: 14px; }
 
+/* Result dialog */
+#resultBody { font-size: 13px; }
+.result-list { margin: 0 0 4px; padding-left: 18px; line-height: 1.7; }
+.result-list .muted { list-style: none; margin-left: -18px; color: var(--ink-soft); font-size: 12px; }
+#resultModal .modal-card .btn { width: auto; }
+
 /* New booking confirm dialog */
 .confirm-card { width: 720px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }
 .confirm-card .btn { width: auto; }

@@ -64,6 +64,19 @@ function canEditField(f) {
   return false; // viewer (or not logged in)
 }
 
+// A centered result dialog that stays open until dismissed.
+function showResult(title, bodyHtml) {
+  $('#resultTitle').textContent = title;
+  $('#resultBody').innerHTML = bodyHtml;
+  $('#resultModal').hidden = false;
+}
+function wireResult() {
+  const close = () => { $('#resultModal').hidden = true; };
+  $('#resultClose').onclick = close;
+  $('#resultOk').onclick = close;
+  $('#resultModal').addEventListener('click', (e) => { if (e.target.id === 'resultModal') close(); });
+}
+
 function toast(msg, isErr = false) {
   const t = $('#toast');
   t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
@@ -756,7 +769,14 @@ function wireActions() {
       state.rows.bookings = await api('/api/bookings');
       if (isAdmin() || role() === 'billing') state.notifications = await api('/api/notifications');
       renderAll();
-      toast(`GoLives — set ${data.updated}, changed ${data.changed}, unchanged ${data.unchanged}, not found ${data.notFound}`);
+      showResult('GoLives upload complete',
+        '<ul class="result-list">'
+        + `<li><strong>${data.updated}</strong> GoLive date(s) set (were blank)</li>`
+        + `<li><strong>${data.changed}</strong> changed (billing notified)</li>`
+        + `<li><strong>${data.unchanged}</strong> unchanged (same date)</li>`
+        + `<li><strong>${data.notFound}</strong> not found in Bookings (Property ID + Product + MRR)</li>`
+        + `<li class="muted">${data.total} row(s) in the file</li>`
+        + '</ul>');
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };
@@ -1767,7 +1787,7 @@ function gotoBooking(id) {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult();
   applyZoom();
   if (state.token) {
     try {
