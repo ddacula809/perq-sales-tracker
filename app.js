@@ -948,6 +948,23 @@ function updatePilotCtam() {
   setProductOffsets(); // CTAM Type may have changed → refresh product Offset visibility
 }
 
+// Auto-fill Property Name + PMC from the Salesforce Recon master when the entered
+// Property ID matches a Property ID 18 Digit there. Returns true if a match was applied.
+function autofillFromSfRecon() {
+  const pidCtl = $('#sharedFields [data-key="property_id"]');
+  if (!pidCtl) return false;
+  const pid = String(pidCtl.value || '').trim().toLowerCase();
+  if (!pid) return false;
+  const match = (state.rows.salesforce_recon || []).find(
+    (r) => String(r.property_id_18 || '').trim().toLowerCase() === pid);
+  if (!match) return false;
+  const nameCtl = $('#sharedFields [data-key="property_name"]');
+  const pmcCtl = $('#sharedFields [data-key="pmc"]');
+  if (nameCtl) nameCtl.value = match.property_name || '';
+  if (pmcCtl) pmcCtl.value = match.account_name || '';
+  return true;
+}
+
 function productLineHtml() {
   const fields = PRODUCT_KEYS.map(fieldDef).filter(Boolean).map(entryFieldHtml).join('');
   return `<div class="product-line" data-product>${fields}` +
@@ -1072,6 +1089,11 @@ function wireEntry() {
     const key = e.target.dataset && e.target.dataset.key;
     if (key === 'ctam_type') setProductOffsets();
     if (key === 'pilot_or_ctam') updatePilotCtam();
+    if (key === 'property_id' && autofillFromSfRecon()) toast('Property Name & PMC filled from Salesforce Recon');
+  });
+  // Property ID: auto-fill Property Name + PMC as soon as a matching ID is entered/pasted.
+  $('#sharedFields').addEventListener('input', (e) => {
+    if (e.target.dataset && e.target.dataset.key === 'property_id') autofillFromSfRecon();
   });
   // Remove a product line (keep at least one).
   $('#productLines').addEventListener('click', (e) => {
