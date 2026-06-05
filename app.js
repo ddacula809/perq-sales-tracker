@@ -526,10 +526,19 @@ function wireBilling() {
     if (!ctl) return;
     const tr = ctl.closest('tr');
     if (!tr || !tr.dataset.id) return;
+    // Remember where we were so the re-render doesn't jump back to the top.
+    const view = $('#billingView');
+    const detail = $('#billingInner .bd-detail');
+    const outerTop = view ? view.scrollTop : 0;
+    const innerTop = detail ? detail.scrollTop : 0;
     try {
       const updated = await api(`/api/bookings/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ [ctl.dataset.key]: ctl.value }) });
       updateRowInState('bookings', updated);
       renderBillingDashboard();
+      // Restore scroll positions after the DOM is rebuilt.
+      if (view) view.scrollTop = outerTop;
+      const newDetail = $('#billingInner .bd-detail');
+      if (newDetail) newDetail.scrollTop = innerTop;
       toast('Saved');
     } catch (err) { toast(err.message, true); }
   });
