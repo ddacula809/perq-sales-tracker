@@ -90,6 +90,12 @@ async function fixLeadCaptureTypo() {
   await pool.query(`UPDATE churn    SET product = 'AI Lead Capture Agent' WHERE product = 'AI Lead Captur Agent'`);
 }
 
+// Fix the product-name typo "AI Google Booking Agent" -> "AI Google Bookings Agent" in existing data.
+async function fixGoogleBookingsTypo() {
+  await pool.query(`UPDATE bookings SET product = 'AI Google Bookings Agent' WHERE product = 'AI Google Booking Agent'`);
+  await pool.query(`UPDATE churn    SET product = 'AI Google Bookings Agent' WHERE product = 'AI Google Booking Agent'`);
+}
+
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookings (
@@ -152,6 +158,7 @@ export async function initDb() {
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
   await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);
+  await runOnce('fix_google_bookings_typo_v1', fixGoogleBookingsTypo);
   await runOnce('sales_periods_init_v1', initSalesPeriods);
   await ensureAdmin();
 }

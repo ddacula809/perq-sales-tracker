@@ -15,7 +15,7 @@ export const BOOKING_FIELDS = [
   { key: 'pilot_or_ctam',                   label: 'Pilot or CTAM',          excel: 6,  type: 'select', options: ['', 'Pilot', 'CTAM'] },
   { key: 'pilot_type',                      label: 'Pilot Type',             excel: 7,  type: 'select', options: ['', 'New - Paid', 'New - Free', 'Conversion', 'Pilot Expansion', 'Second Signature'] },
   { key: 'ctam_type',                       label: 'CTAM Type',              excel: 8,  type: 'select', options: ['', 'Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
-  { key: 'product',                         label: 'Product',                excel: 10, type: 'select', options: ['AI Lead Capture Agent', 'Pulse Data Hub', 'AI Leasing Agent', 'Performance Reporting Agent', 'Property Website', 'Corporate Website', 'Google Search Management', 'AI Google Booking Agent', 'AI Google Posts and Products', 'SEO'] },
+  { key: 'product',                         label: 'Product',                excel: 10, type: 'select', options: ['AI Lead Capture Agent', 'Pulse Data Hub', 'AI Leasing Agent', 'Performance Reporting Agent', 'Property Website', 'Corporate Website', 'Google Search Management', 'AI Google Bookings Agent', 'AI Google Posts and Products', 'SEO'] },
   { key: 'mql',                             label: 'MQL',                    excel: 12, type: 'select', options: ['', 'YES', 'NO'] },
   { key: 'rerate_paid_months',              label: 'Re-rate Paid Months',    excel: 13, type: 'number' },
   { key: 'rerate_old_mrr',                  label: 'Re-rate Old MRR',        excel: 14, type: 'number' },
