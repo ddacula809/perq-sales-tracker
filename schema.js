@@ -109,8 +109,10 @@ export const BOOKING_BILLING_KEYS = [
 export const CHURN_BILLING_KEYS = ['template_deleted', 'completed', 'notes'];
 
 // User roles. admin: full access + user management. standard: edit all data.
+// sales_admin: view Bookings, full Sales Support (+ open/close quarters), no billing/recon.
+// sales: like sales_admin but scoped to one Account Owner (tagged via users.account_owner).
 // billing: edit only the billing columns. viewer: read-only.
-export const USER_ROLES = ['admin', 'standard', 'billing', 'viewer'];
+export const USER_ROLES = ['admin', 'standard', 'sales_admin', 'sales', 'billing', 'viewer'];
 
 // BPR product categories (see compute.js bprCategory).
 export const BPR_CATEGORIES = ['Software', 'Pulse', 'Website', 'Digital Advertising', 'Tools for Google'];

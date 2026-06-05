@@ -180,6 +180,7 @@ export async function initDb() {
     );
   `);
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username))');
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS account_owner TEXT'); // tag for 'sales' role
   await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications (
       id SERIAL PRIMARY KEY,
@@ -295,35 +296,36 @@ export async function getUserByUsername(username) {
   return rows[0];
 }
 export async function listUsers() {
-  const { rows } = await pool.query('SELECT id, username, role, created_at FROM users ORDER BY username ASC');
+  const { rows } = await pool.query('SELECT id, username, role, account_owner, created_at FROM users ORDER BY username ASC');
   return rows;
 }
-export async function createUser({ username, password, role }) {
+export async function createUser({ username, password, role, account_owner }) {
   const { rows } = await pool.query(
-    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role, created_at',
-    [username, hashPassword(password), role]
+    'INSERT INTO users (username, password_hash, role, account_owner) VALUES ($1, $2, $3, $4) RETURNING id, username, role, account_owner, created_at',
+    [username, hashPassword(password), role, account_owner || null]
   );
   return rows[0];
 }
-export async function updateUser(id, { role, password }) {
+export async function updateUser(id, { role, password, account_owner }) {
   const sets = [];
   const vals = [];
   if (role) { vals.push(role); sets.push(`role=$${vals.length}`); }
   if (password) { vals.push(hashPassword(password)); sets.push(`password_hash=$${vals.length}`); }
+  if (account_owner !== undefined) { vals.push(account_owner || null); sets.push(`account_owner=$${vals.length}`); }
   if (!sets.length) {
-    const { rows } = await pool.query('SELECT id, username, role, created_at FROM users WHERE id=$1', [id]);
+    const { rows } = await pool.query('SELECT id, username, role, account_owner, created_at FROM users WHERE id=$1', [id]);
     return rows[0];
   }
   vals.push(id);
   const { rows } = await pool.query(
-    `UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING id, username, role, created_at`,
+    `UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING id, username, role, account_owner, created_at`,
     vals
   );
   return rows[0];
 }
 export async function deleteUser(id) { await pool.query('DELETE FROM users WHERE id=$1', [id]); }
 export async function getUserById(id) {
-  const { rows } = await pool.query('SELECT id, username, role, created_at FROM users WHERE id=$1', [id]);
+  const { rows } = await pool.query('SELECT id, username, role, account_owner, created_at FROM users WHERE id=$1', [id]);
   return rows[0];
 }
 export async function countAdmins() {

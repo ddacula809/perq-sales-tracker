@@ -58,13 +58,18 @@ function escapeHtml(v) {
 // ---------- Roles / permissions (UX mirror of server enforcement) ----------
 function role() { return state.user ? state.user.role : null; }
 function isAdmin() { return role() === 'admin'; }
-function canAddDelete() { return role() === 'admin' || role() === 'standard'; }
+function isSales() { return role() === 'sales'; }                 // salesperson tagged to one owner
+function salesOwner() { return state.user ? (state.user.account_owner || '') : ''; }
+function isSalesRole() { return role() === 'sales_admin' || role() === 'sales'; }
+function canAddDelete() { return role() === 'admin' || role() === 'standard'; } // bookings/churn + imports
 function canImport() { return role() === 'admin'; }
+function canEditSalesSupport() { return ['admin', 'standard', 'sales_admin', 'sales'].includes(role()); }
+function canManageQuarters() { return ['admin', 'sales_admin', 'sales'].includes(role()); }
 function canEditField(f) {
   const r = role();
   if (r === 'admin' || r === 'standard') return true;
   if (r === 'billing') return isBilling(f.key);
-  return false; // viewer (or not logged in)
+  return false; // sales_admin, sales, viewer -> read-only on Bookings/Churn
 }
 
 // A centered result dialog that stays open until dismissed.
@@ -618,7 +623,10 @@ async function loadAll() {
   state.notifications = (isAdmin() || role() === 'billing') ? await api('/api/notifications') : [];
   // Salesforce Recon Data (admin-only tab) + its Account Name list for the Sales Support PMC dropdown.
   state.rows.salesforce_recon = isAdmin() ? await api('/api/salesforce_recon') : [];
-  state.sfPmcs = (isAdmin() || role() === 'standard') ? await api('/api/salesforce_recon/pmcs') : [];
+  state.sfPmcs = ['admin', 'standard', 'sales_admin', 'sales'].includes(role())
+    ? await api('/api/salesforce_recon/pmcs') : [];
+  // A tagged salesperson's Sales Support view defaults (and locks) to their own Account Owner.
+  if (isSales() && salesOwner()) state.ssFilters.owner = salesOwner();
   renderAll();
   $('#status').textContent =
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
@@ -635,6 +643,9 @@ function renderAll() {
   // Salesforce Recon Data is admin-only.
   document.querySelector('[data-tab="sfrecon"]').hidden = !isAdmin();
   if (state.tab === 'sfrecon' && !isAdmin()) state.tab = 'dashboard';
+  // Sales roles don't deal with churn — hide the Churn Tracker for them.
+  document.querySelector('[data-tab="churn"]').hidden = isSalesRole();
+  if (state.tab === 'churn' && isSalesRole()) state.tab = 'dashboard';
 
   const isEntry = state.tab === 'newbooking';
   const isSales = state.tab === 'salessupport';
@@ -1140,7 +1151,7 @@ const SS_MONEY = new Set(['q2_target', 'apr_target', 'may_target', 'jun_target',
   'm1_actual', 'm2_actual', 'm3_actual', 'q_actual', 'worst', 'accurate', 'best']);
 
 function viewedPeriodObj() { return state.salesPeriods.find((p) => p.period === state.salesPeriod) || null; }
-function ssEditable() { const p = viewedPeriodObj(); return !!p && p.status === 'open' && canAddDelete(); }
+function ssEditable() { const p = viewedPeriodObj(); return !!p && p.status === 'open' && canEditSalesSupport(); }
 
 // Columns for the viewed quarter: [key, label]. Labels reflect the quarter's months/year.
 function ssColumns() {
@@ -1197,6 +1208,10 @@ function ssApplyFreeze() {
 // PMC options: Salesforce Recon Account Names + existing PMCs (bookings + sales support),
 // plus an "add new" choice.
 function ssPmcList() {
+  // A tagged salesperson only sees PMCs under their Account Owner (server-scoped sfPmcs).
+  if (isSales()) {
+    return [...new Set(state.sfPmcs.map((n) => String(n).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }
   const set = new Set();
   // Salesforce Recon Account Names: from the dedicated PMC endpoint (standard users)
   // and directly from the loaded recon rows (admins always have these in memory).
@@ -1301,6 +1316,8 @@ function populateSsFilters() {
   $('#ssFilterOwner').innerHTML = ssFilterOptionsHtml(owners, state.ssFilters.owner);
   $('#ssFilterProduct').innerHTML = ssFilterOptionsHtml(products, state.ssFilters.product);
   $('#ssFilterSection').innerHTML = ssFilterOptionsHtml(sections, state.ssFilters.section);
+  // A tagged salesperson is locked to their own Account Owner.
+  $('#ssFilterOwner').disabled = isSales();
 }
 
 function renderSalesSupport() {
@@ -1313,10 +1330,10 @@ function renderSalesSupport() {
   pill.textContent = viewed ? (viewed.status === 'open' ? 'Open' : 'Archived') : '';
   pill.style.display = viewed ? '' : 'none';
   $('#ssAddRow').style.display = ssEditable() ? '' : 'none';
-  $('#ssCloseQuarter').hidden = !(isAdmin() && viewed && viewed.status === 'open');
+  $('#ssCloseQuarter').hidden = !(canManageQuarters() && viewed && viewed.status === 'open');
   // Open New Quarter only applies on the most recent quarter (it creates the next one).
   // If a later quarter already exists, disable it so you can't open ahead from an older quarter.
-  $('#ssOpenQuarter').hidden = !isAdmin();
+  $('#ssOpenQuarter').hidden = !canManageQuarters();
   const latest = periods.length ? periods[periods.length - 1] : null; // periods are oldest→newest
   const onLatest = !!(viewed && latest && viewed.period === latest.period);
   $('#ssOpenQuarter').disabled = !onLatest;
@@ -1380,7 +1397,10 @@ function renderSalesSupport() {
 function ssFormFieldHtml(f) {
   const label = ssLabels()[f.key] || f.label;
   let control;
-  if (f.key === 'pmc') {
+  if (f.key === 'account_owner' && isSales()) {
+    // A tagged salesperson can only file rows under their own name (locked).
+    control = `<input type="text" data-ss-key="account_owner" value="${escapeAttr(salesOwner())}" disabled />`;
+  } else if (f.key === 'pmc') {
     // Type-to-search PMC / Account Name (suggestions from Salesforce Recon + existing PMCs).
     // Free text is allowed, so a brand-new PMC can simply be typed in.
     const opts = ssPmcList().map((p) => `<option value="${escapeAttr(p)}"></option>`).join('');
@@ -1888,7 +1908,19 @@ async function changePassword() {
 }
 
 // ---------- Users admin panel ----------
-const ROLE_LABELS = { admin: 'Admin', standard: 'Standard', billing: 'Billing', viewer: 'Viewer' };
+const ROLE_LABELS = { admin: 'Admin', standard: 'Standard', sales_admin: 'Sales Admin', sales: 'Sales', billing: 'Billing', viewer: 'Viewer' };
+
+// Distinct Account Owner full names from the loaded Salesforce Recon data (admin has it).
+function reconOwnerList() {
+  return [...new Set((state.rows.salesforce_recon || [])
+    .map((r) => String(r.account_owner ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+function ownerOptionsHtml(current) {
+  const cur = current || '';
+  return ['<option value="">— pick Account Owner —</option>']
+    .concat(reconOwnerList().map((o) => `<option value="${escapeAttr(o)}"${o === cur ? ' selected' : ''}>${escapeHtml(o)}</option>`))
+    .join('');
+}
 
 async function openUsers() { $('#usersModal').hidden = false; await renderUsersList(); }
 
@@ -1898,9 +1930,12 @@ async function renderUsersList() {
     $('#usersList').innerHTML = users.map((u) => {
       const opts = Object.keys(ROLE_LABELS).map((r) =>
         `<option value="${r}"${r === u.role ? ' selected' : ''}>${ROLE_LABELS[r]}</option>`).join('');
+      const ownerSel = u.role === 'sales'
+        ? `<select data-owner-for="${u.id}" title="Tagged Account Owner">${ownerOptionsHtml(u.account_owner)}</select>` : '';
       return `<div class="user-row">
         <span class="user-name">${escapeHtml(u.username)}</span>
         <select data-role-for="${u.id}">${opts}</select>
+        ${ownerSel}
         <button type="button" class="view-btn" data-pw-user="${u.id}">Reset password</button>
         <button type="button" class="view-btn danger" data-del-user="${u.id}">Delete</button>
       </div>`;
@@ -1913,28 +1948,48 @@ function wireUsers() {
   $('#usersClose').onclick = () => { $('#usersModal').hidden = true; };
   $('#usersModal').addEventListener('click', (e) => { if (e.target.id === 'usersModal') $('#usersModal').hidden = true; });
 
+  // Show/populate the Account Owner picker only for the Sales role.
+  $('#newUserRole').addEventListener('change', () => {
+    const sales = $('#newUserRole').value === 'sales';
+    const sel = $('#newUserOwner');
+    sel.hidden = !sales;
+    if (sales) sel.innerHTML = ownerOptionsHtml('');
+  });
+
   $('#addUserForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const username = $('#newUserName').value.trim();
     const password = $('#newUserPass').value;
     const role = $('#newUserRole').value;
+    const account_owner = role === 'sales' ? $('#newUserOwner').value : undefined;
+    if (role === 'sales' && !account_owner) { $('#addUserErr').textContent = 'Pick the Account Owner this Sales user is tied to.'; return; }
     try {
-      await api('/api/users', { method: 'POST', body: JSON.stringify({ username, password, role }) });
+      await api('/api/users', { method: 'POST', body: JSON.stringify({ username, password, role, account_owner }) });
       $('#newUserName').value = ''; $('#newUserPass').value = ''; $('#addUserErr').textContent = '';
+      $('#newUserRole').value = 'standard'; $('#newUserOwner').hidden = true;
       toast('User added');
       renderUsersList();
     } catch (err) { $('#addUserErr').textContent = err.message; }
   });
 
-  // Change a user's role.
+  // Change a user's role or (for Sales) their tagged Account Owner.
   $('#usersList').addEventListener('change', async (e) => {
     const sel = e.target.closest('[data-role-for]');
-    if (!sel) return;
-    try {
-      await api(`/api/users/${sel.dataset.roleFor}`, { method: 'PATCH', body: JSON.stringify({ role: sel.value }) });
-      toast('Role updated');
-    } catch (err) { toast(err.message, true); }
-    renderUsersList();
+    if (sel) {
+      try {
+        await api(`/api/users/${sel.dataset.roleFor}`, { method: 'PATCH', body: JSON.stringify({ role: sel.value }) });
+        toast('Role updated');
+      } catch (err) { toast(err.message, true); }
+      renderUsersList();
+      return;
+    }
+    const own = e.target.closest('[data-owner-for]');
+    if (own) {
+      try {
+        await api(`/api/users/${own.dataset.ownerFor}`, { method: 'PATCH', body: JSON.stringify({ account_owner: own.value }) });
+        toast('Account Owner updated');
+      } catch (err) { toast(err.message, true); }
+    }
   });
 
   // Reset password / delete.

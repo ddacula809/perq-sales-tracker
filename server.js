@@ -34,7 +34,7 @@ app.post('/api/login', async (req, res, next) => {
     if (!user || !verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
-    const safe = { id: user.id, username: user.username, role: user.role };
+    const safe = { id: user.id, username: user.username, role: user.role, account_owner: user.account_owner || null };
     res.json({ token: signToken(safe), user: safe });
   } catch (e) { next(e); }
 });
@@ -46,7 +46,7 @@ app.use('/api', (req, res, next) => {
   const token = header.startsWith('Bearer ') ? header.slice(7) : (req.get('x-app-key') || '');
   const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
-  req.user = { id: payload.id, username: payload.username, role: payload.role };
+  req.user = { id: payload.id, username: payload.username, role: payload.role, account_owner: payload.account_owner || null };
   next();
 });
 
@@ -127,7 +127,11 @@ function crud(table, computeFn) {
   app.patch(`/api/${table}/:id`, async (req, res, next) => {
     try {
       const role = req.user.role;
-      if (role === 'viewer') return res.status(403).json({ error: 'Your account is read-only.' });
+      // Bookings/Churn are edited only by admin, standard, and (billing columns) billing.
+      // Viewers and the sales roles have read-only access here.
+      if (role === 'viewer' || role === 'sales_admin' || role === 'sales') {
+        return res.status(403).json({ error: 'Your account has view-only access to this data.' });
+      }
       if (role === 'billing') {
         const allowed = BILLING_KEYS[table] || [];
         const bad = Object.keys(req.body || {}).filter((k) => !allowed.includes(k));
@@ -153,7 +157,7 @@ app.get('/api/sales_periods', async (_req, res, next) => {
   try { res.json(await listPeriods()); } catch (e) { next(e); }
 });
 // Close (archive + lock) one specific quarter. Only that quarter is affected.
-app.post('/api/sales_periods/close', requireRole('admin'), async (req, res, next) => {
+app.post('/api/sales_periods/close', requireRole('admin', 'sales_admin', 'sales'), async (req, res, next) => {
   try {
     const period = (req.body && req.body.period) ? String(req.body.period) : null;
     if (!period) return res.status(400).json({ error: 'No quarter specified.' });
@@ -165,7 +169,7 @@ app.post('/api/sales_periods/close', requireRole('admin'), async (req, res, next
   } catch (e) { next(e); }
 });
 // Open a new quarter. Existing open quarters are left open (closing is now explicit).
-app.post('/api/sales_periods/open', requireRole('admin'), async (_req, res, next) => {
+app.post('/api/sales_periods/open', requireRole('admin', 'sales_admin', 'sales'), async (_req, res, next) => {
   try {
     const last = await latestPeriod();
     let q = last ? last.quarter + 1 : 1;
@@ -180,13 +184,19 @@ app.post('/api/sales_periods/open', requireRole('admin'), async (_req, res, next
 app.get('/api/salesforce_recon', requireRole('admin'), async (_req, res, next) => {
   try { res.json(await listRows('salesforce_recon')); } catch (e) { next(e); }
 });
-// Distinct Account Names (PMCs) — used to populate the Sales Support PMC dropdown.
-// Available to anyone who can edit Sales Support (admin + standard).
-app.get('/api/salesforce_recon/pmcs', requireRole('admin', 'standard'), async (_req, res, next) => {
+// Distinct Account Names (PMCs) for the Sales Support PMC dropdown. Anyone who can edit
+// Sales Support may fetch it; a tagged 'sales' user only sees PMCs under their Account Owner.
+app.get('/api/salesforce_recon/pmcs', requireRole('admin', 'standard', 'sales_admin', 'sales'), async (req, res, next) => {
   try {
     const rows = await listRows('salesforce_recon');
+    const scopeOwner = (req.user.role === 'sales' && req.user.account_owner)
+      ? String(req.user.account_owner).trim().toLowerCase() : null;
     const set = new Set();
-    for (const r of rows) { const v = String(r.account_name ?? '').trim(); if (v) set.add(v); }
+    for (const r of rows) {
+      if (scopeOwner && String(r.account_owner ?? '').trim().toLowerCase() !== scopeOwner) continue;
+      const v = String(r.account_name ?? '').trim();
+      if (v) set.add(v);
+    }
     res.json([...set].sort((a, b) => a.localeCompare(b)));
   } catch (e) { next(e); }
 });
@@ -207,9 +217,11 @@ app.post('/api/salesforce_recon/reconcile-owners', requireRole('admin'), async (
 app.get('/api/sales_support', async (_req, res, next) => {
   try { res.json(await listRows('sales_support')); } catch (e) { next(e); }
 });
-app.post('/api/sales_support', requireRole('admin', 'standard'), async (req, res, next) => {
+app.post('/api/sales_support', requireRole('admin', 'standard', 'sales_admin', 'sales'), async (req, res, next) => {
   try {
     const body = req.body || {};
+    // A tagged 'sales' user can only file rows under their own Account Owner.
+    if (req.user.role === 'sales' && req.user.account_owner) body.account_owner = req.user.account_owner;
     // Add to the quarter the client is viewing (must be open); fall back to the latest open.
     let period = body.period ? String(body.period) : null;
     if (period) {
@@ -232,14 +244,14 @@ async function ssRowEditable(id) {
   if (!p || p.status !== 'open') return { ok: false, code: 403, error: 'This quarter is archived (read-only).' };
   return { ok: true };
 }
-app.patch('/api/sales_support/:id', requireRole('admin', 'standard'), async (req, res, next) => {
+app.patch('/api/sales_support/:id', requireRole('admin', 'standard', 'sales_admin', 'sales'), async (req, res, next) => {
   try {
     const chk = await ssRowEditable(Number(req.params.id));
     if (!chk.ok) return res.status(chk.code).json({ error: chk.error });
     res.json(await updateRow('sales_support', Number(req.params.id), req.body || {}));
   } catch (e) { next(e); }
 });
-app.delete('/api/sales_support/:id', requireRole('admin', 'standard'), async (req, res, next) => {
+app.delete('/api/sales_support/:id', requireRole('admin', 'standard', 'sales_admin', 'sales'), async (req, res, next) => {
   try {
     const chk = await ssRowEditable(Number(req.params.id));
     if (!chk.ok) return res.status(chk.code).json({ error: chk.error });
@@ -254,11 +266,12 @@ app.get('/api/users', requireRole('admin'), async (_req, res, next) => {
 });
 app.post('/api/users', requireRole('admin'), async (req, res, next) => {
   try {
-    const { username, password, role } = req.body || {};
+    const { username, password, role, account_owner } = req.body || {};
     const u = String(username || '').trim();
     if (!u || !password) return res.status(400).json({ error: 'Username and password are required.' });
     if (!USER_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role.' });
-    res.status(201).json(await createUser({ username: u, password, role }));
+    const owner = role === 'sales' ? String(account_owner || '').trim() : null;
+    res.status(201).json(await createUser({ username: u, password, role, account_owner: owner }));
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That username already exists.' });
     next(e);
@@ -267,7 +280,7 @@ app.post('/api/users', requireRole('admin'), async (req, res, next) => {
 app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { role, password } = req.body || {};
+    const { role, password, account_owner } = req.body || {};
     if (role && !USER_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role.' });
     // Never leave the system with zero admins.
     if (role && role !== 'admin') {
@@ -276,7 +289,7 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
         return res.status(400).json({ error: 'Cannot change the role of the last admin.' });
       }
     }
-    const updated = await updateUser(id, { role, password });
+    const updated = await updateUser(id, { role, password, account_owner });
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(updated);
   } catch (e) { next(e); }
