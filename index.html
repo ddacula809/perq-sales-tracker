@@ -68,6 +68,7 @@
     <button class="tab" data-tab="salessupport">Sales Support</button>
     <button class="tab" data-tab="churn">Churn Tracker</button>
     <button class="tab" data-tab="billing" hidden>Billing Dashboard</button>
+    <button class="tab" data-tab="sfrecon" hidden>Salesforce Recon Data</button>
   </aside>
   <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
 
@@ -132,6 +133,16 @@
     </div>
     <div class="sales-scroller">
       <table id="ssTable"><thead id="ssHead"></thead><tbody id="ssBody"></tbody></table>
+    </div>
+  </main>
+
+  <main class="sfrecon-view" id="sfreconView" hidden>
+    <div class="sfrecon-bar">
+      <span class="sfrecon-count" id="sfreconCount"></span>
+      <label class="btn solid" id="sfreconImport">Import Salesforce .xlsx<input type="file" id="sfreconFile" accept=".xlsx" hidden /></label>
+    </div>
+    <div class="sfrecon-scroller">
+      <table id="sfreconTable"><thead id="sfreconHead"></thead><tbody id="sfreconBody"></tbody></table>
     </div>
   </main>
 

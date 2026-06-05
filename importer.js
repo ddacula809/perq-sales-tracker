@@ -1,7 +1,7 @@
 // importer.js — parse the original PERQ workbook's "May 2026" and "Churn Tracker"
 // sheets into plain row objects, ready to insert into the DB.
 import XLSX from 'xlsx';
-import { BOOKING_FIELDS, CHURN_FIELDS, BOOKING_SHEET, CHURN_SHEET } from './schema.js';
+import { BOOKING_FIELDS, CHURN_FIELDS, BOOKING_SHEET, CHURN_SHEET, SALESFORCE_RECON_FIELDS } from './schema.js';
 
 // Convert an Excel cell into a value appropriate for the field type.
 function coerce(value, type) {
@@ -193,6 +193,46 @@ export function parseGolives(buffer) {
       golive_date: colOf.golive_date >= 0 ? coerceExcelDate(row[colOf.golive_date]) : null,
     };
     if (obj.property_id || obj.product || obj.golive_date) out.push(obj);
+  }
+  return out;
+}
+
+// Parse a Salesforce Recon Data export into row objects, matching the SALESFORCE_RECON_FIELDS
+// labels against the file's header row (column order / sheet name don't matter).
+export function parseSalesforceRecon(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('The uploaded file has no sheets.');
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+
+  const wantNorm = SALESFORCE_RECON_FIELDS.map((f) => normHeader(f.label));
+  let headerIdx = -1;
+  let best = 0;
+  for (let i = 0; i < Math.min(aoa.length, 25); i++) {
+    const present = new Set((aoa[i] || []).map(normHeader));
+    const matches = wantNorm.filter((l) => present.has(l)).length;
+    if (matches > best) { best = matches; headerIdx = i; }
+  }
+  if (headerIdx < 0 || best < 4) {
+    throw new Error('Could not find the expected columns (Property ID 18 Digit, Account Name, MRR, Account Owner) in the file.');
+  }
+
+  const header = (aoa[headerIdx] || []).map(normHeader);
+  const colOf = {};
+  for (const f of SALESFORCE_RECON_FIELDS) colOf[f.key] = header.indexOf(normHeader(f.label));
+
+  const out = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const obj = {};
+    let hasContent = false;
+    for (const f of SALESFORCE_RECON_FIELDS) {
+      const ci = colOf[f.key];
+      const v = ci >= 0 ? coerce(row[ci], f.type) : null;
+      obj[f.key] = v;
+      if (v !== null && v !== '') hasContent = true;
+    }
+    if (hasContent) out.push(obj);
   }
   return out;
 }

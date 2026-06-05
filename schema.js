@@ -84,6 +84,22 @@ export const CHURN_COMPUTED = [
 export const BOOKING_SHEET = 'May 2026';
 export const CHURN_SHEET = 'Churn Tracker';
 
+// Salesforce Recon Data — a master reference exported from Salesforce (admin-only).
+// Labels match the export's header row exactly so the importer can map by header.
+// Account Name is the PMC; its values feed the Sales Support PMC dropdown.
+export const SALESFORCE_RECON_FIELDS = [
+  { key: 'property_id_18',       label: 'Property ID 18 Digit',       type: 'text' },
+  { key: 'property_name',        label: 'Property: Name',             type: 'text' },
+  { key: 'mrr',                  label: 'MRR',                        type: 'number' },
+  { key: 'account_id_18',        label: 'Account ID 18 Digits',       type: 'text' },
+  { key: 'account_name',         label: 'Account Name',               type: 'text' },
+  { key: 'parent_account',       label: 'Parent Account',             type: 'text' },
+  { key: 'parent_account_id_18', label: 'Parent Account 18 Digit ID', type: 'text' },
+  { key: 'unit_count',           label: 'Unit Count',                 type: 'number' },
+  { key: 'management_structure', label: 'Management Structure',       type: 'text' },
+  { key: 'account_owner',        label: 'Account Owner',              type: 'text' },
+];
+
 // Billing-section field keys per table (the blue columns). Used to tint/reorder them in
 // the UI and to restrict what a "billing" role user is allowed to edit on the server.
 export const BOOKING_BILLING_KEYS = [

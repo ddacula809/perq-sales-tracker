@@ -9,7 +9,8 @@ const MONEY = new Set([
 const state = {
   tab: 'dashboard',
   schema: null,
-  rows: { bookings: [], churn: [], sales_support: [] },
+  rows: { bookings: [], churn: [], sales_support: [], salesforce_recon: [] },
+  sfPmcs: [], // Account Names from Salesforce Recon Data, for the Sales Support PMC dropdown
   // Dashboard and Bookings filter independently: filtering the grid must not move the
   // dashboard totals, and vice versa.
   filters: {
@@ -545,6 +546,49 @@ function wireBilling() {
   });
 }
 
+// ---------- Salesforce Recon Data (admin-only master reference) ----------
+function renderSfRecon() {
+  const fields = (state.schema.salesforce_recon && state.schema.salesforce_recon.editable) || [];
+  const rows = state.rows.salesforce_recon || [];
+  $('#sfreconCount').textContent = rows.length ? `${fmtNum(rows.length)} records` : 'No data yet';
+  $('#sfreconImport').style.display = isAdmin() ? '' : 'none';
+  $('#sfreconHead').innerHTML = '<tr><th class="rownum">#</th>'
+    + fields.map((f) => `<th>${escapeHtml(f.label)}</th>`).join('') + '</tr>';
+  const money = new Set(['mrr']);
+  $('#sfreconBody').innerHTML = rows.length
+    ? rows.map((r, i) => `<tr><td class="rownum">${i + 1}</td>`
+        + fields.map((f) => {
+          const v = r[f.key];
+          const disp = money.has(f.key) ? fmtMoney(v) : (f.type === 'number' ? fmtNum(v) : (v ?? ''));
+          return `<td class="${f.type === 'number' ? 'num' : ''}">${escapeHtml(String(disp))}</td>`;
+        }).join('') + '</tr>').join('')
+    : `<tr><td class="muted" colspan="${fields.length + 1}" style="padding:14px">No data yet. Use “Import Salesforce .xlsx”.</td></tr>`;
+}
+
+function wireSfRecon() {
+  $('#sfreconFile').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Importing Salesforce data…');
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/salesforce_recon/import', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Import failed');
+      const data = await res.json();
+      state.rows.salesforce_recon = await api('/api/salesforce_recon');
+      state.sfPmcs = await api('/api/salesforce_recon/pmcs');
+      renderAll();
+      showResult('Salesforce Recon import complete',
+        '<ul class="result-list">'
+        + `<li><strong>${fmtNum(data.imported)}</strong> record(s) imported (replaced all existing)</li>`
+        + '</ul>');
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+}
+
 // ---------- Data ops ----------
 async function loadAll() {
   state.schema = await api('/api/schema');
@@ -556,6 +600,9 @@ async function loadAll() {
   state.salesPeriod = openP ? openP.period
     : (state.salesPeriods.length ? state.salesPeriods[state.salesPeriods.length - 1].period : '');
   state.notifications = (isAdmin() || role() === 'billing') ? await api('/api/notifications') : [];
+  // Salesforce Recon Data (admin-only tab) + its Account Name list for the Sales Support PMC dropdown.
+  state.rows.salesforce_recon = isAdmin() ? await api('/api/salesforce_recon') : [];
+  state.sfPmcs = (isAdmin() || role() === 'standard') ? await api('/api/salesforce_recon/pmcs') : [];
   renderAll();
   $('#status').textContent =
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
@@ -569,10 +616,14 @@ function renderAll() {
   const canBilling = isAdmin() || role() === 'billing';
   document.querySelector('[data-tab="billing"]').hidden = !canBilling;
   if (state.tab === 'billing' && !canBilling) state.tab = 'dashboard';
+  // Salesforce Recon Data is admin-only.
+  document.querySelector('[data-tab="sfrecon"]').hidden = !isAdmin();
+  if (state.tab === 'sfrecon' && !isAdmin()) state.tab = 'dashboard';
 
   const isEntry = state.tab === 'newbooking';
   const isSales = state.tab === 'salessupport';
   const isBillingTab = state.tab === 'billing';
+  const isSfrecon = state.tab === 'sfrecon';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   $('#currentTab').textContent = TAB_LABELS[state.tab] || '';
   // Account / role-based controls.
@@ -595,8 +646,9 @@ function renderAll() {
   $('#entryView').hidden = !isEntry;
   $('#salesView').hidden = !isSales;
   $('#billingView').hidden = !isBillingTab;
+  $('#sfreconView').hidden = !isSfrecon;
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
-  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab) ? 'none' : '';
+  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon) ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
   $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
@@ -604,6 +656,7 @@ function renderAll() {
   if (isEntry && !$('#productLines').children.length) resetEntryView();
   if (isSales) renderSalesSupport();
   if (isBillingTab) renderBillingDashboard();
+  if (isSfrecon) renderSfRecon();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
@@ -678,6 +731,7 @@ function wireGrid() {
 const TAB_LABELS = {
   dashboard: 'Dashboard', billing: 'Billing Dashboard', salessupport: 'Sales Support',
   newbooking: 'New Booking', bookings: 'Bookings', churn: 'Churn Tracker',
+  sfrecon: 'Salesforce Recon Data',
 };
 
 function closeSidebar() {
@@ -1094,9 +1148,11 @@ function ssApplyFreeze() {
   $('#ssFreezeStyle').textContent = css;
 }
 
-// PMC options: existing PMCs (from bookings + sales support) plus an "add new" choice.
+// PMC options: Salesforce Recon Account Names + existing PMCs (bookings + sales support),
+// plus an "add new" choice.
 function ssPmcList() {
   const set = new Set();
+  for (const name of state.sfPmcs) if (name) set.add(String(name).trim());
   for (const b of state.rows.bookings) if (b.pmc) set.add(String(b.pmc).trim());
   for (const r of state.rows.sales_support) if (r.pmc) set.add(String(r.pmc).trim());
   return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
@@ -1843,7 +1899,7 @@ function gotoRow(tab, id) {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon();
   applyZoom();
   if (state.token) {
     try {

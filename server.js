@@ -10,11 +10,12 @@ import {
   listNotifications, createNotification, dismissNotification,
 } from './db.js';
 import { computeBooking, computeChurn } from './compute.js';
-import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives } from './importer.js';
+import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
   BOOKING_BILLING_KEYS, CHURN_BILLING_KEYS, USER_ROLES, SALES_SUPPORT_FIELDS,
+  SALESFORCE_RECON_FIELDS,
 } from './schema.js';
 import { verifyPassword, signToken, verifyToken } from './auth.js';
 
@@ -80,6 +81,7 @@ app.get('/api/schema', (_req, res) => {
     bookings: { editable: BOOKING_FIELDS, computed: BOOKING_COMPUTED, billing: BOOKING_BILLING_KEYS },
     churn: { editable: CHURN_FIELDS, computed: CHURN_COMPUTED, billing: CHURN_BILLING_KEYS },
     sales_support: { editable: SALES_SUPPORT_FIELDS },
+    salesforce_recon: { editable: SALESFORCE_RECON_FIELDS },
   });
 });
 
@@ -144,6 +146,29 @@ app.post('/api/sales_periods/open', requireRole('admin'), async (_req, res, next
     if (q > 4) { q = 1; y += 1; }
     const created = await createPeriod(q, y);
     res.json({ created, periods: await listPeriods() });
+  } catch (e) { next(e); }
+});
+
+// ---- Salesforce Recon Data: admin-only master reference, replaced wholesale on import ----
+app.get('/api/salesforce_recon', requireRole('admin'), async (_req, res, next) => {
+  try { res.json(await listRows('salesforce_recon')); } catch (e) { next(e); }
+});
+// Distinct Account Names (PMCs) — used to populate the Sales Support PMC dropdown.
+// Available to anyone who can edit Sales Support (admin + standard).
+app.get('/api/salesforce_recon/pmcs', requireRole('admin', 'standard'), async (_req, res, next) => {
+  try {
+    const rows = await listRows('salesforce_recon');
+    const set = new Set();
+    for (const r of rows) { const v = String(r.account_name ?? '').trim(); if (v) set.add(v); }
+    res.json([...set].sort((a, b) => a.localeCompare(b)));
+  } catch (e) { next(e); }
+});
+app.post('/api/salesforce_recon/import', requireRole('admin'), upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const rows = parseSalesforceRecon(req.file.buffer);
+    await replaceAll('salesforce_recon', rows);
+    res.json({ imported: rows.length });
   } catch (e) { next(e); }
 });
 
