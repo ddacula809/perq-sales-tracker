@@ -34,6 +34,7 @@ const state = {
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
+  pendingBookings: [], // new-booking payloads awaiting confirmation
 };
 
 const $ = (s) => document.querySelector(s);
@@ -887,6 +888,42 @@ async function submitEntries() {
     return p;
   });
   if (!payloads.length) { toast('Add at least one product.', true); return; }
+  // Preview the computed values, then ask for confirmation before creating anything.
+  try {
+    const { rows } = await api('/api/bookings/preview', { method: 'POST', body: JSON.stringify({ rows: payloads }) });
+    state.pendingBookings = payloads;
+    openBookingConfirm(rows, shared);
+  } catch (err) { toast(err.message, true); }
+}
+
+function openBookingConfirm(computed, shared) {
+  const m = fmtMoney;
+  const sum = (k) => computed.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  const period = `${shared.booking_month || ''} ${shared.booking_year || ''}`.trim();
+  const prop = shared.property_name || shared.property_id || '—';
+  const meta = `<strong>${escapeHtml(prop)}</strong>`
+    + (period ? ` · ${escapeHtml(period)}` : '')
+    + (shared.sales_rep ? ` · ${escapeHtml(shared.sales_rep)}` : '')
+    + (shared.ctam_type ? ` · ${escapeHtml(shared.ctam_type)}` : '')
+    + (shared.pilot_type ? ` · ${escapeHtml(shared.pilot_type)}` : '');
+  const body = computed.map((r) =>
+    `<tr><td>${escapeHtml(r.product || '—')}</td><td class="num">${m(r.mrr)}</td>`
+    + `<td class="num">${m(r.company_total_booking)}</td><td class="num">${m(r.commissionable_bookings)}</td>`
+    + `<td class="num">${m(r.one_time_fee)}</td></tr>`).join('');
+  $('#confirmSummary').innerHTML =
+    `<p class="confirm-meta">${meta}</p>`
+    + '<table class="confirm-table"><thead><tr><th>Product</th><th class="num">MRR</th>'
+    + '<th class="num">Company Total Booking</th><th class="num">Commissionable</th><th class="num">One-Time Fee</th></tr></thead>'
+    + `<tbody>${body}</tbody>`
+    + `<tfoot><tr><th>Total (${computed.length})</th><th class="num">${m(sum('mrr'))}</th>`
+    + `<th class="num">${m(sum('company_total_booking'))}</th><th class="num">${m(sum('commissionable_bookings'))}</th>`
+    + `<th class="num">${m(sum('one_time_fee'))}</th></tr></tfoot></table>`;
+  $('#confirmModal').hidden = false;
+}
+
+async function confirmBookings() {
+  const payloads = state.pendingBookings || [];
+  if (!payloads.length) { $('#confirmModal').hidden = true; return; }
   try {
     let added = 0;
     for (const payload of payloads) {
@@ -894,8 +931,11 @@ async function submitEntries() {
       state.rows.bookings.push(row);
       added += 1;
     }
-    if (shared.booking_month) entryDefaults.booking_month = shared.booking_month;
-    if (shared.booking_year) entryDefaults.booking_year = shared.booking_year;
+    const last = payloads[payloads.length - 1];
+    if (last.booking_month) entryDefaults.booking_month = last.booking_month;
+    if (last.booking_year) entryDefaults.booking_year = last.booking_year;
+    state.pendingBookings = [];
+    $('#confirmModal').hidden = true;
     $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
     toast(`Added ${added} line item${added === 1 ? '' : 's'}`);
     resetEntryView();
@@ -905,6 +945,11 @@ async function submitEntries() {
 function wireEntry() {
   $('#addEntryFormBtn').onclick = () => addProductLine();
   $('#submitEntriesBtn').onclick = submitEntries;
+  // Confirm dialog: Confirm creates the rows; Cancel returns to the entry form unchanged.
+  $('#confirmSubmit').onclick = confirmBookings;
+  $('#confirmCancel').onclick = () => { $('#confirmModal').hidden = true; };
+  $('#confirmClose').onclick = () => { $('#confirmModal').hidden = true; };
+  $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confirmModal') $('#confirmModal').hidden = true; });
   // Shared-field changes: CTAM Type toggles product Offset; Pilot/CTAM gates Pilot Type.
   $('#sharedFields').addEventListener('change', (e) => {
     const key = e.target.dataset && e.target.dataset.key;

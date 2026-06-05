@@ -338,6 +338,18 @@ tr.ss-group td {
 .modal-card .btn { width: 100%; justify-content: center; }
 .err { color: var(--neg); font-size: 12px; min-height: 14px; }
 
+/* New booking confirm dialog */
+.confirm-card { width: 720px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }
+.confirm-card .btn { width: auto; }
+.confirm-meta { color: var(--ink-soft); font-size: 13px; margin: 0 0 12px; }
+.confirm-meta strong { color: var(--ink); }
+#confirmSummary { overflow: auto; min-height: 0; margin-bottom: 4px; }
+.confirm-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.confirm-table th, .confirm-table td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.confirm-table thead th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
+.confirm-table td.num, .confirm-table th.num { text-align: right; font-family: 'Fira Mono', monospace; }
+.confirm-table tfoot th { border-top: 2px solid var(--line-strong); border-bottom: none; color: var(--ink); font-weight: 700; }
+
 /* Export dialog */
 #exportModal select {
   width: 100%; padding: 9px; border: 1px solid var(--line-strong); border-radius: 7px;

@@ -121,6 +121,12 @@ function crud(table, computeFn) {
 crud('bookings', computeBooking);
 crud('churn', computeChurn);
 
+// Preview booking rows (compute formula columns) without saving — for the confirm dialog.
+app.post('/api/bookings/preview', requireRole('admin', 'standard'), (req, res) => {
+  const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
+  res.json({ rows: rows.map((r) => ({ ...r, ...computeBooking(r) })) });
+});
+
 // ---- Sales Support periods (quarters); close/open are admin-only ----
 app.get('/api/sales_periods', async (_req, res, next) => {
   try { res.json(await listPeriods()); } catch (e) { next(e); }
