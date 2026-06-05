@@ -105,10 +105,11 @@ export function computeBooking(r) {
     }
   }
 
-  // Column AK default: if no one-time fee, implementation billing is N/A
+  // Implementation billing default (only when not explicitly set):
+  //   no one-time fee (blank or 0) -> Not Applicable;  has a one-time fee -> Pending.
   let implStatus = r.implementation_billing_status;
-  if ((implStatus === null || implStatus === undefined || implStatus === '') && V === 0) {
-    implStatus = 'Not Applicable';
+  if (implStatus === null || implStatus === undefined || implStatus === '') {
+    implStatus = (V === null || V === 0) ? 'Not Applicable' : 'Pending';
   }
 
   return {
