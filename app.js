@@ -506,6 +506,10 @@ function wireTabs() {
 }
 
 function wireActions() {
+  // "More PERQs" dropdown holding the file actions.
+  $('#moreBtn').onclick = () => { $('#moreMenu').hidden = !$('#moreMenu').hidden; };
+  document.addEventListener('click', (e) => { if (!e.target.closest('.more-wrap')) $('#moreMenu').hidden = true; });
+
   // Quick blank-row add — only used on the Churn grid (Bookings uses the New Booking tab).
   $('#addRowBtn').onclick = async () => {
     if (state.tab !== 'churn' || !canAddDelete()) return;
@@ -519,6 +523,7 @@ function wireActions() {
   };
 
   $('#importFile').onchange = async (e) => {
+    $('#moreMenu').hidden = true;
     const file = e.target.files[0];
     if (!file) return;
     if (!confirm('Importing replaces ALL current data in both tabs. Continue?')) { e.target.value = ''; return; }
@@ -538,6 +543,7 @@ function wireActions() {
 
   // Append churn rows from an uploaded report (duplicates skipped server-side).
   $('#churnUploadFile').onchange = async (e) => {
+    $('#moreMenu').hidden = true;
     const file = e.target.files[0];
     if (!file) return;
     const fd = new FormData();
@@ -557,7 +563,7 @@ function wireActions() {
   };
 
   // Export opens a dialog to pick the booking period first.
-  $('#exportBtn').onclick = (e) => { e.preventDefault(); openExport(); };
+  $('#exportBtn').onclick = (e) => { e.preventDefault(); $('#moreMenu').hidden = true; openExport(); };
   $('#exportClose').onclick = () => { $('#exportModal').hidden = true; };
   $('#exportModal').addEventListener('click', (e) => { if (e.target.id === 'exportModal') $('#exportModal').hidden = true; });
   $('#exportConfirm').onclick = doExport;
@@ -848,6 +854,7 @@ function closeReconcile() {
 
 function wireReconcile() {
   $('#reconcileFile').onchange = async (e) => {
+    $('#moreMenu').hidden = true;
     const file = e.target.files[0];
     if (!file) return;
     const fd = new FormData();

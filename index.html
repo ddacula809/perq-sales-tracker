@@ -21,19 +21,24 @@
       </div>
     </div>
     <div class="actions">
-      <label class="btn ghost" id="importBtn">
-        Import .xlsx
-        <input type="file" id="importFile" accept=".xlsx" hidden />
-      </label>
-      <a class="btn ghost" id="exportBtn" href="/api/export">Export .xlsx</a>
-      <label class="btn ghost" id="churnUploadBtn" hidden>
-        Upload churn .xlsx
-        <input type="file" id="churnUploadFile" accept=".xlsx" hidden />
-      </label>
-      <label class="btn ghost" id="reconcileBtn" hidden>
-        Reconcile .xlsx
-        <input type="file" id="reconcileFile" accept=".xlsx" hidden />
-      </label>
+      <div class="more-wrap">
+        <button class="btn ghost" id="moreBtn">More PERQs ▾</button>
+        <div class="more-menu" id="moreMenu" hidden>
+          <label class="more-item" id="importBtn">
+            Import .xlsx
+            <input type="file" id="importFile" accept=".xlsx" hidden />
+          </label>
+          <a class="more-item" id="exportBtn" href="/api/export">Export .xlsx</a>
+          <label class="more-item" id="churnUploadBtn" hidden>
+            Upload churn .xlsx
+            <input type="file" id="churnUploadFile" accept=".xlsx" hidden />
+          </label>
+          <label class="more-item" id="reconcileBtn" hidden>
+            Reconcile .xlsx
+            <input type="file" id="reconcileFile" accept=".xlsx" hidden />
+          </label>
+        </div>
+      </div>
       <button class="btn solid" id="addRowBtn">+ Add row</button>
       <button class="btn ghost" id="usersBtn" hidden>Users</button>
       <span class="user-chip" id="userChip"></span>
