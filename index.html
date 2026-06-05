@@ -30,6 +30,10 @@
         Upload churn .xlsx
         <input type="file" id="churnUploadFile" accept=".xlsx" hidden />
       </label>
+      <label class="btn ghost" id="reconcileBtn" hidden>
+        Reconcile .xlsx
+        <input type="file" id="reconcileFile" accept=".xlsx" hidden />
+      </label>
       <button class="btn solid" id="addRowBtn">+ Add row</button>
       <button class="btn ghost" id="usersBtn" hidden>Users</button>
       <span class="user-chip" id="userChip"></span>
@@ -88,6 +92,17 @@
 
   <div class="toast" id="toast"></div>
   <div class="cell-tip" id="cellTip" hidden></div>
+
+  <div class="modal" id="reconcileModal" hidden>
+    <div class="modal-card reconcile-card">
+      <div class="entry-head">
+        <h2>Reconcile bookings</h2>
+        <button type="button" class="entry-close" id="reconcileClose" title="Close">✕</button>
+      </div>
+      <p class="recon-note">Compared by Property ID + Product within each uploaded Booking Month/Year. Edit a Current MRR to fix it; changes save immediately.</p>
+      <div id="reconcileBody"></div>
+    </div>
+  </div>
 
   <div class="modal" id="exportModal" hidden>
     <div class="modal-card">

@@ -8,7 +8,7 @@ import {
   getUserByUsername, listUsers, createUser, updateUser, deleteUser, getUserById, countAdmins,
 } from './db.js';
 import { computeBooking, computeChurn } from './compute.js';
-import { parseWorkbook, parseChurnUpload } from './importer.js';
+import { parseWorkbook, parseChurnUpload, parseBookingReconcile } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
@@ -195,6 +195,14 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       added += 1;
     }
     res.json({ added, skipped, total: incoming.length });
+  } catch (e) { next(e); }
+});
+
+// ---- Reconcile: parse an uploaded bookings file; the client diffs it against current data ----
+app.post('/api/bookings/reconcile', requireRole('admin', 'standard'), upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    res.json({ rows: parseBookingReconcile(req.file.buffer) });
   } catch (e) { next(e); }
 });
 

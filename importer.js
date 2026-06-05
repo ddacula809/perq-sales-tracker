@@ -95,6 +95,55 @@ export function parseChurnUpload(buffer) {
   return out;
 }
 
+// Columns read from a bookings reconciliation upload (matched by header label).
+const RECON_COLS = [
+  ['Booking Month', 'booking_month', 'text'],
+  ['Booking Year', 'booking_year', 'number'],
+  ['Property ID', 'property_id', 'text'],
+  ['Product', 'product', 'text'],
+  ['MRR', 'mrr', 'number'],
+];
+
+// Parse a reconciliation file into { booking_month, booking_year, property_id, product, mrr }
+// row objects. Reads the first sheet and locates the header row by matching the labels.
+export function parseBookingReconcile(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('The uploaded file has no sheets.');
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+
+  const wantNorm = RECON_COLS.map(([label]) => normHeader(label));
+  let headerIdx = -1;
+  let best = 0;
+  for (let i = 0; i < Math.min(aoa.length, 25); i++) {
+    const present = new Set((aoa[i] || []).map(normHeader));
+    const matches = wantNorm.filter((l) => present.has(l)).length;
+    if (matches > best) { best = matches; headerIdx = i; }
+  }
+  if (headerIdx < 0 || best < 3) {
+    throw new Error('Could not find the expected columns (Booking Month, Booking Year, Property ID, Product, MRR) in the file.');
+  }
+
+  const header = (aoa[headerIdx] || []).map(normHeader);
+  const colOf = {};
+  for (const [label, key] of RECON_COLS) colOf[key] = header.indexOf(normHeader(label));
+
+  const out = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const obj = {};
+    let hasContent = false;
+    for (const [, key, type] of RECON_COLS) {
+      const ci = colOf[key];
+      const v = ci >= 0 ? coerce(row[ci], type) : null;
+      obj[key] = v;
+      if (v !== null && v !== '') hasContent = true;
+    }
+    if (hasContent) out.push(obj);
+  }
+  return out;
+}
+
 export function parseWorkbook(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const result = { bookings: [], churn: [] };

@@ -27,6 +27,7 @@ const state = {
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
   churnQuarter: 'All',   // dashboard churn-by-month quarter filter
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
+  reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
 };
 
 const $ = (s) => document.querySelector(s);
@@ -403,6 +404,7 @@ function renderAll() {
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
   $('#churnUploadBtn').hidden = !(state.tab === 'churn' && canAddDelete());
+  $('#reconcileBtn').hidden = !(state.tab === 'bookings' && canAddDelete());
   $('#usersBtn').hidden = !isAdmin();
   $('#changePwBtn').hidden = !state.user;
   $('#logoutBtn').hidden = !state.user;
@@ -740,6 +742,121 @@ function wireEntry() {
   });
 }
 
+// ---------- Bookings reconciliation ----------
+const reconText = (v) => String(v == null ? '' : v).trim().toLowerCase();
+const reconNum = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : null; };
+const reconPair = (r) => `${reconText(r.booking_month)}|${reconNum(r.booking_year)}`;
+const reconKey = (r) => `${reconPair(r)}|${reconText(r.property_id)}|${reconText(r.product)}`;
+function mrrEqual(a, b) { const na = reconNum(a); const nb = reconNum(b); return na === nb; }
+
+// Diff the uploaded rows against current bookings, scoped to the uploaded Month/Year pairs.
+function reconcile() {
+  const uploaded = state.reconcile.uploaded || [];
+  const scope = new Set(uploaded.map(reconPair));
+  const upByKey = new Map();
+  uploaded.forEach((r) => upByKey.set(reconKey(r), r));
+  const curByKey = new Map();
+  for (const b of state.rows.bookings) {
+    if (scope.has(reconPair(b))) curByKey.set(reconKey(b), b);
+  }
+  const mismatches = [];
+  const missingInApp = [];
+  for (const r of uploaded) {
+    const b = curByKey.get(reconKey(r));
+    if (!b) missingInApp.push(r);
+    else if (!mrrEqual(b.mrr, r.mrr)) mismatches.push({ booking: b, uploadedMrr: r.mrr });
+  }
+  const extraInApp = [];
+  for (const [key, b] of curByKey) if (!upByKey.has(key)) extraInApp.push(b);
+  state.reconcile.result = { mismatches, missingInApp, extraInApp };
+}
+
+function renderReconcile() {
+  const res = state.reconcile.result || { mismatches: [], missingInApp: [], extraInApp: [] };
+  const my = (r) => `${r.booking_month || ''} ${r.booking_year || ''}`.trim();
+  if (!res.mismatches.length && !res.missingInApp.length && !res.extraInApp.length) {
+    $('#reconcileBody').innerHTML = '<p class="recon-ok">Everything reconciles for the uploaded period(s). 🎉</p>';
+    return;
+  }
+  let html = `<h3 class="recon-h">MRR differs (${res.mismatches.length})</h3>`;
+  html += res.mismatches.length
+    ? '<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th><th class="num">Uploaded MRR</th><th class="num">Current MRR</th></tr></thead><tbody>' +
+      res.mismatches.map(({ booking: b, uploadedMrr }) =>
+        `<tr data-id="${b.id}"><td>${escapeHtml(my(b))}</td><td>${escapeHtml(b.property_id ?? '')}</td><td>${escapeHtml(b.property_name ?? '')}</td><td>${escapeHtml(b.product ?? '')}</td><td class="num">${fmtMoney(uploadedMrr)}</td><td class="num"><input type="number" step="any" data-recon-mrr value="${escapeAttr(b.mrr ?? '')}" /></td></tr>`).join('') +
+      '</tbody></table>'
+    : '<p class="muted">None.</p>';
+  html += `<h3 class="recon-h">In upload, missing from Bookings (${res.missingInApp.length})</h3>`;
+  html += res.missingInApp.length
+    ? '<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Product</th><th class="num">MRR</th></tr></thead><tbody>' +
+      res.missingInApp.map((r) =>
+        `<tr><td>${escapeHtml(my(r))}</td><td>${escapeHtml(r.property_id ?? '')}</td><td>${escapeHtml(r.product ?? '')}</td><td class="num">${fmtMoney(r.mrr)}</td></tr>`).join('') +
+      '</tbody></table>'
+    : '<p class="muted">None.</p>';
+  html += `<h3 class="recon-h">In Bookings, not in upload (${res.extraInApp.length})</h3>`;
+  html += res.extraInApp.length
+    ? '<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th><th class="num">Current MRR</th><th></th></tr></thead><tbody>' +
+      res.extraInApp.map((b) =>
+        `<tr data-id="${b.id}"><td>${escapeHtml(my(b))}</td><td>${escapeHtml(b.property_id ?? '')}</td><td>${escapeHtml(b.property_name ?? '')}</td><td>${escapeHtml(b.product ?? '')}</td><td class="num"><input type="number" step="any" data-recon-mrr value="${escapeAttr(b.mrr ?? '')}" /></td><td><button type="button" class="view-btn danger" data-recon-del>Delete</button></td></tr>`).join('') +
+      '</tbody></table>'
+    : '<p class="muted">None.</p>';
+  $('#reconcileBody').innerHTML = html;
+}
+
+function closeReconcile() {
+  $('#reconcileModal').hidden = true;
+  renderBody(); renderSummary(); // reflect any edits made during reconciliation
+  $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+}
+
+function wireReconcile() {
+  $('#reconcileFile').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Reconciling…');
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/bookings/reconcile', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Reconcile failed');
+      const data = await res.json();
+      state.reconcile.uploaded = data.rows || [];
+      reconcile();
+      renderReconcile();
+      $('#reconcileModal').hidden = false;
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+  $('#reconcileClose').onclick = closeReconcile;
+  $('#reconcileModal').addEventListener('click', (e) => { if (e.target.id === 'reconcileModal') closeReconcile(); });
+
+  // Inline-edit a current MRR -> save and re-diff.
+  $('#reconcileBody').addEventListener('change', async (e) => {
+    const inp = e.target.closest('[data-recon-mrr]');
+    if (!inp) return;
+    const id = Number(inp.closest('tr').dataset.id);
+    try {
+      const updated = await api(`/api/bookings/${id}`, { method: 'PATCH', body: JSON.stringify({ mrr: inp.value }) });
+      updateRowInState('bookings', updated);
+      reconcile(); renderReconcile();
+      toast('Saved');
+    } catch (err) { toast(err.message, true); }
+  });
+  // Delete an extra booking -> remove and re-diff.
+  $('#reconcileBody').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-recon-del]');
+    if (!del) return;
+    const id = Number(del.closest('tr').dataset.id);
+    if (!confirm('Delete this booking?')) return;
+    try {
+      await api(`/api/bookings/${id}`, { method: 'DELETE' });
+      state.rows.bookings = state.rows.bookings.filter((r) => r.id !== id);
+      reconcile(); renderReconcile();
+      toast('Deleted');
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 // ---------- View tools: filter toggle + table zoom ----------
 function applyZoom() {
   $('#grid').style.zoom = state.zoom;
@@ -1022,7 +1139,7 @@ function wireUsers() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile();
   applyZoom();
   if (state.token) {
     try {

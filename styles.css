@@ -303,3 +303,15 @@ tbody td.del button:hover { color: var(--neg); }
 .add-user-row input { flex: 1; min-width: 110px; font: inherit; padding: 8px 9px; border: 1px solid var(--line-strong); border-radius: 7px; }
 .add-user-row select { font: inherit; padding: 8px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; }
 .view-btn.danger:hover { border-color: var(--neg); color: var(--neg); }
+
+/* Reconcile results */
+.reconcile-card { width: 820px; max-width: 96vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }
+.recon-note { color: var(--ink-soft); font-size: 12px; margin: 0 0 8px; }
+#reconcileBody { overflow: auto; min-height: 0; }
+.recon-h { font-size: 12px; margin: 16px 0 6px; color: var(--ink); }
+.recon-ok { color: var(--ok); font-weight: 600; padding: 12px 0; }
+.recon-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.recon-table th, .recon-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.recon-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
+.recon-table td.num, .recon-table th.num { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+.recon-table input { width: 110px; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; text-align: right; }
