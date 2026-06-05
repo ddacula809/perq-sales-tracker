@@ -76,6 +76,15 @@ function fmtNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : v;
 }
+// Parse a typed money string ("$19,200", "(1,234)") back to a number.
+function parseMoney(v) {
+  if (v == null || String(v).trim() === '') return '';
+  const s = String(v).trim();
+  const neg = /^\(.*\)$/.test(s);
+  const n = Number(s.replace(/[(),$\s]/g, ''));
+  if (!Number.isFinite(n)) return s; // leave as-is; server will coerce/reject
+  return neg ? -n : n;
+}
 
 // ---------- Rendering ----------
 // Billing sections (per tab) — shown at the very end, after the computed columns, and
@@ -843,6 +852,9 @@ function ssCell(row, key) {
   if (key === 'pmc') {
     return `<td data-col="pmc"><select data-ss-key="pmc">${ssPmcOptions(val)}</select></td>`;
   }
+  if (SS_MONEY.has(key)) { // editable money fields: show a formatted $ value
+    return `<td class="num" data-col="${key}"><input type="text" inputmode="decimal" data-ss-key="${key}" value="${escapeAttr(fmtMoney(row[key]))}" /></td>`;
+  }
   const step = f.type === 'number' ? ' step="any"' : '';
   return `<td class="${numCls.trim()}" data-col="${key}"><input type="${f.type === 'number' ? 'number' : 'text'}"${step} data-ss-key="${key}" value="${escapeAttr(val)}" /></td>`;
 }
@@ -896,6 +908,8 @@ function wireSalesSupport() {
       const name = (prompt('New PMC name:') || '').trim();
       if (!name) { renderSalesSupport(); return; } // cancelled — restore the select
       value = name;
+    } else if (SS_MONEY.has(key)) {
+      value = parseMoney(value);
     }
     try {
       const updated = await api(`/api/sales_support/${id}`, { method: 'PATCH', body: JSON.stringify({ [key]: value }) });
