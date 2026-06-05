@@ -1,18 +1,23 @@
 :root {
-  --paper: #f4f1ea;
-  --panel: #fbfaf6;
-  --ink: #1a1714;
-  --ink-soft: #6b635a;
-  --line: #ddd6c9;
-  --line-strong: #c6bdad;
-  --accent: #c2410c;        /* burnt amber */
-  --accent-soft: #fbe6d6;
-  --compute-bg: #eef3ee;    /* tint for read-only computed cells */
-  --compute-ink: #2f5d3a;
-  --billing-bg: #e7eef8;    /* tint for the churn billing section (blue) */
-  --billing-ink: #1e3a64;
-  --neg: #b91c1c;
-  --ok: #15803d;
+  /* PERQ brand palette */
+  --paper: #f6eee8;          /* Linen — page background (not pure white) */
+  --panel: #fcf9f6;          /* warm near-white surface (cards, rows, inputs) */
+  --ink: #3e3a4a;            /* Gray 700 — body text on light */
+  --ink-soft: #7e7a8c;       /* Gray 500 — supporting text */
+  --line: #e6ddd4;
+  --line-strong: #d2c7bd;
+  --night: #0e0c12;          /* dark chrome (tooltips, toast) */
+  --plum: #7e1f59;           /* primary */
+  --plum-soft: #f0e3ec;      /* plum tint */
+  --accent: #d85a2e;         /* Coral 500 — warm accent */
+  --accent-deep: #8b2f18;    /* Coral 700 */
+  --accent-soft: #fbe6dc;    /* coral tint */
+  --compute-bg: #e4eef1;     /* cyan tint for read-only computed cells */
+  --compute-ink: #2e6478;    /* Cyan 700 */
+  --billing-bg: #f0e3ec;     /* plum tint for the billing section */
+  --billing-ink: #7e1f59;    /* Plum */
+  --neg: #b91c1c;            /* negative values (kept red for meaning) */
+  --ok: #15803d;             /* positive/ok (kept green for meaning) */
   --shadow: 0 1px 0 rgba(0,0,0,.04), 0 8px 24px -16px rgba(0,0,0,.35);
 }
 * { box-sizing: border-box; }
@@ -22,7 +27,7 @@ body {
   background:
     radial-gradient(120% 120% at 100% 0%, #faf7f0 0%, var(--paper) 55%) fixed;
   color: var(--ink);
-  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   font-size: 13px;
   display: flex;
   flex-direction: column;
@@ -61,29 +66,33 @@ body {
 .sidebar-backdrop[hidden] { display: none; }
 .current-tab { font-weight: 700; font-size: 14px; color: var(--ink); }
 .mark {
-  font-size: 26px; color: var(--accent); line-height: 1;
+  font-size: 26px; color: var(--plum); line-height: 1;
   transform: rotate(0deg);
 }
-h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
+h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; color: var(--plum); }
 .sub { margin: 2px 0 0; color: var(--ink-soft); font-size: 11px; letter-spacing: .02em; }
 .actions { display: flex; gap: 8px; align-items: center; }
 .user-chip {
-  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--ink-soft);
+  font-family: 'Fira Mono', monospace; font-size: 11.5px; color: var(--ink-soft);
   padding: 0 4px; white-space: nowrap;
 }
 .user-chip .role { color: var(--accent); font-weight: 600; text-transform: capitalize; }
 
 .btn {
   font: inherit; font-weight: 600; font-size: 12px;
-  padding: 8px 13px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--line-strong); background: #fff; color: var(--ink);
+  padding: 8px 13px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink);
   text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
-  transition: transform .06s ease, background .15s ease, border-color .15s ease;
+  transition: transform .06s ease, filter .15s ease, background .15s ease, border-color .15s ease;
 }
 .btn:hover { transform: translateY(-1px); }
-.btn.ghost:hover { border-color: var(--accent); color: var(--accent); }
-.btn.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.solid:hover { background: #a8350a; }
+.btn.ghost { background: transparent; border-color: var(--plum); color: var(--plum); }
+.btn.ghost:hover { background: var(--plum-soft); }
+.btn.solid {
+  background: linear-gradient(135deg, var(--plum), var(--accent));
+  border-color: transparent; color: #fff;
+}
+.btn.solid:hover { filter: brightness(0.95); }
 
 /* "More PERQs" actions dropdown */
 .more-wrap { position: relative; }
@@ -112,7 +121,7 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
   padding: 12px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-.status { color: var(--ink-soft); font-size: 11px; font-family: 'IBM Plex Mono', monospace; }
+.status { color: var(--ink-soft); font-size: 11px; font-family: 'Fira Mono', monospace; }
 
 /* View tools (filter toggle + table zoom), right side of the tab bar */
 .view-tools { margin-left: auto; display: flex; align-items: center; gap: 12px; }
@@ -124,12 +133,12 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
 .view-btn:hover { border-color: var(--accent); color: var(--accent); }
 .zoom { display: flex; align-items: center; gap: 5px; }
 .zoom #zoomLevel {
-  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft);
+  font-family: 'Fira Mono', monospace; font-size: 11px; color: var(--ink-soft);
   min-width: 40px; text-align: center;
 }
 .pager { display: flex; align-items: center; gap: 5px; }
 .pager select { font: inherit; font-size: 11px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); }
-.pager #pageInfo { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft); min-width: 96px; text-align: center; white-space: nowrap; }
+.pager #pageInfo { font-family: 'Fira Mono', monospace; font-size: 11px; color: var(--ink-soft); min-width: 96px; text-align: center; white-space: nowrap; }
 .view-btn:disabled { opacity: .4; cursor: default; }
 .view-btn:disabled:hover { border-color: var(--line-strong); color: var(--ink-soft); }
 
@@ -179,8 +188,8 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
   color: var(--ink-soft); margin-bottom: 4px;
 }
 .filter select { font: inherit; padding: 5px 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; min-width: 150px; }
-.metric .v { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
-.metric.accent { background: var(--accent-soft); border-color: #f0c6ab; }
+.metric .v { font-family: 'Fira Mono', monospace; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.metric.accent { background: var(--accent-soft); border-color: #f2c9b6; }
 .metric.accent .v { color: var(--accent); }
 
 /* Grid */
@@ -194,8 +203,8 @@ thead th {
   text-align: left; padding: 9px 10px; white-space: nowrap;
   border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line);
 }
-thead th.computed { background: #dde7dd; color: var(--compute-ink); }
-thead th.billing { background: #d4e1f3; color: var(--billing-ink); }
+thead th.computed { background: #d3e1e6; color: var(--compute-ink); }
+thead th.billing { background: #ecd9e4; color: var(--billing-ink); }
 /* Drag-to-resize handle on the right edge of each data column header */
 thead th .col-resize {
   position: absolute; top: 0; right: 0; width: 7px; height: 100%;
@@ -204,7 +213,7 @@ thead th .col-resize {
 thead th .col-resize:hover { background: var(--accent); opacity: .45; }
 thead th.rownum, tbody td.rownum {
   position: sticky; left: 0; z-index: 2; min-width: 46px; text-align: right;
-  background: #efe9dc; color: var(--ink-soft); font-family: 'IBM Plex Mono', monospace;
+  background: #efe9dc; color: var(--ink-soft); font-family: 'Fira Mono', monospace;
 }
 tbody td.rownum { background: var(--panel); border-right: 1px solid var(--line-strong); }
 thead th.rownum { z-index: 4; }
@@ -223,17 +232,17 @@ tbody td input, tbody td select {
 tbody td input:focus, tbody td select:focus {
   background: #fff; box-shadow: inset 0 0 0 2px var(--accent);
 }
-tbody td.num input { font-family: 'IBM Plex Mono', monospace; text-align: right; }
+tbody td.num input { font-family: 'Fira Mono', monospace; text-align: right; }
 tbody td.computed {
   background: var(--compute-bg) !important; color: var(--compute-ink);
-  font-family: 'IBM Plex Mono', monospace; text-align: right;
+  font-family: 'Fira Mono', monospace; text-align: right;
   padding: 7px 10px; font-weight: 500;
 }
 tbody td.computed.neg { color: var(--neg); }
 tbody td.billing { background: var(--billing-bg) !important; }
 /* Read-only cells (fields the current user may view but not edit) */
 tbody td.ro { padding: 7px 9px; color: var(--ink); white-space: nowrap; }
-tbody td.ro.num { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+tbody td.ro.num { text-align: right; font-family: 'Fira Mono', monospace; }
 tbody td.offset-na { text-align: right; }
 tbody td.offset-na .na { display: inline-block; padding: 7px 10px; color: var(--ink-soft); opacity: .5; }
 tbody td.del {
@@ -248,7 +257,7 @@ tbody td.del button:hover { color: var(--neg); }
 /* Hover popup for long cell text (e.g. Notes) */
 .cell-tip {
   position: fixed; z-index: 200; max-width: 360px;
-  background: var(--ink); color: #fff; padding: 9px 12px; border-radius: 8px;
+  background: var(--night); color: #fff; padding: 9px 12px; border-radius: 8px;
   font-size: 12.5px; line-height: 1.45; box-shadow: var(--shadow);
   white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none;
 }
@@ -267,13 +276,13 @@ tbody td.del button:hover { color: var(--neg); }
   text-align: left; padding: 9px 10px; white-space: nowrap;
   border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line);
 }
-#ssTable th.ss-actual { background: #dde7dd; color: var(--compute-ink); }
+#ssTable th.ss-actual { background: #d3e1e6; color: var(--compute-ink); }
 #ssTable td {
   padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line);
   background: var(--panel); white-space: nowrap;
 }
 #ssTable td.ss-actual {
-  background: var(--compute-bg); color: var(--compute-ink); font-family: 'IBM Plex Mono', monospace;
+  background: var(--compute-bg); color: var(--compute-ink); font-family: 'Fira Mono', monospace;
   text-align: right; padding: 7px 10px; font-weight: 500;
 }
 #ssTable td.num { text-align: right; }
@@ -282,10 +291,10 @@ tbody td.del button:hover { color: var(--neg); }
   min-width: 90px; color: var(--ink); outline: none;
 }
 #ssTable td input:focus, #ssTable td select:focus { background: #fff; box-shadow: inset 0 0 0 2px var(--accent); }
-#ssTable td.num input { font-family: 'IBM Plex Mono', monospace; text-align: right; }
+#ssTable td.num input { font-family: 'Fira Mono', monospace; text-align: right; }
 #ssTable td .view-btn.danger { border: none; padding: 6px 10px; }
 tr.ss-group td {
-  background: #e7eef8; padding: 0; border-bottom: 1px solid var(--line-strong);
+  background: var(--plum-soft); padding: 0; border-bottom: 1px solid var(--line-strong);
 }
 .ss-group-label {
   position: sticky; left: 0; display: inline-block; padding: 7px 12px;
@@ -297,7 +306,7 @@ tr.ss-group td {
 /* Toast */
 .toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px);
-  background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px;
+  background: var(--night); color: #fff; padding: 10px 16px; border-radius: 8px;
   font-size: 12.5px; opacity: 0; pointer-events: none; transition: all .25s ease; z-index: 50;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -399,7 +408,7 @@ tr.ss-group td {
 .recon-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .recon-table th, .recon-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .recon-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
-.recon-table td.num, .recon-table th.num { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+.recon-table td.num, .recon-table th.num { text-align: right; font-family: 'Fira Mono', monospace; }
 .recon-table input { width: 100px; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; text-align: right; }
 .recon-up { font-size: 10px; color: var(--ink-soft); margin-top: 2px; }
 .recon-table td.diff { background: #fdecec; }
