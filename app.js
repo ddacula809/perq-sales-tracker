@@ -805,6 +805,23 @@ function ssActual(row, month) {
 }
 const ssFieldDef = (key) => state.schema.sales_support.editable.find((f) => f.key === key);
 
+// PMC options: existing PMCs (from bookings + sales support) plus an "add new" choice.
+function ssPmcList() {
+  const set = new Set();
+  for (const b of state.rows.bookings) if (b.pmc) set.add(String(b.pmc).trim());
+  for (const r of state.rows.sales_support) if (r.pmc) set.add(String(r.pmc).trim());
+  return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+function ssPmcOptions(current) {
+  const cur = current == null ? '' : String(current);
+  const list = ssPmcList();
+  if (cur && !list.includes(cur)) list.unshift(cur); // keep an unknown current value visible
+  return ['<option value="">—</option>']
+    .concat(list.map((p) => `<option value="${escapeAttr(p)}"${p === cur ? ' selected' : ''}>${escapeHtml(p)}</option>`))
+    .concat('<option value="__add_pmc__">+ Add new PMC…</option>')
+    .join('');
+}
+
 function ssCell(row, key) {
   if (key === 'apr_actual' || key === 'may_actual' || key === 'jun_actual') {
     return `<td class="ss-actual">${fmtMoney(ssActual(row, SS_MONTHS.find((m) => m.akey === key)))}</td>`;
@@ -824,15 +841,13 @@ function ssCell(row, key) {
     return `<td><select data-ss-key="${key}">${opts}</select></td>`;
   }
   if (key === 'pmc') {
-    return `<td><input type="text" list="pmcList" data-ss-key="pmc" value="${escapeAttr(val)}" /></td>`;
+    return `<td><select data-ss-key="pmc">${ssPmcOptions(val)}</select></td>`;
   }
   const step = f.type === 'number' ? ' step="any"' : '';
   return `<td class="${numCls.trim()}"><input type="${f.type === 'number' ? 'number' : 'text'}"${step} data-ss-key="${key}" value="${escapeAttr(val)}" /></td>`;
 }
 
 function renderSalesSupport() {
-  const pmcs = [...new Set(state.rows.bookings.map((b) => b.pmc).filter(Boolean))].sort();
-  $('#pmcList').innerHTML = pmcs.map((p) => `<option value="${escapeAttr(p)}"></option>`).join('');
   $('#ssAddRow').style.display = canAddDelete() ? '' : 'none';
 
   const editCol = canAddDelete();
@@ -875,8 +890,15 @@ function wireSalesSupport() {
     const ctl = e.target.closest('[data-ss-key]');
     if (!ctl) return;
     const id = Number(ctl.closest('[data-ss-id]').dataset.ssId);
+    const key = ctl.dataset.ssKey;
+    let value = ctl.value;
+    if (key === 'pmc' && value === '__add_pmc__') {
+      const name = (prompt('New PMC name:') || '').trim();
+      if (!name) { renderSalesSupport(); return; } // cancelled — restore the select
+      value = name;
+    }
     try {
-      const updated = await api(`/api/sales_support/${id}`, { method: 'PATCH', body: JSON.stringify({ [ctl.dataset.ssKey]: ctl.value }) });
+      const updated = await api(`/api/sales_support/${id}`, { method: 'PATCH', body: JSON.stringify({ [key]: value }) });
       updateRowInState('sales_support', updated);
       renderSalesSupport(); // grouping/actuals may change
       toast('Saved');
