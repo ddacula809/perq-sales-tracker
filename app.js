@@ -746,7 +746,7 @@ function wireEntry() {
 const reconText = (v) => String(v == null ? '' : v).trim().toLowerCase();
 const reconNum = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : null; };
 const reconPair = (r) => `${reconText(r.booking_month)}|${reconNum(r.booking_year)}`;
-const reconKey = (r) => `${reconPair(r)}|${reconText(r.property_id)}|${reconText(r.product)}`;
+const reconKey = (r) => `${reconPair(r)}|${reconText(r.property_id)}|${reconText(r.pmc)}|${reconText(r.product)}`;
 // Value columns compared during reconciliation. Company Total is computed (not editable).
 const RECON_METRICS = [
   { key: 'mrr', label: 'MRR', editable: true },
@@ -810,13 +810,13 @@ function renderReconcile() {
   }
   const metricHead = RECON_METRICS.map((m) => `<th class="num">${m.label}</th>`).join('');
   const idCells = (r, prop = true) =>
-    `<td>${escapeHtml(my(r))}</td><td>${escapeHtml(r.property_id ?? '')}</td>` +
+    `<td>${escapeHtml(my(r))}</td><td>${escapeHtml(r.property_id ?? '')}</td><td>${escapeHtml(r.pmc ?? '')}</td>` +
     (prop ? `<td>${escapeHtml(r.property_name ?? '')}</td>` : '') +
     `<td>${escapeHtml(r.product ?? '')}</td>`;
 
   let html = `<h3 class="recon-h">Values differ (${res.mismatches.length})</h3>`;
   html += res.mismatches.length
-    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th>${metricHead}</tr></thead><tbody>` +
+    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>PMC</th><th>Property</th><th>Product</th>${metricHead}</tr></thead><tbody>` +
       res.mismatches.map(({ booking: b, uploaded: u, diffs }) =>
         `<tr data-id="${b.id}">${idCells(b)}${RECON_METRICS.map((m) => reconMetricCell(b, u, m, diffs)).join('')}</tr>`).join('') +
       '</tbody></table>'
@@ -824,7 +824,7 @@ function renderReconcile() {
 
   html += `<h3 class="recon-h">In upload, missing from Bookings (${res.missingInApp.length})</h3>`;
   html += res.missingInApp.length
-    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Product</th>${metricHead}</tr></thead><tbody>` +
+    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>PMC</th><th>Product</th>${metricHead}</tr></thead><tbody>` +
       res.missingInApp.map((r) =>
         `<tr>${idCells(r, false)}${RECON_METRICS.map((m) => `<td class="num">${(r[m.key] != null && r[m.key] !== '') ? fmtMoney(r[m.key]) : ''}</td>`).join('')}</tr>`).join('') +
       '</tbody></table>'
@@ -832,7 +832,7 @@ function renderReconcile() {
 
   html += `<h3 class="recon-h">In Bookings, not in upload (${res.extraInApp.length})</h3>`;
   html += res.extraInApp.length
-    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th>${metricHead}<th></th></tr></thead><tbody>` +
+    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>PMC</th><th>Property</th><th>Product</th>${metricHead}<th></th></tr></thead><tbody>` +
       res.extraInApp.map((b) =>
         `<tr data-id="${b.id}">${idCells(b)}${RECON_METRICS.map((m) => reconMetricCell(b, null, m, [])).join('')}<td><button type="button" class="view-btn danger" data-recon-del>Delete</button></td></tr>`).join('') +
       '</tbody></table>'

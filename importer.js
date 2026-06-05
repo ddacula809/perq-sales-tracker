@@ -100,6 +100,7 @@ const RECON_COLS = [
   ['Booking Month', 'booking_month', 'text'],
   ['Booking Year', 'booking_year', 'number'],
   ['Property ID', 'property_id', 'text'],
+  ['PMC', 'pmc', 'text'],
   ['Product', 'product', 'text'],
   ['MRR', 'mrr', 'number'],
   ['Offset Amount', 'offset_amount', 'number'],
