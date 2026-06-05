@@ -32,6 +32,7 @@ const state = {
   page: { bookings: 1, churn: 1 },
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
+  bdDetail: null,     // active Billing Dashboard drill-down key
 };
 
 const $ = (s) => document.querySelector(s);
@@ -413,11 +414,20 @@ function metric(k, v, accent = false) {
 }
 
 // ---------- Billing Dashboard (admin + billing) ----------
+const BD_BILLING = new Set(['billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'sage_id']);
+// Who can edit a field in the drill-down: admin/standard all; billing = billing columns.
+function bdCanEdit(key) {
+  const r = role();
+  if (r === 'admin' || r === 'standard') return true;
+  if (r === 'billing') return BD_BILLING.has(key);
+  return false;
+}
+const BD_DETAIL_KEYS = ['property_id', 'property_name', 'pmc', 'product', 'mrr', 'one_time_fee',
+  'billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'golive_date'];
+
 function renderBillingDashboard() {
   const rows = state.rows.bookings;
   const num = (v) => Number(v) || 0;
-  const card = (label, value, accent) =>
-    `<div class="metric${accent ? ' accent' : ''}"><span class="k">${label}</span><span class="v">${value}</span></div>`;
   const distinctProps = (pred) => {
     const set = new Set();
     for (const r of rows) if (pred(r)) set.add(String(r.property_id || r.property_name || `#${r.id}`));
@@ -433,25 +443,77 @@ function renderBillingDashboard() {
   const notLive = (r) => !r.golive_date;
   const live = (r) => !!r.golive_date;
 
-  $('#billingInner').innerHTML =
+  const BD_PREDS = {
+    implFee: { label: 'Properties with Implementation Fees', pred: hasImplFee },
+    implBilled: { label: 'Implementation Fees — Billed (Completed)', pred: (r) => hasImplFee(r) && implCompleted(r) },
+    implPending: { label: 'Implementation Fees — Pending / Not Billed', pred: implPending },
+    recCompleted: { label: 'Recurring Billing — Completed', pred: recCompleted },
+    recPending: { label: 'Recurring Billing — Pending', pred: recPending },
+    notLive: { label: 'Not Live (no GoLive date)', pred: notLive },
+    live: { label: 'Live Properties', pred: live },
+  };
+
+  // Tiles are clickable; data-bd ties each to a drill-down predicate.
+  const card = (label, value, bd, accent) =>
+    `<div class="metric clickable${accent ? ' accent' : ''}${state.bdDetail === bd ? ' active' : ''}" data-bd="${bd}"><span class="k">${label}</span><span class="v">${value}</span></div>`;
+
+  let html =
     '<div class="metrics-title">Implementation Fees</div><div class="metrics-row">'
-    + card('Properties w/ Impl. Fee', String(distinctProps(hasImplFee)), true)
-    + card('Total Implementation Fees', fmtMoney(sumWhere(hasImplFee, 'one_time_fee')))
-    + card('Billed (Completed)', fmtMoney(sumWhere(implCompleted, 'one_time_fee')))
-    + card('Pending / Not Billed', fmtMoney(sumWhere(implPending, 'one_time_fee')))
+    + card('Properties w/ Impl. Fee', String(distinctProps(hasImplFee)), 'implFee', true)
+    + card('Total Implementation Fees', fmtMoney(sumWhere(hasImplFee, 'one_time_fee')), 'implFee')
+    + card('Billed (Completed)', fmtMoney(sumWhere((r) => hasImplFee(r) && implCompleted(r), 'one_time_fee')), 'implBilled')
+    + card('Pending / Not Billed', fmtMoney(sumWhere(implPending, 'one_time_fee')), 'implPending')
     + '</div>'
     + '<div class="metrics-title">Recurring Billing</div><div class="metrics-row">'
-    + card('Completed Properties', String(distinctProps(recCompleted)), true)
-    + card('Completed MRR', fmtMoney(sumWhere(recCompleted, 'mrr')))
-    + card('Pending Properties', String(distinctProps(recPending)))
-    + card('Pending MRR', fmtMoney(sumWhere(recPending, 'mrr')))
+    + card('Completed Properties', String(distinctProps(recCompleted)), 'recCompleted', true)
+    + card('Completed MRR', fmtMoney(sumWhere(recCompleted, 'mrr')), 'recCompleted')
+    + card('Pending Properties', String(distinctProps(recPending)), 'recPending')
+    + card('Pending MRR', fmtMoney(sumWhere(recPending, 'mrr')), 'recPending')
     + '</div>'
     + '<div class="metrics-title">Go-Live</div><div class="metrics-row">'
-    + card('Not Live (no GoLive date)', String(distinctProps(notLive)), true)
-    + card('Not Live MRR', fmtMoney(sumWhere(notLive, 'mrr')))
-    + card('Live Properties', String(distinctProps(live)))
-    + card('Live MRR', fmtMoney(sumWhere(live, 'mrr')))
+    + card('Not Live (no GoLive date)', String(distinctProps(notLive)), 'notLive', true)
+    + card('Not Live MRR', fmtMoney(sumWhere(notLive, 'mrr')), 'notLive')
+    + card('Live Properties', String(distinctProps(live)), 'live')
+    + card('Live MRR', fmtMoney(sumWhere(live, 'mrr')), 'live')
     + '</div>';
+
+  // Drill-down: editable detail table for the selected tile (edits write back to bookings).
+  if (state.bdDetail && BD_PREDS[state.bdDetail]) {
+    const { pred, label } = BD_PREDS[state.bdDetail];
+    const defs = BD_DETAIL_KEYS.map((k) => state.schema.bookings.editable.find((f) => f.key === k)).filter(Boolean);
+    const matching = rows.filter(pred);
+    const headRow = defs.map((f) => `<th>${escapeHtml(f.label)}</th>`).join('');
+    const bodyRows = matching.map((row) =>
+      `<tr data-id="${row.id}">${defs.map((f) => (bdCanEdit(f.key) ? editCell(f, row) : readonlyCell(f, row))).join('')}</tr>`).join('');
+    html += `<div class="metrics-title">${escapeHtml(label)} (${matching.length})</div>`
+      + '<div class="bd-detail"><table><thead><tr>' + headRow + '</tr></thead><tbody>'
+      + (bodyRows || `<tr><td class="muted" colspan="${defs.length || 1}" style="padding:12px">No matching properties.</td></tr>`)
+      + '</tbody></table></div>';
+  }
+  $('#billingInner').innerHTML = html;
+}
+
+function wireBilling() {
+  // Click a tile -> toggle its drill-down.
+  $('#billingInner').addEventListener('click', (e) => {
+    const tile = e.target.closest('[data-bd]');
+    if (!tile) return;
+    state.bdDetail = state.bdDetail === tile.dataset.bd ? null : tile.dataset.bd;
+    renderBillingDashboard();
+  });
+  // Edit a cell in the drill-down -> save to bookings and refresh.
+  $('#billingInner').addEventListener('change', async (e) => {
+    const ctl = e.target.closest('[data-key]');
+    if (!ctl) return;
+    const tr = ctl.closest('tr');
+    if (!tr || !tr.dataset.id) return;
+    try {
+      const updated = await api(`/api/bookings/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ [ctl.dataset.key]: ctl.value }) });
+      updateRowInState('bookings', updated);
+      renderBillingDashboard();
+      toast('Saved');
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 // ---------- Data ops ----------
@@ -1582,7 +1644,7 @@ function wireUsers() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling();
   applyZoom();
   if (state.token) {
     try {

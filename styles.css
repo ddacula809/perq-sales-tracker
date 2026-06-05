@@ -267,6 +267,11 @@ tbody td.del button:hover { color: var(--neg); }
 .billing-view { flex: 1; min-height: 0; overflow: auto; background: var(--paper); }
 .billing-view[hidden] { display: none; }
 .billing-inner { padding: 18px 22px 28px; display: flex; flex-direction: column; gap: 12px; }
+.metric.clickable { cursor: pointer; }
+.metric.clickable:hover { border-color: var(--accent); }
+.metric.active { box-shadow: inset 0 0 0 2px var(--accent); }
+.bd-detail { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.bd-detail table { width: max-content; }
 
 /* Sales Support */
 .sales-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--paper); }
