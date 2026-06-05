@@ -33,6 +33,7 @@ const state = {
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   bdDetail: null,     // active Billing Dashboard drill-down key
+  bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
 };
 
 const $ = (s) => document.querySelector(s);
@@ -457,7 +458,8 @@ function renderBillingDashboard() {
   const card = (label, value, bd, accent) =>
     `<div class="metric clickable${accent ? ' accent' : ''}${state.bdDetail === bd ? ' active' : ''}" data-bd="${bd}"><span class="k">${label}</span><span class="v">${value}</span></div>`;
 
-  let html =
+  let html = `<div class="bd-bar"><button type="button" class="view-btn" data-bd-toggle>${state.bdCollapsed ? 'Show metrics ▾' : 'Hide metrics ▴'}</button></div>`;
+  if (!state.bdCollapsed) html +=
     '<div class="metrics-title">Implementation Fees</div><div class="metrics-row">'
     + card('Properties w/ Impl. Fee', String(distinctProps(hasImplFee)), 'implFee', true)
     + card('Total Implementation Fees', fmtMoney(sumWhere(hasImplFee, 'one_time_fee')), 'implFee')
@@ -490,12 +492,14 @@ function renderBillingDashboard() {
       + (bodyRows || `<tr><td class="muted" colspan="${defs.length || 1}" style="padding:12px">No matching properties.</td></tr>`)
       + '</tbody></table></div>';
   }
+  $('#billingInner').classList.toggle('bd-collapsed', state.bdCollapsed);
   $('#billingInner').innerHTML = html;
 }
 
 function wireBilling() {
   // Click a tile -> toggle its drill-down.
   $('#billingInner').addEventListener('click', (e) => {
+    if (e.target.closest('[data-bd-toggle]')) { state.bdCollapsed = !state.bdCollapsed; renderBillingDashboard(); return; }
     const tile = e.target.closest('[data-bd]');
     if (!tile) return;
     state.bdDetail = state.bdDetail === tile.dataset.bd ? null : tile.dataset.bd;

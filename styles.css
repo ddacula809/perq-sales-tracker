@@ -272,6 +272,8 @@ tbody td.del button:hover { color: var(--neg); }
 .metric.active { box-shadow: inset 0 0 0 2px var(--accent); }
 .bd-detail { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .bd-detail table { width: max-content; }
+.bd-bar { display: flex; }
+.bd-collapsed .bd-detail { max-height: 82vh; }
 
 /* Sales Support */
 .sales-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--paper); }
