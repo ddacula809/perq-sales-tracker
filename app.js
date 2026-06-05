@@ -30,6 +30,8 @@ const state = {
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
   pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
   page: { bookings: 1, churn: 1 },
+  salesPeriods: [],   // [{ period, quarter, year, status }]
+  salesPeriod: '',    // the quarter currently being viewed in Sales Support
 };
 
 const $ = (s) => document.querySelector(s);
@@ -416,6 +418,10 @@ async function loadAll() {
   state.rows.bookings = await api('/api/bookings');
   state.rows.churn = await api('/api/churn');
   state.rows.sales_support = await api('/api/sales_support');
+  state.salesPeriods = await api('/api/sales_periods');
+  const openP = state.salesPeriods.find((p) => p.status === 'open');
+  state.salesPeriod = openP ? openP.period
+    : (state.salesPeriods.length ? state.salesPeriods[state.salesPeriods.length - 1].period : '');
   renderAll();
   $('#status').textContent =
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
@@ -799,35 +805,50 @@ function wireEntry() {
   });
 }
 
-// ---------- Sales Support (Q2 2026 forecast) ----------
-const SS_MONTHS = [
-  { akey: 'apr_actual', name: 'April', year: 2026 },
-  { akey: 'may_actual', name: 'May', year: 2026 },
-  { akey: 'jun_actual', name: 'June', year: 2026 },
-];
-const SS_COLS = [
-  ['product_category', 'Product'], ['section', 'Section'], ['pmc', 'PMC'],
-  ['booking_type', 'Booking Type'], ['account_owner', 'Account Owner'], ['q2_target', 'Q2 Target'],
-  ['apr_target', 'April 2026 Target'], ['apr_actual', 'April 2026 Actual'],
-  ['may_target', 'May 2026 Target'], ['may_actual', 'May 2026 Actual'],
-  ['jun_target', 'June 2026 Target'], ['jun_actual', 'June 2026 Actual'],
-  ['q2_actual', 'Q2 Actual'], ['worst', 'Worst'], ['accurate', 'Accurate'], ['best', 'Best'], ['notes', 'Notes'],
-];
-const SS_COMPUTED = new Set(['apr_actual', 'may_actual', 'jun_actual', 'q2_actual']);
-const SS_MONEY = new Set(['q2_target', 'apr_target', 'apr_actual', 'may_target', 'may_actual',
-  'jun_target', 'jun_actual', 'q2_actual', 'worst', 'accurate', 'best']);
+// ---------- Sales Support (quarterly forecast vs actuals) ----------
+const QUARTER_MONTHS = {
+  1: ['January', 'February', 'March'], 2: ['April', 'May', 'June'],
+  3: ['July', 'August', 'September'], 4: ['October', 'November', 'December'],
+};
+// Stored slots: q2_target = quarter target; apr/may/jun_target = month 1/2/3 targets.
+// Computed (frontend-only): m1/m2/m3_actual + q_actual.
+const SS_COMPUTED = new Set(['m1_actual', 'm2_actual', 'm3_actual', 'q_actual']);
+const SS_MONEY = new Set(['q2_target', 'apr_target', 'may_target', 'jun_target',
+  'm1_actual', 'm2_actual', 'm3_actual', 'q_actual', 'worst', 'accurate', 'best']);
 
-// Sum of Company Total Booking for bookings matching this row's PMC + Product category in a month.
-function ssActual(row, month) {
+function viewedPeriodObj() { return state.salesPeriods.find((p) => p.period === state.salesPeriod) || null; }
+function ssEditable() { const p = viewedPeriodObj(); return !!p && p.status === 'open' && canAddDelete(); }
+
+// Columns for the viewed quarter: [key, label]. Labels reflect the quarter's months/year.
+function ssColumns() {
+  const p = viewedPeriodObj();
+  const q = p ? `Q${p.quarter}` : 'Q';
+  const y = p ? p.year : '';
+  const m = p ? QUARTER_MONTHS[p.quarter] : ['Month 1', 'Month 2', 'Month 3'];
+  return [
+    ['product_category', 'Product'], ['section', 'Section'], ['pmc', 'PMC'],
+    ['booking_type', 'Booking Type'], ['account_owner', 'Account Owner'],
+    ['q2_target', `${q} Target`],
+    ['apr_target', `${m[0]} ${y} Target`], ['m1_actual', `${m[0]} ${y} Actual`],
+    ['may_target', `${m[1]} ${y} Target`], ['m2_actual', `${m[1]} ${y} Actual`],
+    ['jun_target', `${m[2]} ${y} Target`], ['m3_actual', `${m[2]} ${y} Actual`],
+    ['q_actual', `${q} Actual`],
+    ['worst', 'Worst'], ['accurate', 'Accurate'], ['best', 'Best'], ['notes', 'Notes'],
+  ];
+}
+const ssLabels = () => Object.fromEntries(ssColumns());
+
+// Sum of Company Total Booking for matching PMC + product category + month + year.
+function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
-  if (!pmc || !cat) return 0;
+  if (!pmc || !cat || !monthName) return 0;
   let sum = 0;
   for (const b of state.rows.bookings) {
     if (String(b.pmc || '').trim().toLowerCase() === pmc
       && (b.bpr_prod_category || '') === cat
-      && b.booking_month === month.name
-      && reconNum(b.booking_year) === month.year) {
+      && b.booking_month === monthName
+      && reconNum(b.booking_year) === year) {
       sum += Number(b.company_total_booking) || 0;
     }
   }
@@ -868,16 +889,20 @@ function ssPmcOptions(current) {
 }
 
 function ssCell(row, key) {
-  if (key === 'apr_actual' || key === 'may_actual' || key === 'jun_actual') {
-    return `<td class="ss-actual" data-col="${key}">${fmtMoney(ssActual(row, SS_MONTHS.find((m) => m.akey === key)))}</td>`;
+  const p = viewedPeriodObj();
+  const months = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const year = p ? p.year : null;
+  if (key === 'm1_actual' || key === 'm2_actual' || key === 'm3_actual') {
+    const idx = { m1_actual: 0, m2_actual: 1, m3_actual: 2 }[key];
+    return `<td class="ss-actual" data-col="${key}">${fmtMoney(ssActual(row, months[idx], year))}</td>`;
   }
-  if (key === 'q2_actual') {
-    return `<td class="ss-actual" data-col="${key}">${fmtMoney(SS_MONTHS.reduce((a, m) => a + ssActual(row, m), 0))}</td>`;
+  if (key === 'q_actual') {
+    return `<td class="ss-actual" data-col="${key}">${fmtMoney(months.reduce((a, mn) => a + ssActual(row, mn, year), 0))}</td>`;
   }
   const f = ssFieldDef(key);
   const val = row[key] ?? '';
   const numCls = f.type === 'number' ? ' num' : '';
-  if (!canAddDelete()) { // read-only
+  if (!ssEditable()) { // read-only (archived quarter or no edit permission)
     const text = SS_MONEY.has(key) ? fmtMoney(row[key]) : (f.type === 'number' ? fmtNum(row[key]) : (row[key] ?? ''));
     return `<td class="${numCls.trim()}" data-col="${key}">${escapeHtml(text)}</td>`;
   }
@@ -896,37 +921,56 @@ function ssCell(row, key) {
 }
 
 function renderSalesSupport() {
-  $('#ssAddRow').style.display = canAddDelete() ? '' : 'none';
+  const periods = state.salesPeriods;
+  $('#ssPeriod').innerHTML = periods.slice().reverse().map((p) =>
+    `<option value="${escapeAttr(p.period)}"${p.period === state.salesPeriod ? ' selected' : ''}>${escapeHtml(p.period)}${p.status === 'open' ? ' (open)' : ' (archived)'}</option>`).join('')
+    || '<option value="">No quarters</option>';
+  const viewed = viewedPeriodObj();
+  const pill = $('#ssPeriodStatus');
+  pill.textContent = viewed ? (viewed.status === 'open' ? 'Open' : 'Archived') : '';
+  pill.style.display = viewed ? '' : 'none';
+  $('#ssAddRow').style.display = ssEditable() ? '' : 'none';
+  $('#ssCloseQuarter').hidden = !(isAdmin() && viewed && viewed.status === 'open');
+  $('#ssOpenQuarter').hidden = !isAdmin();
 
-  const editCol = canAddDelete();
+  const cols = ssColumns();
+  const editCol = ssEditable();
   $('#ssHead').innerHTML = '<tr>' +
-    SS_COLS.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}" data-col="${k}">${label}<span class="col-resize"></span></th>`).join('') +
+    cols.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}" data-col="${k}">${escapeHtml(label)}<span class="col-resize"></span></th>`).join('') +
     (editCol ? '<th></th>' : '') + '</tr>';
 
-  const cats = ssFieldDef('product_category').options;
-  const secs = ssFieldDef('section').options;
-  const catIdx = (c) => { const i = cats.indexOf(c); return i < 0 ? 99 : i; };
-  const secIdx = (s) => { const i = secs.indexOf(s); return i < 0 ? 99 : i; };
-  const rows = [...state.rows.sales_support].sort((a, b) =>
-    catIdx(a.product_category) - catIdx(b.product_category)
-    || secIdx(a.section) - secIdx(b.section)
-    || String(a.pmc || '').localeCompare(String(b.pmc || '')));
+  const catList = ssFieldDef('product_category').options;
+  const secList = ssFieldDef('section').options;
+  const catIdx = (c) => { const i = catList.indexOf(c); return i < 0 ? 99 : i; };
+  const secIdx = (s) => { const i = secList.indexOf(s); return i < 0 ? 99 : i; };
+  const rows = state.rows.sales_support
+    .filter((r) => r.period === state.salesPeriod)
+    .sort((a, b) =>
+      catIdx(a.product_category) - catIdx(b.product_category)
+      || secIdx(a.section) - secIdx(b.section)
+      || String(a.pmc || '').localeCompare(String(b.pmc || '')));
 
-  const colCount = SS_COLS.length + (editCol ? 1 : 0);
+  const colCount = cols.length + (editCol ? 1 : 0);
   let html = '';
   let group = null;
   for (const row of rows) {
     const g = `${row.product_category || '—'}  ·  ${row.section || '—'}`;
     if (g !== group) { group = g; html += `<tr class="ss-group"><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`; }
     const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
-    html += `<tr data-ss-id="${row.id}">${SS_COLS.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
+    html += `<tr data-ss-id="${row.id}">${cols.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
   }
-  if (!rows.length) html = `<tr><td class="muted" colspan="${colCount}" style="padding:14px">No rows yet.${editCol ? ' Use “+ Add row”.' : ''}</td></tr>`;
+  if (!rows.length) {
+    const msg = !viewed ? `No quarters yet.${isAdmin() ? ' Use “Open New Quarter”.' : ''}`
+      : editCol ? 'No rows yet. Use “+ Add row”.'
+        : (viewed.status === 'open' ? 'No rows yet.' : 'Archived quarter (read-only).');
+    html = `<tr><td class="muted" colspan="${colCount || 1}" style="padding:14px">${msg}</td></tr>`;
+  }
   $('#ssBody').innerHTML = html;
 }
 
-// Build one field for the "Add row" form.
+// Build one field for the "Add row" form (labels reflect the open quarter).
 function ssFormFieldHtml(f) {
+  const label = ssLabels()[f.key] || f.label;
   let control;
   if (f.key === 'pmc') {
     control = `<select data-ss-key="pmc">${ssPmcOptions('')}</select>`;
@@ -936,11 +980,13 @@ function ssFormFieldHtml(f) {
   } else {
     control = `<input type="text" data-ss-key="${f.key}" />`; // money/text typed in
   }
-  return `<div class="entry-field" data-field="${f.key}"><label>${f.label}</label>${control}</div>`;
+  return `<div class="entry-field" data-field="${f.key}"><label>${escapeHtml(label)}</label>${control}</div>`;
 }
 
 function openSsForm() {
-  $('#ssForm').innerHTML = state.schema.sales_support.editable.map(ssFormFieldHtml).join('');
+  $('#ssForm').innerHTML = state.schema.sales_support.editable
+    .filter((f) => f.key !== 'period') // period is set server-side to the open quarter
+    .map(ssFormFieldHtml).join('');
   $('#ssModal').hidden = false;
   const first = $('#ssForm [data-ss-key]');
   if (first) first.focus();
@@ -966,7 +1012,26 @@ async function submitSsForm(e) {
 }
 
 function wireSalesSupport() {
-  $('#ssAddRow').onclick = () => { if (canAddDelete()) openSsForm(); };
+  $('#ssAddRow').onclick = () => { if (ssEditable()) openSsForm(); };
+  $('#ssPeriod').onchange = (e) => { state.salesPeriod = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
+  $('#ssCloseQuarter').onclick = async () => {
+    if (!confirm('Close (archive) the current open quarter? It becomes read-only.')) return;
+    try {
+      state.salesPeriods = await api('/api/sales_periods/close', { method: 'POST' });
+      renderSalesSupport(); ssApplyFreeze();
+      toast('Quarter closed');
+    } catch (err) { toast(err.message, true); }
+  };
+  $('#ssOpenQuarter').onclick = async () => {
+    if (!confirm('Open a new quarter? Any open quarter will be archived first.')) return;
+    try {
+      const data = await api('/api/sales_periods/open', { method: 'POST' });
+      state.salesPeriods = data.periods;
+      state.salesPeriod = data.created.period;
+      renderSalesSupport(); ssApplyFreeze();
+      toast(`Opened ${data.created.period}`);
+    } catch (err) { toast(err.message, true); }
+  };
   $('#ssModalClose').onclick = () => { $('#ssModal').hidden = true; };
   $('#ssCancel').onclick = () => { $('#ssModal').hidden = true; };
   $('#ssModal').addEventListener('click', (e) => { if (e.target.id === 'ssModal') $('#ssModal').hidden = true; });

@@ -266,8 +266,12 @@ tbody td.del button:hover { color: var(--neg); }
 /* Sales Support */
 .sales-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--paper); }
 .sales-view[hidden] { display: none; }
-.sales-bar { padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.sales-bar { display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .sales-bar .btn { width: auto; }
+.ss-period { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 8px; }
+.ss-period select { font: inherit; text-transform: none; letter-spacing: 0; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); }
+.ss-pill { font-family: 'Fira Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; padding: 3px 9px; border-radius: 999px; background: var(--plum-soft); color: var(--plum); }
+.ss-quarter-actions { margin-left: auto; display: flex; gap: 8px; }
 .sales-scroller { overflow: auto; flex: 1; min-height: 0; }
 #ssTable { border-collapse: separate; border-spacing: 0; width: max-content; }
 #ssTable th {

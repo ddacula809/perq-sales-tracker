@@ -125,13 +125,63 @@ export async function initDb() {
     );
   `);
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username))');
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sales_periods (
+      period TEXT PRIMARY KEY,
+      quarter INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      closed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
   await ensureColumns('bookings', BOOKING_FIELDS);
   await ensureColumns('churn', CHURN_FIELDS);
   await ensureColumns('sales_support', SALES_SUPPORT_FIELDS);
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
   await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);
+  await runOnce('sales_periods_init_v1', initSalesPeriods);
   await ensureAdmin();
+}
+
+// Seed the first sales period (Q2 2026) and tag existing sales_support rows to it.
+async function initSalesPeriods() {
+  const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM sales_periods');
+  if (rows[0].n === 0) {
+    await pool.query(`INSERT INTO sales_periods (period, quarter, year, status) VALUES ('Q2 2026', 2, 2026, 'open')`);
+  }
+  await pool.query(`UPDATE sales_support SET period = 'Q2 2026' WHERE period IS NULL`);
+}
+
+// ---- Sales Support periods ----
+export async function listPeriods() {
+  const { rows } = await pool.query('SELECT period, quarter, year, status, closed_at FROM sales_periods ORDER BY year ASC, quarter ASC');
+  return rows;
+}
+export async function getOpenPeriod() {
+  const { rows } = await pool.query(`SELECT * FROM sales_periods WHERE status='open' ORDER BY year DESC, quarter DESC LIMIT 1`);
+  return rows[0];
+}
+export async function closeAllOpenPeriods() {
+  await pool.query(`UPDATE sales_periods SET status='closed', closed_at=now() WHERE status='open'`);
+}
+export async function latestPeriod() {
+  const { rows } = await pool.query('SELECT * FROM sales_periods ORDER BY year DESC, quarter DESC LIMIT 1');
+  return rows[0];
+}
+export async function createPeriod(quarter, year) {
+  const period = `Q${quarter} ${year}`;
+  await pool.query(
+    `INSERT INTO sales_periods (period, quarter, year, status) VALUES ($1, $2, $3, 'open')
+     ON CONFLICT (period) DO UPDATE SET status='open', closed_at=NULL`,
+    [period, quarter, year]
+  );
+  return { period, quarter, year, status: 'open' };
+}
+export async function getRowPeriod(table, id) {
+  const { rows } = await pool.query(`SELECT period FROM ${table} WHERE id=$1`, [id]);
+  return rows[0] ? rows[0].period : null;
 }
 
 // Seed the first admin if there are no users yet, so a fresh deploy isn't locked out.

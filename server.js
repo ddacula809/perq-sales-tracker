@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   initDb, listRows, insertRow, updateRow, deleteRow, replaceAll, pool,
   getUserByUsername, listUsers, createUser, updateUser, deleteUser, getUserById, countAdmins,
+  listPeriods, getOpenPeriod, closeAllOpenPeriods, latestPeriod, createPeriod, getRowPeriod,
 } from './db.js';
 import { computeBooking, computeChurn } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile } from './importer.js';
@@ -119,7 +120,55 @@ function crud(table, computeFn) {
 }
 crud('bookings', computeBooking);
 crud('churn', computeChurn);
-crud('sales_support', () => ({})); // actuals are computed on the client from bookings
+
+// ---- Sales Support periods (quarters); close/open are admin-only ----
+app.get('/api/sales_periods', async (_req, res, next) => {
+  try { res.json(await listPeriods()); } catch (e) { next(e); }
+});
+app.post('/api/sales_periods/close', requireRole('admin'), async (_req, res, next) => {
+  try { await closeAllOpenPeriods(); res.json(await listPeriods()); } catch (e) { next(e); }
+});
+app.post('/api/sales_periods/open', requireRole('admin'), async (_req, res, next) => {
+  try {
+    await closeAllOpenPeriods();
+    const last = await latestPeriod();
+    let q = last ? last.quarter + 1 : 1;
+    let y = last ? last.year : new Date().getFullYear();
+    if (q > 4) { q = 1; y += 1; }
+    const created = await createPeriod(q, y);
+    res.json({ created, periods: await listPeriods() });
+  } catch (e) { next(e); }
+});
+
+// ---- Sales Support rows: edits allowed only within the open quarter ----
+app.get('/api/sales_support', async (_req, res, next) => {
+  try { res.json(await listRows('sales_support')); } catch (e) { next(e); }
+});
+app.post('/api/sales_support', requireRole('admin', 'standard'), async (req, res, next) => {
+  try {
+    const open = await getOpenPeriod();
+    if (!open) return res.status(400).json({ error: 'No open quarter. Open a new quarter first.' });
+    res.status(201).json(await insertRow('sales_support', { ...(req.body || {}), period: open.period }));
+  } catch (e) { next(e); }
+});
+app.patch('/api/sales_support/:id', requireRole('admin', 'standard'), async (req, res, next) => {
+  try {
+    const open = await getOpenPeriod();
+    const rowPeriod = await getRowPeriod('sales_support', Number(req.params.id));
+    if (!rowPeriod) return res.status(404).json({ error: 'Not found' });
+    if (!open || rowPeriod !== open.period) return res.status(403).json({ error: 'This quarter is archived (read-only).' });
+    res.json(await updateRow('sales_support', Number(req.params.id), req.body || {}));
+  } catch (e) { next(e); }
+});
+app.delete('/api/sales_support/:id', requireRole('admin', 'standard'), async (req, res, next) => {
+  try {
+    const open = await getOpenPeriod();
+    const rowPeriod = await getRowPeriod('sales_support', Number(req.params.id));
+    if (!open || rowPeriod !== open.period) return res.status(403).json({ error: 'This quarter is archived (read-only).' });
+    await deleteRow('sales_support', Number(req.params.id));
+    res.status(204).end();
+  } catch (e) { next(e); }
+});
 
 // ---- User management (admin only) ----
 app.get('/api/users', requireRole('admin'), async (_req, res, next) => {

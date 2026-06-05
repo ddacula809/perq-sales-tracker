@@ -100,7 +100,13 @@
 
   <main class="sales-view" id="salesView" hidden>
     <div class="sales-bar">
+      <label class="ss-period">Quarter <select id="ssPeriod"></select></label>
+      <span class="ss-pill" id="ssPeriodStatus"></span>
       <button class="btn solid" id="ssAddRow">+ Add row</button>
+      <div class="ss-quarter-actions">
+        <button class="btn ghost" id="ssCloseQuarter" hidden>Close Quarter</button>
+        <button class="btn ghost" id="ssOpenQuarter" hidden>Open New Quarter</button>
+      </div>
     </div>
     <div class="sales-scroller">
       <table id="ssTable"><thead id="ssHead"></thead><tbody id="ssBody"></tbody></table>

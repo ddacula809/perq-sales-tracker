@@ -108,12 +108,13 @@ export const SALES_SUPPORT_FIELDS = [
   { key: 'pmc',              label: 'PMC',            type: 'text' },
   { key: 'booking_type',     label: 'Booking Type',   type: 'select', options: ['', 'Pilot', 'Conversion', 'Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
   { key: 'account_owner',    label: 'Account Owner',  type: 'select', options: ['', 'Kathryn', 'Doug', 'House/CSM', 'Caleb', 'Kirk', 'Scott', 'Cindy', 'Michelle'] },
-  { key: 'q2_target',        label: 'Q2 Target',      type: 'number' },
-  { key: 'apr_target',       label: 'April 2026 Target', type: 'number' },
-  { key: 'may_target',       label: 'May 2026 Target',   type: 'number' },
-  { key: 'jun_target',       label: 'June 2026 Target',  type: 'number' },
+  { key: 'q2_target',        label: 'Quarter Target', type: 'number' }, // quarter target (generic slot)
+  { key: 'apr_target',       label: 'Month 1 Target', type: 'number' }, // 1st month of the quarter
+  { key: 'may_target',       label: 'Month 2 Target', type: 'number' },
+  { key: 'jun_target',       label: 'Month 3 Target', type: 'number' },
   { key: 'worst',            label: 'Worst',          type: 'number' },
   { key: 'accurate',         label: 'Accurate',       type: 'number' },
   { key: 'best',             label: 'Best',           type: 'number' },
   { key: 'notes',            label: 'Notes',          type: 'text' },
+  { key: 'period',           label: 'Period',         type: 'text' },  // 'Q2 2026' (scoping; not shown)
 ];
