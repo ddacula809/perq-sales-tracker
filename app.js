@@ -747,7 +747,24 @@ const reconText = (v) => String(v == null ? '' : v).trim().toLowerCase();
 const reconNum = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : null; };
 const reconPair = (r) => `${reconText(r.booking_month)}|${reconNum(r.booking_year)}`;
 const reconKey = (r) => `${reconPair(r)}|${reconText(r.property_id)}|${reconText(r.product)}`;
-function mrrEqual(a, b) { const na = reconNum(a); const nb = reconNum(b); return na === nb; }
+// Value columns compared during reconciliation. Company Total is computed (not editable).
+const RECON_METRICS = [
+  { key: 'mrr', label: 'MRR', editable: true },
+  { key: 'offset_amount', label: 'Offset Amount', editable: true },
+  { key: 'one_time_fee', label: 'One-Time Fee', editable: true },
+  { key: 'company_total_booking', label: 'Company Total', editable: false },
+];
+
+// Metric keys where the uploaded value (when present) differs from the booking's value.
+function metricsDiff(b, u) {
+  const diffs = [];
+  for (const m of RECON_METRICS) {
+    const uv = u[m.key];
+    if (uv === null || uv === undefined || uv === '') continue; // upload didn't provide it
+    if (reconNum(uv) !== reconNum(b[m.key])) diffs.push(m.key);
+  }
+  return diffs;
+}
 
 // Diff the uploaded rows against current bookings, scoped to the uploaded Month/Year pairs.
 function reconcile() {
@@ -763,12 +780,25 @@ function reconcile() {
   const missingInApp = [];
   for (const r of uploaded) {
     const b = curByKey.get(reconKey(r));
-    if (!b) missingInApp.push(r);
-    else if (!mrrEqual(b.mrr, r.mrr)) mismatches.push({ booking: b, uploadedMrr: r.mrr });
+    if (!b) { missingInApp.push(r); continue; }
+    const diffs = metricsDiff(b, r);
+    if (diffs.length) mismatches.push({ booking: b, uploaded: r, diffs });
   }
   const extraInApp = [];
   for (const [key, b] of curByKey) if (!upByKey.has(key)) extraInApp.push(b);
   state.reconcile.result = { mismatches, missingInApp, extraInApp };
+}
+
+// One metric cell: the booking's value (editable input or text) + a small "file: $X" hint.
+function reconMetricCell(b, u, m, diffs) {
+  const differs = diffs.includes(m.key);
+  const upRaw = u ? u[m.key] : null;
+  const hasUp = upRaw !== null && upRaw !== undefined && upRaw !== '';
+  const cur = m.editable
+    ? `<input type="number" step="any" data-recon-field="${m.key}" value="${escapeAttr(b[m.key] ?? '')}" />`
+    : `<span>${fmtMoney(b[m.key])}</span>`;
+  const hint = hasUp ? `<div class="recon-up">file: ${fmtMoney(upRaw)}</div>` : '';
+  return `<td class="num${differs ? ' diff' : ''}">${cur}${hint}</td>`;
 }
 
 function renderReconcile() {
@@ -778,25 +808,33 @@ function renderReconcile() {
     $('#reconcileBody').innerHTML = '<p class="recon-ok">Everything reconciles for the uploaded period(s). 🎉</p>';
     return;
   }
-  let html = `<h3 class="recon-h">MRR differs (${res.mismatches.length})</h3>`;
+  const metricHead = RECON_METRICS.map((m) => `<th class="num">${m.label}</th>`).join('');
+  const idCells = (r, prop = true) =>
+    `<td>${escapeHtml(my(r))}</td><td>${escapeHtml(r.property_id ?? '')}</td>` +
+    (prop ? `<td>${escapeHtml(r.property_name ?? '')}</td>` : '') +
+    `<td>${escapeHtml(r.product ?? '')}</td>`;
+
+  let html = `<h3 class="recon-h">Values differ (${res.mismatches.length})</h3>`;
   html += res.mismatches.length
-    ? '<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th><th class="num">Uploaded MRR</th><th class="num">Current MRR</th></tr></thead><tbody>' +
-      res.mismatches.map(({ booking: b, uploadedMrr }) =>
-        `<tr data-id="${b.id}"><td>${escapeHtml(my(b))}</td><td>${escapeHtml(b.property_id ?? '')}</td><td>${escapeHtml(b.property_name ?? '')}</td><td>${escapeHtml(b.product ?? '')}</td><td class="num">${fmtMoney(uploadedMrr)}</td><td class="num"><input type="number" step="any" data-recon-mrr value="${escapeAttr(b.mrr ?? '')}" /></td></tr>`).join('') +
+    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th>${metricHead}</tr></thead><tbody>` +
+      res.mismatches.map(({ booking: b, uploaded: u, diffs }) =>
+        `<tr data-id="${b.id}">${idCells(b)}${RECON_METRICS.map((m) => reconMetricCell(b, u, m, diffs)).join('')}</tr>`).join('') +
       '</tbody></table>'
     : '<p class="muted">None.</p>';
+
   html += `<h3 class="recon-h">In upload, missing from Bookings (${res.missingInApp.length})</h3>`;
   html += res.missingInApp.length
-    ? '<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Product</th><th class="num">MRR</th></tr></thead><tbody>' +
+    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Product</th>${metricHead}</tr></thead><tbody>` +
       res.missingInApp.map((r) =>
-        `<tr><td>${escapeHtml(my(r))}</td><td>${escapeHtml(r.property_id ?? '')}</td><td>${escapeHtml(r.product ?? '')}</td><td class="num">${fmtMoney(r.mrr)}</td></tr>`).join('') +
+        `<tr>${idCells(r, false)}${RECON_METRICS.map((m) => `<td class="num">${(r[m.key] != null && r[m.key] !== '') ? fmtMoney(r[m.key]) : ''}</td>`).join('')}</tr>`).join('') +
       '</tbody></table>'
     : '<p class="muted">None.</p>';
+
   html += `<h3 class="recon-h">In Bookings, not in upload (${res.extraInApp.length})</h3>`;
   html += res.extraInApp.length
-    ? '<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th><th class="num">Current MRR</th><th></th></tr></thead><tbody>' +
+    ? `<table class="recon-table"><thead><tr><th>Month/Year</th><th>Property ID</th><th>Property</th><th>Product</th>${metricHead}<th></th></tr></thead><tbody>` +
       res.extraInApp.map((b) =>
-        `<tr data-id="${b.id}"><td>${escapeHtml(my(b))}</td><td>${escapeHtml(b.property_id ?? '')}</td><td>${escapeHtml(b.property_name ?? '')}</td><td>${escapeHtml(b.product ?? '')}</td><td class="num"><input type="number" step="any" data-recon-mrr value="${escapeAttr(b.mrr ?? '')}" /></td><td><button type="button" class="view-btn danger" data-recon-del>Delete</button></td></tr>`).join('') +
+        `<tr data-id="${b.id}">${idCells(b)}${RECON_METRICS.map((m) => reconMetricCell(b, null, m, [])).join('')}<td><button type="button" class="view-btn danger" data-recon-del>Delete</button></td></tr>`).join('') +
       '</tbody></table>'
     : '<p class="muted">None.</p>';
   $('#reconcileBody').innerHTML = html;
@@ -830,13 +868,14 @@ function wireReconcile() {
   $('#reconcileClose').onclick = closeReconcile;
   $('#reconcileModal').addEventListener('click', (e) => { if (e.target.id === 'reconcileModal') closeReconcile(); });
 
-  // Inline-edit a current MRR -> save and re-diff.
+  // Inline-edit a value (MRR / Offset / One-Time Fee) -> save and re-diff.
   $('#reconcileBody').addEventListener('change', async (e) => {
-    const inp = e.target.closest('[data-recon-mrr]');
+    const inp = e.target.closest('[data-recon-field]');
     if (!inp) return;
     const id = Number(inp.closest('tr').dataset.id);
+    const key = inp.dataset.reconField;
     try {
-      const updated = await api(`/api/bookings/${id}`, { method: 'PATCH', body: JSON.stringify({ mrr: inp.value }) });
+      const updated = await api(`/api/bookings/${id}`, { method: 'PATCH', body: JSON.stringify({ [key]: inp.value }) });
       updateRowInState('bookings', updated);
       reconcile(); renderReconcile();
       toast('Saved');

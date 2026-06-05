@@ -314,4 +314,7 @@ tbody td.del button:hover { color: var(--neg); }
 .recon-table th, .recon-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .recon-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
 .recon-table td.num, .recon-table th.num { text-align: right; font-family: 'IBM Plex Mono', monospace; }
-.recon-table input { width: 110px; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; text-align: right; }
+.recon-table input { width: 100px; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; text-align: right; }
+.recon-up { font-size: 10px; color: var(--ink-soft); margin-top: 2px; }
+.recon-table td.diff { background: #fdecec; }
+.recon-table td.diff .recon-up { color: var(--neg); font-weight: 600; }

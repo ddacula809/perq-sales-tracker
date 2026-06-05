@@ -53,7 +53,7 @@ const CHURN_UPLOAD_COLS = [
   ['Client Success Manager', 'client_success_manager', 'text'],
 ];
 
-const normHeader = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
+const normHeader = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 // Parse a churn report (.xlsx) into churn row objects. Reads the first sheet and locates
 // the header row by matching the expected labels, so column position/sheet name don't matter.
@@ -102,6 +102,9 @@ const RECON_COLS = [
   ['Property ID', 'property_id', 'text'],
   ['Product', 'product', 'text'],
   ['MRR', 'mrr', 'number'],
+  ['Offset Amount', 'offset_amount', 'number'],
+  ['One-Time Fee', 'one_time_fee', 'number'],
+  ['Company Total Booking', 'company_total_booking', 'number'],
 ];
 
 // Parse a reconciliation file into { booking_month, booking_year, property_id, product, mrr }
