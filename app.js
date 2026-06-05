@@ -1278,7 +1278,11 @@ function ssFormFieldHtml(f) {
   const label = ssLabels()[f.key] || f.label;
   let control;
   if (f.key === 'pmc') {
-    control = `<select data-ss-key="pmc">${ssPmcOptions('')}</select>`;
+    // Type-to-search PMC / Account Name (suggestions from Salesforce Recon + existing PMCs).
+    // Free text is allowed, so a brand-new PMC can simply be typed in.
+    const opts = ssPmcList().map((p) => `<option value="${escapeAttr(p)}"></option>`).join('');
+    control = `<input type="text" list="ssPmcDatalist" data-ss-key="pmc" placeholder="Type to search PMCs…" autocomplete="off" />`
+      + `<datalist id="ssPmcDatalist">${opts}</datalist>`;
   } else if (f.type === 'select') {
     const opts = f.options.map((o) => `<option value="${escapeAttr(o)}">${o || '—'}</option>`).join('');
     control = `<select data-ss-key="${f.key}">${opts}</select>`;
@@ -1344,13 +1348,7 @@ function wireSalesSupport() {
   $('#ssCancel').onclick = () => { $('#ssModal').hidden = true; };
   $('#ssModal').addEventListener('click', (e) => { if (e.target.id === 'ssModal') $('#ssModal').hidden = true; });
   $('#ssForm').addEventListener('submit', submitSsForm);
-  // "+ Add new PMC" inside the form.
-  $('#ssForm').addEventListener('change', (e) => {
-    const sel = e.target.closest('[data-ss-key="pmc"]');
-    if (!sel || sel.value !== '__add_pmc__') return;
-    const name = (prompt('New PMC name:') || '').trim();
-    sel.innerHTML = ssPmcOptions(name); // includes + selects the new name, or resets if blank
-  });
+  // (PMC in the Add-row form is a type-to-search input with a datalist — free text allowed.)
   $('#ssBody').addEventListener('change', async (e) => {
     const ctl = e.target.closest('[data-ss-key]');
     if (!ctl) return;
