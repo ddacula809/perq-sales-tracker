@@ -1187,16 +1187,19 @@ function ssColumns() {
 const ssLabels = () => Object.fromEntries(ssColumns());
 
 // Sum of Company Total Booking for matching PMC + product category + month + year.
+// For the "Pilot / New Logo" section, only count bookings tagged Pilot in "Pilot or CTAM".
 function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
   if (!pmc || !cat || !monthName) return 0;
+  const pilotOnly = String(row.section || '').trim() === 'Pilot / New Logo';
   let sum = 0;
   for (const b of state.rows.bookings) {
     if (String(b.pmc || '').trim().toLowerCase() === pmc
       && (b.bpr_prod_category || '') === cat
       && b.booking_month === monthName
-      && reconNum(b.booking_year) === year) {
+      && reconNum(b.booking_year) === year
+      && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot')) {
       sum += Number(b.company_total_booking) || 0;
     }
   }
