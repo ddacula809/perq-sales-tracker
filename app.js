@@ -412,6 +412,48 @@ function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
 }
 
+// ---------- Billing Dashboard (admin + billing) ----------
+function renderBillingDashboard() {
+  const rows = state.rows.bookings;
+  const num = (v) => Number(v) || 0;
+  const card = (label, value, accent) =>
+    `<div class="metric${accent ? ' accent' : ''}"><span class="k">${label}</span><span class="v">${value}</span></div>`;
+  const distinctProps = (pred) => {
+    const set = new Set();
+    for (const r of rows) if (pred(r)) set.add(String(r.property_id || r.property_name || `#${r.id}`));
+    return set.size;
+  };
+  const sumWhere = (pred, key) => rows.reduce((a, r) => a + (pred(r) ? num(r[key]) : 0), 0);
+
+  const hasImplFee = (r) => num(r.one_time_fee) > 0;
+  const implCompleted = (r) => r.implementation_billing_status === 'Completed';
+  const implPending = (r) => hasImplFee(r) && r.implementation_billing_status !== 'Completed';
+  const recCompleted = (r) => r.recurring_billing_status === 'Completed';
+  const recPending = (r) => r.recurring_billing_status === 'Pending';
+  const notLive = (r) => !r.golive_date;
+  const live = (r) => !!r.golive_date;
+
+  $('#billingInner').innerHTML =
+    '<div class="metrics-title">Implementation Fees</div><div class="metrics-row">'
+    + card('Properties w/ Impl. Fee', String(distinctProps(hasImplFee)), true)
+    + card('Total Implementation Fees', fmtMoney(sumWhere(hasImplFee, 'one_time_fee')))
+    + card('Billed (Completed)', fmtMoney(sumWhere(implCompleted, 'one_time_fee')))
+    + card('Pending / Not Billed', fmtMoney(sumWhere(implPending, 'one_time_fee')))
+    + '</div>'
+    + '<div class="metrics-title">Recurring Billing</div><div class="metrics-row">'
+    + card('Completed Properties', String(distinctProps(recCompleted)), true)
+    + card('Completed MRR', fmtMoney(sumWhere(recCompleted, 'mrr')))
+    + card('Pending Properties', String(distinctProps(recPending)))
+    + card('Pending MRR', fmtMoney(sumWhere(recPending, 'mrr')))
+    + '</div>'
+    + '<div class="metrics-title">Go-Live</div><div class="metrics-row">'
+    + card('Not Live (no GoLive date)', String(distinctProps(notLive)), true)
+    + card('Not Live MRR', fmtMoney(sumWhere(notLive, 'mrr')))
+    + card('Live Properties', String(distinctProps(live)))
+    + card('Live MRR', fmtMoney(sumWhere(live, 'mrr')))
+    + '</div>';
+}
+
 // ---------- Data ops ----------
 async function loadAll() {
   state.schema = await api('/api/schema');
@@ -431,9 +473,14 @@ function renderAll() {
   // The New Booking tab is admin-only.
   document.querySelector('[data-tab="newbooking"]').hidden = !isAdmin();
   if (state.tab === 'newbooking' && !isAdmin()) state.tab = 'dashboard';
+  // The Billing Dashboard is for admins and billing users.
+  const canBilling = isAdmin() || role() === 'billing';
+  document.querySelector('[data-tab="billing"]').hidden = !canBilling;
+  if (state.tab === 'billing' && !canBilling) state.tab = 'dashboard';
 
   const isEntry = state.tab === 'newbooking';
   const isSales = state.tab === 'salessupport';
+  const isBillingTab = state.tab === 'billing';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   $('#currentTab').textContent = TAB_LABELS[state.tab] || '';
   // Account / role-based controls.
@@ -453,14 +500,16 @@ function renderAll() {
   $('#gridwrap').style.display = isGrid ? '' : 'none';
   $('#entryView').hidden = !isEntry;
   $('#salesView').hidden = !isSales;
+  $('#billingView').hidden = !isBillingTab;
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
-  $('#toggleFilters').style.display = (isEntry || isSales) ? 'none' : '';
+  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab) ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
   $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
   $('#colMenu').hidden = true;
   if (isEntry && !$('#productLines').children.length) resetEntryView();
   if (isSales) renderSalesSupport();
+  if (isBillingTab) renderBillingDashboard();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
@@ -533,8 +582,8 @@ function wireGrid() {
 }
 
 const TAB_LABELS = {
-  dashboard: 'Dashboard', salessupport: 'Sales Support', newbooking: 'New Booking',
-  bookings: 'Bookings', churn: 'Churn Tracker',
+  dashboard: 'Dashboard', billing: 'Billing Dashboard', salessupport: 'Sales Support',
+  newbooking: 'New Booking', bookings: 'Bookings', churn: 'Churn Tracker',
 };
 
 function closeSidebar() {

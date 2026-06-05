@@ -263,6 +263,11 @@ tbody td.del button:hover { color: var(--neg); }
 }
 .cell-tip[hidden] { display: none; }
 
+/* Billing Dashboard */
+.billing-view { flex: 1; min-height: 0; overflow: auto; background: var(--paper); }
+.billing-view[hidden] { display: none; }
+.billing-inner { padding: 18px 22px 28px; display: flex; flex-direction: column; gap: 12px; }
+
 /* Sales Support */
 .sales-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--paper); }
 .sales-view[hidden] { display: none; }

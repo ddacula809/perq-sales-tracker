@@ -51,6 +51,7 @@
 
   <aside class="sidebar" id="sidebar">
     <button class="tab active" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="billing" hidden>Billing Dashboard</button>
     <button class="tab" data-tab="salessupport">Sales Support</button>
     <button class="tab" data-tab="newbooking">New Booking</button>
     <button class="tab" data-tab="bookings">Bookings</button>
@@ -96,6 +97,10 @@
         <tbody id="tbody"></tbody>
       </table>
     </div>
+  </main>
+
+  <main class="billing-view" id="billingView" hidden>
+    <div class="billing-inner" id="billingInner"></div>
   </main>
 
   <main class="sales-view" id="salesView" hidden>
