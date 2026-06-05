@@ -403,8 +403,9 @@ function renderAll() {
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
-  $('#churnUploadBtn').hidden = !(state.tab === 'churn' && canAddDelete());
-  $('#reconcileBtn').hidden = !(state.tab === 'bookings' && canAddDelete());
+  // In the More PERQs menu these are role-gated only (work from any tab).
+  $('#churnUploadBtn').hidden = !canAddDelete();
+  $('#reconcileBtn').hidden = !canAddDelete();
   $('#usersBtn').hidden = !isAdmin();
   $('#changePwBtn').hidden = !state.user;
   $('#logoutBtn').hidden = !state.user;
