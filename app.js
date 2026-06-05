@@ -1152,7 +1152,10 @@ function ssApplyFreeze() {
 // plus an "add new" choice.
 function ssPmcList() {
   const set = new Set();
+  // Salesforce Recon Account Names: from the dedicated PMC endpoint (standard users)
+  // and directly from the loaded recon rows (admins always have these in memory).
   for (const name of state.sfPmcs) if (name) set.add(String(name).trim());
+  for (const r of state.rows.salesforce_recon) if (r.account_name) set.add(String(r.account_name).trim());
   for (const b of state.rows.bookings) if (b.pmc) set.add(String(b.pmc).trim());
   for (const r of state.rows.sales_support) if (r.pmc) set.add(String(r.pmc).trim());
   return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
