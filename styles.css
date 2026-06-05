@@ -306,6 +306,9 @@ tbody td.del button:hover { color: var(--neg); }
 .ss-period { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 8px; }
 .ss-period select { font: inherit; text-transform: none; letter-spacing: 0; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); }
 .ss-pill { font-family: 'Fira Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; padding: 3px 9px; border-radius: 999px; background: var(--plum-soft); color: var(--plum); }
+.ss-filters { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ss-filters label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
+.ss-filters select { font: inherit; text-transform: none; letter-spacing: 0; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); }
 .ss-quarter-actions { margin-left: auto; display: flex; gap: 8px; }
 .sales-scroller { overflow: auto; flex: 1; min-height: 0; }
 #ssTable { border-collapse: separate; border-spacing: 0; width: max-content; }

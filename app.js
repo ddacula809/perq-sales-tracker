@@ -32,6 +32,7 @@ const state = {
   page: { bookings: 1, churn: 1 },
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
+  ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   pendingBookings: [], // new-booking payloads awaiting confirmation
@@ -1142,6 +1143,22 @@ function ssCell(row, key) {
   return `<td class="${numCls.trim()}" data-col="${key}"><input type="${f.type === 'number' ? 'number' : 'text'}"${step} data-ss-key="${key}" value="${escapeAttr(val)}" /></td>`;
 }
 
+// Build the Sales Support filter dropdowns (Account Owner / Product / Section)
+// from the schema field options, preserving the current selection.
+function ssFilterOptionsHtml(values, current) {
+  return [`<option value="All"${current === 'All' ? ' selected' : ''}>All</option>`]
+    .concat(values.map((v) => `<option value="${escapeAttr(v)}"${v === current ? ' selected' : ''}>${escapeHtml(v)}</option>`))
+    .join('');
+}
+function populateSsFilters() {
+  const owners = (ssFieldDef('account_owner')?.options || []).filter(Boolean);
+  const products = (ssFieldDef('product_category')?.options || []).filter(Boolean);
+  const sections = (ssFieldDef('section')?.options || []).filter(Boolean);
+  $('#ssFilterOwner').innerHTML = ssFilterOptionsHtml(owners, state.ssFilters.owner);
+  $('#ssFilterProduct').innerHTML = ssFilterOptionsHtml(products, state.ssFilters.product);
+  $('#ssFilterSection').innerHTML = ssFilterOptionsHtml(sections, state.ssFilters.section);
+}
+
 function renderSalesSupport() {
   const periods = state.salesPeriods;
   $('#ssPeriod').innerHTML = periods.slice().reverse().map((p) =>
@@ -1165,8 +1182,15 @@ function renderSalesSupport() {
   const secList = ssFieldDef('section').options;
   const catIdx = (c) => { const i = catList.indexOf(c); return i < 0 ? 99 : i; };
   const secIdx = (s) => { const i = secList.indexOf(s); return i < 0 ? 99 : i; };
+
+  // Filter controls (Account Owner / Product / Section).
+  populateSsFilters();
+  const ff = state.ssFilters;
   const rows = state.rows.sales_support
     .filter((r) => r.period === state.salesPeriod)
+    .filter((r) => ff.owner === 'All' || (r.account_owner || '') === ff.owner)
+    .filter((r) => ff.product === 'All' || (r.product_category || '') === ff.product)
+    .filter((r) => ff.section === 'All' || (r.section || '') === ff.section)
     .sort((a, b) =>
       catIdx(a.product_category) - catIdx(b.product_category)
       || secIdx(a.section) - secIdx(b.section)
@@ -1239,6 +1263,9 @@ async function submitSsForm(e) {
 function wireSalesSupport() {
   $('#ssAddRow').onclick = () => { if (ssEditable()) openSsForm(); };
   $('#ssPeriod').onchange = (e) => { state.salesPeriod = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
+  $('#ssFilterOwner').onchange = (e) => { state.ssFilters.owner = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
+  $('#ssFilterProduct').onchange = (e) => { state.ssFilters.product = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
+  $('#ssFilterSection').onchange = (e) => { state.ssFilters.section = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssCloseQuarter').onclick = async () => {
     if (!confirm('Close (archive) the current open quarter? It becomes read-only.')) return;
     try {
