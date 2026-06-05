@@ -897,7 +897,7 @@ function renderSalesSupport() {
   let group = null;
   for (const row of rows) {
     const g = `${row.product_category || '—'}  ·  ${row.section || '—'}`;
-    if (g !== group) { group = g; html += `<tr class="ss-group"><td colspan="${colCount}">${escapeHtml(g)}</td></tr>`; }
+    if (g !== group) { group = g; html += `<tr class="ss-group"><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`; }
     const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
     html += `<tr data-ss-id="${row.id}">${SS_COLS.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
   }
