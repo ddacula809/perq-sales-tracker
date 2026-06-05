@@ -754,6 +754,7 @@ function wireActions() {
         + `<li><strong>${data.added}</strong> new churn row(s) added</li>`
         + `<li><strong>${data.changed}</strong> Last Date Under Contract changed (billing notified)</li>`
         + `<li><strong>${data.unchanged}</strong> unchanged (already present)</li>`
+        + `<li><strong>${data.skippedBlank || 0}</strong> skipped (blank Last Date Under Contract)</li>`
         + `<li class="muted">${data.total} row(s) in the file</li>`
         + '</ul>');
     } catch (err) { toast(err.message, true); }

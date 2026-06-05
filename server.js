@@ -241,7 +241,11 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
     let added = 0;
     let changed = 0;
     let unchanged = 0;
+    let skippedBlank = 0;
     for (const row of incoming) {
+      // Rows without a Last Date Under Contract are not real churn events -> skip them.
+      const next = row.last_date_under_contract ? String(row.last_date_under_contract).slice(0, 10) : '';
+      if (!next) { skippedBlank += 1; continue; }
       const k = key(row);
       const match = byKey.get(k);
       if (!match) {
@@ -253,7 +257,6 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       }
       // Same property/product/MRR already exists: compare Last Date Under Contract.
       const cur = match.last_date_under_contract ? String(match.last_date_under_contract).slice(0, 10) : '';
-      const next = row.last_date_under_contract ? String(row.last_date_under_contract).slice(0, 10) : '';
       if (cur === next) { unchanged += 1; continue; }
       // Last Date Under Contract changed -> update the existing row and notify billing.
       await updateRow('churn', match.id, { last_date_under_contract: next });
@@ -263,7 +266,7 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       match.last_date_under_contract = next;
       changed += 1;
     }
-    res.json({ added, changed, unchanged, total: incoming.length });
+    res.json({ added, changed, unchanged, skippedBlank, total: incoming.length });
   } catch (e) { next(e); }
 });
 
