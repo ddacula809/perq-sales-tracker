@@ -128,12 +128,14 @@ export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications (
       id SERIAL PRIMARY KEY,
+      target_tab TEXT NOT NULL DEFAULT 'bookings',
       booking_id INTEGER,
       message TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       dismissed BOOLEAN NOT NULL DEFAULT false
     );
   `);
+  await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_tab TEXT NOT NULL DEFAULT 'bookings'");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales_periods (
       period TEXT PRIMARY KEY,
@@ -195,11 +197,11 @@ export async function getRowPeriod(table, id) {
 
 // ---- Notifications (e.g. GoLive date changes, for billing users) ----
 export async function listNotifications() {
-  const { rows } = await pool.query('SELECT id, booking_id, message, created_at FROM notifications WHERE dismissed = false ORDER BY created_at DESC, id DESC');
+  const { rows } = await pool.query('SELECT id, target_tab, booking_id, message, created_at FROM notifications WHERE dismissed = false ORDER BY created_at DESC, id DESC');
   return rows;
 }
-export async function createNotification(bookingId, message) {
-  await pool.query('INSERT INTO notifications (booking_id, message) VALUES ($1, $2)', [bookingId, message]);
+export async function createNotification(targetTab, rowId, message) {
+  await pool.query('INSERT INTO notifications (target_tab, booking_id, message) VALUES ($1, $2, $3)', [targetTab, rowId, message]);
 }
 export async function dismissNotification(id) {
   await pool.query('UPDATE notifications SET dismissed = true WHERE id=$1', [id]);

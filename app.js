@@ -746,9 +746,16 @@ function wireActions() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Upload failed');
       const data = await res.json();
       state.rows.churn = await api('/api/churn');
+      if (isAdmin() || role() === 'billing') state.notifications = await api('/api/notifications');
       renderAll();
       $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
-      toast(`Added ${data.added}, skipped ${data.skipped} duplicate${data.skipped === 1 ? '' : 's'}`);
+      showResult('Churn upload complete',
+        '<ul class="result-list">'
+        + `<li><strong>${data.added}</strong> new churn row(s) added</li>`
+        + `<li><strong>${data.changed}</strong> Last Date Under Contract changed (billing notified)</li>`
+        + `<li><strong>${data.unchanged}</strong> unchanged (already present)</li>`
+        + `<li class="muted">${data.total} row(s) in the file</li>`
+        + '</ul>');
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };
@@ -1741,7 +1748,7 @@ function wireUsers() {
 function renderNotifMenu() {
   const list = state.notifications || [];
   $('#notifMenu').innerHTML = list.length
-    ? list.map((n) => `<div class="notif-item" data-go="${n.booking_id}"><span class="notif-msg">${escapeHtml(n.message)}</span><button type="button" class="notif-x" data-dismiss="${n.id}" title="Dismiss">✕</button></div>`).join('')
+    ? list.map((n) => `<div class="notif-item" data-go="${n.booking_id}" data-tab="${n.target_tab || 'bookings'}"><span class="notif-msg">${escapeHtml(n.message)}</span><button type="button" class="notif-x" data-dismiss="${n.id}" title="Dismiss">✕</button></div>`).join('')
     : '<div class="notif-empty">No notifications</div>';
 }
 
@@ -1760,20 +1767,22 @@ function wireNotifications() {
       return;
     }
     const item = e.target.closest('[data-go]');
-    if (item) { $('#notifMenu').hidden = true; gotoBooking(item.dataset.go); }
+    if (item) { $('#notifMenu').hidden = true; gotoRow(item.dataset.tab || 'bookings', item.dataset.go); }
   });
 }
 
-// Navigate to a specific booking line item: open Bookings, clear filters, page to it, flash it.
-function gotoBooking(id) {
-  state.tab = 'bookings';
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'bookings'));
-  Object.keys(state.filters.bookings).forEach((k) => { state.filters.bookings[k] = 'All'; });
-  const rows = currentRows('bookings');
+// Navigate to a specific line item: open its tab (Bookings or Churn), clear filters,
+// page to it, and flash the row.
+function gotoRow(tab, id) {
+  if (tab !== 'bookings' && tab !== 'churn') tab = 'bookings';
+  state.tab = tab;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  Object.keys(state.filters[tab]).forEach((k) => { state.filters[tab][k] = 'All'; });
+  const rows = currentRows(tab);
   const idx = rows.findIndex((r) => String(r.id) === String(id));
   if (idx >= 0) {
     const size = state.pageSize === 'all' ? (rows.length || 1) : Number(state.pageSize);
-    state.page.bookings = Math.floor(idx / size) + 1;
+    state.page[tab] = Math.floor(idx / size) + 1;
   }
   closeSidebar();
   renderAll();
