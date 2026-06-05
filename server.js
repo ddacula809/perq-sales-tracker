@@ -157,7 +157,7 @@ app.get('/api/sales_periods', async (_req, res, next) => {
   try { res.json(await listPeriods()); } catch (e) { next(e); }
 });
 // Close (archive + lock) one specific quarter. Only that quarter is affected.
-app.post('/api/sales_periods/close', requireRole('admin', 'sales_admin', 'sales'), async (req, res, next) => {
+app.post('/api/sales_periods/close', requireRole('admin', 'sales_admin'), async (req, res, next) => {
   try {
     const period = (req.body && req.body.period) ? String(req.body.period) : null;
     if (!period) return res.status(400).json({ error: 'No quarter specified.' });
@@ -169,7 +169,7 @@ app.post('/api/sales_periods/close', requireRole('admin', 'sales_admin', 'sales'
   } catch (e) { next(e); }
 });
 // Open a new quarter. Existing open quarters are left open (closing is now explicit).
-app.post('/api/sales_periods/open', requireRole('admin', 'sales_admin', 'sales'), async (_req, res, next) => {
+app.post('/api/sales_periods/open', requireRole('admin', 'sales_admin'), async (_req, res, next) => {
   try {
     const last = await latestPeriod();
     let q = last ? last.quarter + 1 : 1;

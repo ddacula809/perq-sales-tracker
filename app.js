@@ -64,7 +64,7 @@ function isSalesRole() { return role() === 'sales_admin' || role() === 'sales'; 
 function canAddDelete() { return role() === 'admin' || role() === 'standard'; } // bookings/churn + imports
 function canImport() { return role() === 'admin'; }
 function canEditSalesSupport() { return ['admin', 'standard', 'sales_admin', 'sales'].includes(role()); }
-function canManageQuarters() { return ['admin', 'sales_admin', 'sales'].includes(role()); }
+function canManageQuarters() { return ['admin', 'sales_admin'].includes(role()); } // open/close quarter
 function canEditField(f) {
   const r = role();
   if (r === 'admin' || r === 'standard') return true;
@@ -643,9 +643,7 @@ function renderAll() {
   // Salesforce Recon Data is admin-only.
   document.querySelector('[data-tab="sfrecon"]').hidden = !isAdmin();
   if (state.tab === 'sfrecon' && !isAdmin()) state.tab = 'dashboard';
-  // Sales roles don't deal with churn — hide the Churn Tracker for them.
-  document.querySelector('[data-tab="churn"]').hidden = isSalesRole();
-  if (state.tab === 'churn' && isSalesRole()) state.tab = 'dashboard';
+  // (Sales roles see Churn read-only — canEditField returns false for them.)
 
   const isEntry = state.tab === 'newbooking';
   const isSales = state.tab === 'salessupport';
