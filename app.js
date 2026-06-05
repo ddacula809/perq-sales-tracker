@@ -9,7 +9,7 @@ const MONEY = new Set([
 const state = {
   tab: 'dashboard',
   schema: null,
-  rows: { bookings: [], churn: [] },
+  rows: { bookings: [], churn: [], sales_support: [] },
   // Dashboard and Bookings filter independently: filtering the grid must not move the
   // dashboard totals, and vice versa.
   filters: {
@@ -406,6 +406,7 @@ async function loadAll() {
   state.schema = await api('/api/schema');
   state.rows.bookings = await api('/api/bookings');
   state.rows.churn = await api('/api/churn');
+  state.rows.sales_support = await api('/api/sales_support');
   renderAll();
   $('#status').textContent =
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
@@ -417,6 +418,7 @@ function renderAll() {
   if (state.tab === 'newbooking' && !isAdmin()) state.tab = 'dashboard';
 
   const isEntry = state.tab === 'newbooking';
+  const isSales = state.tab === 'salessupport';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
@@ -434,13 +436,15 @@ function renderAll() {
   // Sections: grid for Bookings/Churn, the entry form for New Booking, neither on Dashboard.
   $('#gridwrap').style.display = isGrid ? '' : 'none';
   $('#entryView').hidden = !isEntry;
+  $('#salesView').hidden = !isSales;
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
-  $('#toggleFilters').style.display = isEntry ? 'none' : '';
+  $('#toggleFilters').style.display = (isEntry || isSales) ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
   $('#zoomGroup').style.display = isGrid ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
   $('#colMenu').hidden = true;
   if (isEntry && !$('#productLines').children.length) resetEntryView();
+  if (isSales) renderSalesSupport();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
@@ -762,6 +766,131 @@ function wireEntry() {
     if ($('#productLines').querySelectorAll('[data-product]').length <= 1) return;
     e.target.closest('[data-product]').remove();
     renumberProducts();
+  });
+}
+
+// ---------- Sales Support (Q2 2026 forecast) ----------
+const SS_MONTHS = [
+  { akey: 'apr_actual', name: 'April', year: 2026 },
+  { akey: 'may_actual', name: 'May', year: 2026 },
+  { akey: 'jun_actual', name: 'June', year: 2026 },
+];
+const SS_COLS = [
+  ['product_category', 'Product'], ['section', 'Section'], ['pmc', 'PMC'],
+  ['booking_type', 'Booking Type'], ['account_owner', 'Account Owner'], ['q2_target', 'Q2 Target'],
+  ['apr_target', 'April 2026 Target'], ['apr_actual', 'April 2026 Actual'],
+  ['may_target', 'May 2026 Target'], ['may_actual', 'May 2026 Actual'],
+  ['jun_target', 'June 2026 Target'], ['jun_actual', 'June 2026 Actual'],
+  ['q2_actual', 'Q2 Actual'], ['worst', 'Worst'], ['accurate', 'Accurate'], ['best', 'Best'], ['notes', 'Notes'],
+];
+const SS_COMPUTED = new Set(['apr_actual', 'may_actual', 'jun_actual', 'q2_actual']);
+const SS_MONEY = new Set(['q2_target', 'apr_target', 'apr_actual', 'may_target', 'may_actual',
+  'jun_target', 'jun_actual', 'q2_actual', 'worst', 'accurate', 'best']);
+
+// Sum of Company Total Booking for bookings matching this row's PMC + Product category in a month.
+function ssActual(row, month) {
+  const pmc = String(row.pmc || '').trim().toLowerCase();
+  const cat = String(row.product_category || '').trim();
+  if (!pmc || !cat) return 0;
+  let sum = 0;
+  for (const b of state.rows.bookings) {
+    if (String(b.pmc || '').trim().toLowerCase() === pmc
+      && (b.bpr_prod_category || '') === cat
+      && b.booking_month === month.name
+      && reconNum(b.booking_year) === month.year) {
+      sum += Number(b.company_total_booking) || 0;
+    }
+  }
+  return sum;
+}
+const ssFieldDef = (key) => state.schema.sales_support.editable.find((f) => f.key === key);
+
+function ssCell(row, key) {
+  if (key === 'apr_actual' || key === 'may_actual' || key === 'jun_actual') {
+    return `<td class="ss-actual">${fmtMoney(ssActual(row, SS_MONTHS.find((m) => m.akey === key)))}</td>`;
+  }
+  if (key === 'q2_actual') {
+    return `<td class="ss-actual">${fmtMoney(SS_MONTHS.reduce((a, m) => a + ssActual(row, m), 0))}</td>`;
+  }
+  const f = ssFieldDef(key);
+  const val = row[key] ?? '';
+  const numCls = f.type === 'number' ? ' num' : '';
+  if (!canAddDelete()) { // read-only
+    const text = SS_MONEY.has(key) ? fmtMoney(row[key]) : (f.type === 'number' ? fmtNum(row[key]) : (row[key] ?? ''));
+    return `<td class="${numCls.trim()}">${escapeHtml(text)}</td>`;
+  }
+  if (f.type === 'select') {
+    const opts = f.options.map((o) => `<option value="${escapeAttr(o)}"${o === val ? ' selected' : ''}>${o || '—'}</option>`).join('');
+    return `<td><select data-ss-key="${key}">${opts}</select></td>`;
+  }
+  if (key === 'pmc') {
+    return `<td><input type="text" list="pmcList" data-ss-key="pmc" value="${escapeAttr(val)}" /></td>`;
+  }
+  const step = f.type === 'number' ? ' step="any"' : '';
+  return `<td class="${numCls.trim()}"><input type="${f.type === 'number' ? 'number' : 'text'}"${step} data-ss-key="${key}" value="${escapeAttr(val)}" /></td>`;
+}
+
+function renderSalesSupport() {
+  const pmcs = [...new Set(state.rows.bookings.map((b) => b.pmc).filter(Boolean))].sort();
+  $('#pmcList').innerHTML = pmcs.map((p) => `<option value="${escapeAttr(p)}"></option>`).join('');
+  $('#ssAddRow').style.display = canAddDelete() ? '' : 'none';
+
+  const editCol = canAddDelete();
+  $('#ssHead').innerHTML = '<tr>' +
+    SS_COLS.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}">${label}</th>`).join('') +
+    (editCol ? '<th></th>' : '') + '</tr>';
+
+  const cats = ssFieldDef('product_category').options;
+  const secs = ssFieldDef('section').options;
+  const catIdx = (c) => { const i = cats.indexOf(c); return i < 0 ? 99 : i; };
+  const secIdx = (s) => { const i = secs.indexOf(s); return i < 0 ? 99 : i; };
+  const rows = [...state.rows.sales_support].sort((a, b) =>
+    catIdx(a.product_category) - catIdx(b.product_category)
+    || secIdx(a.section) - secIdx(b.section)
+    || String(a.pmc || '').localeCompare(String(b.pmc || '')));
+
+  const colCount = SS_COLS.length + (editCol ? 1 : 0);
+  let html = '';
+  let group = null;
+  for (const row of rows) {
+    const g = `${row.product_category || '—'}  ·  ${row.section || '—'}`;
+    if (g !== group) { group = g; html += `<tr class="ss-group"><td colspan="${colCount}">${escapeHtml(g)}</td></tr>`; }
+    const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
+    html += `<tr data-ss-id="${row.id}">${SS_COLS.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
+  }
+  if (!rows.length) html = `<tr><td class="muted" colspan="${colCount}" style="padding:14px">No rows yet.${editCol ? ' Use “+ Add row”.' : ''}</td></tr>`;
+  $('#ssBody').innerHTML = html;
+}
+
+function wireSalesSupport() {
+  $('#ssAddRow').onclick = async () => {
+    if (!canAddDelete()) return;
+    try {
+      const row = await api('/api/sales_support', { method: 'POST', body: JSON.stringify({ product_category: 'Software', section: 'Pilot / New Logo' }) });
+      state.rows.sales_support.push(row);
+      renderSalesSupport();
+    } catch (err) { toast(err.message, true); }
+  };
+  $('#ssBody').addEventListener('change', async (e) => {
+    const ctl = e.target.closest('[data-ss-key]');
+    if (!ctl) return;
+    const id = Number(ctl.closest('[data-ss-id]').dataset.ssId);
+    try {
+      const updated = await api(`/api/sales_support/${id}`, { method: 'PATCH', body: JSON.stringify({ [ctl.dataset.ssKey]: ctl.value }) });
+      updateRowInState('sales_support', updated);
+      renderSalesSupport(); // grouping/actuals may change
+      toast('Saved');
+    } catch (err) { toast(err.message, true); }
+  });
+  $('#ssBody').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-ss-del]');
+    if (!del) return;
+    if (!confirm('Delete this row?')) return;
+    try {
+      await api(`/api/sales_support/${del.dataset.ssDel}`, { method: 'DELETE' });
+      state.rows.sales_support = state.rows.sales_support.filter((r) => String(r.id) !== String(del.dataset.ssDel));
+      renderSalesSupport();
+    } catch (err) { toast(err.message, true); }
   });
 }
 
@@ -1219,7 +1348,7 @@ function wireUsers() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport();
   applyZoom();
   if (state.token) {
     try {

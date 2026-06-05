@@ -49,6 +49,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="salessupport">Sales Support</button>
     <button class="tab" data-tab="newbooking">New Booking</button>
     <button class="tab" data-tab="bookings">Bookings</button>
     <button class="tab" data-tab="churn">Churn Tracker</button>
@@ -88,6 +89,16 @@
         <tbody id="tbody"></tbody>
       </table>
     </div>
+  </main>
+
+  <main class="sales-view" id="salesView" hidden>
+    <div class="sales-bar">
+      <button class="btn solid" id="ssAddRow">+ Add row</button>
+    </div>
+    <div class="sales-scroller">
+      <table id="ssTable"><thead id="ssHead"></thead><tbody id="ssBody"></tbody></table>
+    </div>
+    <datalist id="pmcList"></datalist>
   </main>
 
   <main class="entry-view" id="entryView" hidden>

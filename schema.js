@@ -95,3 +95,25 @@ export const CHURN_BILLING_KEYS = ['template_deleted', 'completed', 'notes'];
 // User roles. admin: full access + user management. standard: edit all data.
 // billing: edit only the billing columns. viewer: read-only.
 export const USER_ROLES = ['admin', 'standard', 'billing', 'viewer'];
+
+// BPR product categories (see compute.js bprCategory).
+export const BPR_CATEGORIES = ['Software', 'Pulse', 'Website', 'Digital Advertising', 'Tools for Google'];
+
+// Sales Support (Q2 2026 forecast). Editable fields stored in the sales_support table.
+// The monthly "Actual" columns and "Q2 Actual" are computed on the client from Bookings.
+export const SALES_SUPPORT_SECTIONS = ['Pilot / New Logo', 'CTAM'];
+export const SALES_SUPPORT_FIELDS = [
+  { key: 'product_category', label: 'Product',        type: 'select', options: BPR_CATEGORIES },
+  { key: 'section',          label: 'Section',        type: 'select', options: SALES_SUPPORT_SECTIONS },
+  { key: 'pmc',              label: 'PMC',            type: 'text' },
+  { key: 'booking_type',     label: 'Booking Type',   type: 'select', options: ['', 'Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
+  { key: 'account_owner',    label: 'Account Owner',  type: 'select', options: ['', 'Kathryn', 'Doug', 'House/CSM', 'Caleb', 'Kirk', 'Scott', 'Cindy', 'Michelle'] },
+  { key: 'q2_target',        label: 'Q2 Target',      type: 'number' },
+  { key: 'apr_target',       label: 'April 2026 Target', type: 'number' },
+  { key: 'may_target',       label: 'May 2026 Target',   type: 'number' },
+  { key: 'jun_target',       label: 'June 2026 Target',  type: 'number' },
+  { key: 'worst',            label: 'Worst',          type: 'number' },
+  { key: 'accurate',         label: 'Accurate',       type: 'number' },
+  { key: 'best',             label: 'Best',           type: 'number' },
+  { key: 'notes',            label: 'Notes',          type: 'text' },
+];

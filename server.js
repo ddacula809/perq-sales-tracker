@@ -12,7 +12,7 @@ import { parseWorkbook, parseChurnUpload, parseBookingReconcile } from './import
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
-  BOOKING_BILLING_KEYS, CHURN_BILLING_KEYS, USER_ROLES,
+  BOOKING_BILLING_KEYS, CHURN_BILLING_KEYS, USER_ROLES, SALES_SUPPORT_FIELDS,
 } from './schema.js';
 import { verifyPassword, signToken, verifyToken } from './auth.js';
 
@@ -77,6 +77,7 @@ app.get('/api/schema', (_req, res) => {
   res.json({
     bookings: { editable: BOOKING_FIELDS, computed: BOOKING_COMPUTED, billing: BOOKING_BILLING_KEYS },
     churn: { editable: CHURN_FIELDS, computed: CHURN_COMPUTED, billing: CHURN_BILLING_KEYS },
+    sales_support: { editable: SALES_SUPPORT_FIELDS },
   });
 });
 
@@ -106,7 +107,8 @@ function crud(table, computeFn) {
       const role = req.user.role;
       if (role === 'viewer') return res.status(403).json({ error: 'Your account is read-only.' });
       if (role === 'billing') {
-        const bad = Object.keys(req.body || {}).filter((k) => !BILLING_KEYS[table].includes(k));
+        const allowed = BILLING_KEYS[table] || [];
+        const bad = Object.keys(req.body || {}).filter((k) => !allowed.includes(k));
         if (bad.length) return res.status(403).json({ error: 'Billing users can only edit the billing columns.' });
       }
       const row = await updateRow(table, Number(req.params.id), req.body || {});
@@ -117,6 +119,7 @@ function crud(table, computeFn) {
 }
 crud('bookings', computeBooking);
 crud('churn', computeChurn);
+crud('sales_support', () => ({})); // actuals are computed on the client from bookings
 
 // ---- User management (admin only) ----
 app.get('/api/users', requireRole('admin'), async (_req, res, next) => {

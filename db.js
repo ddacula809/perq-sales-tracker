@@ -1,7 +1,7 @@
 // db.js — PostgreSQL access layer. Tables are created from the schema definitions
 // on boot, so a fresh Railway Postgres is ready with no manual migration.
 import pg from 'pg';
-import { BOOKING_FIELDS, CHURN_FIELDS } from './schema.js';
+import { BOOKING_FIELDS, CHURN_FIELDS, SALES_SUPPORT_FIELDS } from './schema.js';
 import { hashPassword } from './auth.js';
 
 const { Pool, types } = pg;
@@ -108,6 +108,14 @@ export async function initDb() {
     );
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS sales_support (
+      id SERIAL PRIMARY KEY,
+      ${columnsDef(SALES_SUPPORT_FIELDS)},
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -119,6 +127,7 @@ export async function initDb() {
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username))');
   await ensureColumns('bookings', BOOKING_FIELDS);
   await ensureColumns('churn', CHURN_FIELDS);
+  await ensureColumns('sales_support', SALES_SUPPORT_FIELDS);
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
   await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);
@@ -184,6 +193,7 @@ export async function countAdmins() {
 const TABLES = {
   bookings: BOOKING_FIELDS,
   churn: CHURN_FIELDS,
+  sales_support: SALES_SUPPORT_FIELDS,
 };
 
 // Normalize an incoming value for a given field type before writing.
