@@ -63,6 +63,18 @@
         <span id="zoomLevel">100%</span>
         <button class="view-btn" id="zoomIn" aria-label="Larger">&plus;</button>
       </div>
+      <div class="pager" id="pager" title="Rows per page">
+        <select id="pageSize">
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="250">250</option>
+          <option value="500">500</option>
+          <option value="all">All</option>
+        </select>
+        <button class="view-btn" id="pagePrev" aria-label="Previous page">&lsaquo;</button>
+        <span id="pageInfo">0–0 of 0</span>
+        <button class="view-btn" id="pageNext" aria-label="Next page">&rsaquo;</button>
+      </div>
       <span class="status" id="status"></span>
     </div>
   </nav>

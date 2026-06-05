@@ -102,6 +102,11 @@ h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; font-weight: 700; }
   font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft);
   min-width: 40px; text-align: center;
 }
+.pager { display: flex; align-items: center; gap: 5px; }
+.pager select { font: inherit; font-size: 11px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); }
+.pager #pageInfo { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-soft); min-width: 96px; text-align: center; white-space: nowrap; }
+.view-btn:disabled { opacity: .4; cursor: default; }
+.view-btn:disabled:hover { border-color: var(--line-strong); color: var(--ink-soft); }
 
 /* Columns show/hide dropdown */
 .col-menu-wrap { position: relative; }

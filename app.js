@@ -28,6 +28,8 @@ const state = {
   churnQuarter: 'All',   // dashboard churn-by-month quarter filter
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
+  pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
+  page: { bookings: 1, churn: 1 },
 };
 
 const $ = (s) => document.querySelector(s);
@@ -122,40 +124,43 @@ function rowInnerHtml(row, i) {
   return html;
 }
 
-function renderBody() {
-  const tbody = $('#tbody');
-  if (state.tab !== 'bookings' && state.tab !== 'churn') { tbody.innerHTML = ''; return; }
-  // Build every row once; filtering only toggles row visibility (no rebuild) afterwards.
-  const rows = state.rows[state.tab] || [];
-  tbody.innerHTML = '';
-  rows.forEach((row, i) => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = row.id;
-    tr.innerHTML = rowInnerHtml(row, i);
-    tbody.appendChild(tr);
-  });
-  applyRowFilter();
+// The rows for the active grid tab, after applying that tab's filters.
+function currentRows(tab) {
+  const rows = state.rows[tab] || [];
+  if (tab === 'bookings') return rows.filter((r) => bookingMatch(r, state.filters.bookings));
+  if (tab === 'churn') return rows.filter((r) => churnMatch(r, state.filters.churn));
+  return rows;
 }
 
-// Show/hide already-rendered rows to match the current filter — cheap vs. rebuilding the
-// grid, so filtering stays responsive on large tables. Renumbers the visible rows.
-function applyRowFilter() {
-  const tab = state.tab;
-  if (tab !== 'bookings' && tab !== 'churn') return;
-  const f = state.filters[tab];
-  const match = tab === 'bookings' ? bookingMatch : churnMatch;
-  const byId = new Map((state.rows[tab] || []).map((r) => [String(r.id), r]));
-  let n = 0;
-  for (const tr of $('#tbody').children) {
-    const row = byId.get(tr.dataset.id);
-    const show = row ? match(row, f) : true;
-    tr.style.display = show ? '' : 'none';
-    if (show) {
-      n += 1;
-      const rn = tr.querySelector('.rownum');
-      if (rn) rn.textContent = n;
-    }
-  }
+// Render only the current page of rows (default 100) — keeps tab-switch/filtering fast
+// on large tables. Row numbers reflect the global position within the filtered set.
+function renderBody() {
+  const tbody = $('#tbody');
+  if (state.tab !== 'bookings' && state.tab !== 'churn') { tbody.innerHTML = ''; renderPager(0, 1, 1, 0, 0); return; }
+  const rows = currentRows(state.tab);
+  const size = state.pageSize === 'all' ? (rows.length || 1) : Number(state.pageSize);
+  const totalPages = Math.max(1, Math.ceil(rows.length / size));
+  let page = Math.min(Math.max(1, state.page[state.tab] || 1), totalPages);
+  state.page[state.tab] = page;
+  const start = (page - 1) * size;
+  const slice = state.pageSize === 'all' ? rows : rows.slice(start, start + size);
+  tbody.innerHTML = '';
+  slice.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = row.id;
+    tr.innerHTML = rowInnerHtml(row, start + i);
+    tbody.appendChild(tr);
+  });
+  renderPager(rows.length, page, totalPages, start, slice.length);
+}
+
+function renderPager(total, page, totalPages, start, count) {
+  const pager = $('#pager');
+  if (state.tab !== 'bookings' && state.tab !== 'churn') { pager.style.display = 'none'; return; }
+  pager.style.display = '';
+  $('#pageInfo').textContent = `${total === 0 ? 0 : start + 1}–${start + count} of ${total}`;
+  $('#pagePrev').disabled = page <= 1;
+  $('#pageNext').disabled = page >= totalPages;
 }
 
 function editCell(f, row) {
@@ -235,11 +240,12 @@ function monthYearQuarter(my) {
   return { q, year: Number(y), label: `Q${q} ${y}` };
 }
 
-// React to a filter change. Bookings/Churn just toggle row visibility (fast); the
+// React to a filter change. Bookings/Churn re-render page 1 of the filtered set; the
 // Dashboard recomputes its metric cards.
 function onFilterChange() {
-  if (state.tab === 'dashboard') renderSummary();
-  else applyRowFilter();
+  if (state.tab === 'dashboard') { renderSummary(); return; }
+  state.page[state.tab] = 1;
+  renderBody();
 }
 
 function renderSummary() {
@@ -479,10 +485,9 @@ function wireGrid() {
         });
       }
       updateRowInState(state.tab, updated);
-      // Changing CTAM Type flips whether the Offset cell is editable — re-render the whole row.
+      // Changing CTAM Type flips whether the Offset cell is editable — re-render the page.
       if (key === 'ctam_type') {
-        const idx = [...tr.parentNode.children].indexOf(tr); // visible position (grid may be filtered)
-        tr.innerHTML = rowInnerHtml(updated, idx);
+        renderBody();
       } else {
         refreshComputedCells(tr, updated);
       }
@@ -758,6 +763,23 @@ function wireEntry() {
     e.target.closest('[data-product]').remove();
     renumberProducts();
   });
+}
+
+// ---------- Pagination ----------
+function wirePager() {
+  $('#pageSize').value = state.pageSize;
+  $('#pageSize').onchange = (e) => {
+    state.pageSize = e.target.value;
+    localStorage.setItem('perqPageSize', state.pageSize);
+    state.page[state.tab] = 1;
+    renderBody();
+  };
+  $('#pagePrev').onclick = () => {
+    if ((state.page[state.tab] || 1) > 1) { state.page[state.tab] -= 1; renderBody(); $('#scroller').scrollTop = 0; }
+  };
+  $('#pageNext').onclick = () => {
+    state.page[state.tab] = (state.page[state.tab] || 1) + 1; renderBody(); $('#scroller').scrollTop = 0;
+  };
 }
 
 // ---------- Bookings reconciliation ----------
@@ -1197,7 +1219,7 @@ function wireUsers() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile();
+  wireTabs(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager();
   applyZoom();
   if (state.token) {
     try {
