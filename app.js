@@ -905,15 +905,59 @@ function renderSalesSupport() {
   $('#ssBody').innerHTML = html;
 }
 
+// Build one field for the "Add row" form.
+function ssFormFieldHtml(f) {
+  let control;
+  if (f.key === 'pmc') {
+    control = `<select data-ss-key="pmc">${ssPmcOptions('')}</select>`;
+  } else if (f.type === 'select') {
+    const opts = f.options.map((o) => `<option value="${escapeAttr(o)}">${o || '—'}</option>`).join('');
+    control = `<select data-ss-key="${f.key}">${opts}</select>`;
+  } else {
+    control = `<input type="text" data-ss-key="${f.key}" />`; // money/text typed in
+  }
+  return `<div class="entry-field" data-field="${f.key}"><label>${f.label}</label>${control}</div>`;
+}
+
+function openSsForm() {
+  $('#ssForm').innerHTML = state.schema.sales_support.editable.map(ssFormFieldHtml).join('');
+  $('#ssModal').hidden = false;
+  const first = $('#ssForm [data-ss-key]');
+  if (first) first.focus();
+}
+
+async function submitSsForm(e) {
+  e.preventDefault();
+  const payload = {};
+  $('#ssForm').querySelectorAll('[data-ss-key]').forEach((ctl) => {
+    let v = ctl.value;
+    if (v === '__add_pmc__') v = ''; // unfinished add-new
+    if (SS_MONEY.has(ctl.dataset.ssKey)) v = parseMoney(v);
+    payload[ctl.dataset.ssKey] = v;
+  });
+  try {
+    const row = await api('/api/sales_support', { method: 'POST', body: JSON.stringify(payload) });
+    state.rows.sales_support.push(row);
+    $('#ssModal').hidden = true;
+    renderSalesSupport();
+    ssApplyFreeze();
+    toast('Row added');
+  } catch (err) { toast(err.message, true); }
+}
+
 function wireSalesSupport() {
-  $('#ssAddRow').onclick = async () => {
-    if (!canAddDelete()) return;
-    try {
-      const row = await api('/api/sales_support', { method: 'POST', body: JSON.stringify({ product_category: 'Software', section: 'Pilot / New Logo' }) });
-      state.rows.sales_support.push(row);
-      renderSalesSupport();
-    } catch (err) { toast(err.message, true); }
-  };
+  $('#ssAddRow').onclick = () => { if (canAddDelete()) openSsForm(); };
+  $('#ssModalClose').onclick = () => { $('#ssModal').hidden = true; };
+  $('#ssCancel').onclick = () => { $('#ssModal').hidden = true; };
+  $('#ssModal').addEventListener('click', (e) => { if (e.target.id === 'ssModal') $('#ssModal').hidden = true; });
+  $('#ssForm').addEventListener('submit', submitSsForm);
+  // "+ Add new PMC" inside the form.
+  $('#ssForm').addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-ss-key="pmc"]');
+    if (!sel || sel.value !== '__add_pmc__') return;
+    const name = (prompt('New PMC name:') || '').trim();
+    sel.innerHTML = ssPmcOptions(name); // includes + selects the new name, or resets if blank
+  });
   $('#ssBody').addEventListener('change', async (e) => {
     const ctl = e.target.closest('[data-ss-key]');
     if (!ctl) return;
