@@ -357,10 +357,21 @@ function renderSummary() {
       });
     }
     const churnCards = sortMonthYear(churnMonths).map((m) => metric(m, churnByMonth[m])).join('');
+    // Quarter totals (sum of the shown months, grouped by quarter).
+    const qTotals = new Map();
+    for (const m of churnMonths) {
+      const info = monthYearQuarter(m);
+      if (info) qTotals.set(info.label, (qTotals.get(info.label) || 0) + churnByMonth[m]);
+    }
+    const qTotalCards = [...qTotals.keys()]
+      .sort((a, b) => { const ia = quarterMap.get(a); const ib = quarterMap.get(b); return (ia.year - ib.year) || (ia.q - ib.q); })
+      .map((label) => metric(`${label} total`, qTotals.get(label), true))
+      .join('');
     const quarterSel = '<select id="churnQuarter" class="churn-quarter">' +
       quarterVals.map((q) => `<option${q === state.churnQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
-    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>${quarterSel}</div>` +
-      `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
+    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>${quarterSel}</div>`;
+    if (qTotalCards) metricsHtml += `<div class="metrics-row">${qTotalCards}</div>`;
+    metricsHtml += `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
   }
 
   // Nothing to show (filters hidden and not the dashboard) — collapse the whole bar.
