@@ -457,6 +457,7 @@ function renderAll() {
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
+  if (isSales) ssApplyFreeze();
 }
 
 function updateRowInState(table, updated) {
@@ -813,6 +814,21 @@ function ssActual(row, month) {
   return sum;
 }
 const ssFieldDef = (key) => state.schema.sales_support.editable.find((f) => f.key === key);
+
+// Freeze the leading columns (through PMC) so they stay visible when scrolling right.
+// Offsets are computed from the actual header widths (recomputed on resize).
+const SS_FREEZE = ['product_category', 'section', 'pmc'];
+function ssApplyFreeze() {
+  let left = 0;
+  let css = '';
+  for (const key of SS_FREEZE) {
+    css += `#ssTable td[data-col="${key}"]{position:sticky;left:${left}px;z-index:1;}`;
+    css += `#ssTable th[data-col="${key}"]{position:sticky;left:${left}px;top:0;z-index:4;}`;
+    const th = $(`#ssHead th[data-col="${key}"]`);
+    left += th ? th.getBoundingClientRect().width / (state.zoom || 1) : 0;
+  }
+  $('#ssFreezeStyle').textContent = css;
+}
 
 // PMC options: existing PMCs (from bookings + sales support) plus an "add new" choice.
 function ssPmcList() {
@@ -1204,6 +1220,7 @@ function wireResize() {
     if (!active) return;
     const delta = (e.clientX - active.startX) / (state.zoom || 1);
     setColWidth(active.key, Math.max(48, Math.min(900, Math.round(active.startW + delta))));
+    if (state.tab === 'salessupport') ssApplyFreeze();
   });
   document.addEventListener('mouseup', () => {
     if (!active) return;
