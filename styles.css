@@ -247,6 +247,9 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .grid-totals .gt-cell { display: inline-flex; align-items: baseline; gap: 6px; }
 .grid-totals .gt-k { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); }
 .grid-totals .gt-v { font-family: 'Fira Mono', monospace; font-size: 12px; font-weight: 700; color: var(--ink); }
+.grid-totals .gt-content { display: inline-flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.grid-totals .gt-zoom { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
+.grid-totals .gt-zoom #gtZoomLevel { font-family: 'Fira Mono', monospace; font-size: 11px; color: var(--ink-soft); min-width: 38px; text-align: center; }
 table { border-collapse: separate; border-spacing: 0; width: max-content; }
 thead th {
   position: sticky; top: 0; z-index: 3;

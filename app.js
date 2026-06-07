@@ -38,6 +38,7 @@ const state = {
   quickFilter: { bookings: { col: '', text: '' }, churn: { col: '', text: '' } },
   // Which detailed filters are currently shown per tab (added via "Add Filter"); default none.
   activeFilters: (() => { try { return JSON.parse(localStorage.getItem('perqActiveFilters') || '{}'); } catch { return {}; } })(),
+  totalsZoom: parseFloat(localStorage.getItem('perqTotalsZoom')) || 1, // Bookings totals-bar zoom
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
@@ -188,17 +189,41 @@ function currentRows(tab) {
 
 // Render only the current page of rows (default 100) — keeps tab-switch/filtering fast
 // on large tables. Row numbers reflect the global position within the filtered set.
+function applyTotalsZoom() {
+  const c = $('#bookingTotals .gt-content');
+  if (c) c.style.zoom = state.totalsZoom;
+  const lvl = $('#gtZoomLevel');
+  if (lvl) lvl.textContent = Math.round(state.totalsZoom * 100) + '%';
+}
 function renderBookingTotals(rows) {
   const el = $('#bookingTotals');
   if (state.tab !== 'bookings') { el.hidden = true; return; }
   const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
   const cell = (label, k) => `<span class="gt-cell"><span class="gt-k">${label}</span><span class="gt-v">${fmtMoney(sum(k))}</span></span>`;
-  el.innerHTML = `<span class="gt-count">${fmtNum(rows.length)} row${rows.length === 1 ? '' : 's'}</span>`
+  el.innerHTML = `<div class="gt-content">`
+    + `<span class="gt-count">${fmtNum(rows.length)} row${rows.length === 1 ? '' : 's'}</span>`
     + cell('MRR', 'mrr')
     + cell('Annual Value', 'annual_value')
     + cell('Company Total Booking', 'company_total_booking')
-    + cell('Commissionable', 'commissionable_bookings');
+    + cell('Commissionable', 'commissionable_bookings')
+    + '</div>'
+    + '<div class="gt-zoom" title="Totals size">'
+    + '<button type="button" class="view-btn" data-gt-zoom="out" aria-label="Smaller">&minus;</button>'
+    + '<span id="gtZoomLevel"></span>'
+    + '<button type="button" class="view-btn" data-gt-zoom="in" aria-label="Larger">&plus;</button>'
+    + '</div>';
   el.hidden = false;
+  applyTotalsZoom();
+}
+function wireTotalsZoom() {
+  $('#bookingTotals').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-gt-zoom]');
+    if (!btn) return;
+    const step = btn.dataset.gtZoom === 'in' ? 0.1 : -0.1;
+    state.totalsZoom = Math.min(2, Math.max(0.5, Math.round((state.totalsZoom + step) * 10) / 10));
+    localStorage.setItem('perqTotalsZoom', String(state.totalsZoom));
+    applyTotalsZoom();
+  });
 }
 function renderBody() {
   const tbody = $('#tbody');
@@ -2109,7 +2134,6 @@ function wireReconcile() {
 function applyZoom() {
   $('#grid').style.zoom = state.zoom;
   $('#ssTable').style.zoom = state.zoom;
-  $('#bookingTotals').style.zoom = state.zoom; // totals bar scales with the grid zoom control
   $('#zoomLevel').textContent = Math.round(state.zoom * 100) + '%';
 }
 
@@ -2600,7 +2624,7 @@ function gotoRow(tab, id) {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom();
   applyZoom();
   if (state.token) {
     try {
