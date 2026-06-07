@@ -2099,7 +2099,17 @@ function wireCellTip() {
 
 function wireResize() {
   let active = null; // { key, startX, startW }
-  // Listen on document so both the main grid (#grid) and Sales Support (#ssTable) work.
+  let pendingPx = null;
+  let rafId = 0;
+  // Apply at most once per animation frame so dragging never stacks up reflows (the big
+  // Legacy / no-pagination tables would otherwise freeze on every mousemove).
+  const flush = () => {
+    rafId = 0;
+    if (!active || pendingPx === null) return;
+    setColWidth(active.key, pendingPx);
+    if (state.tab === 'salessupport') ssApplyFreeze();
+  };
+  // Listen on document so the grid (#grid), Sales Support (#ssTable) and Legacy all work.
   document.addEventListener('mousedown', (e) => {
     const handle = e.target.closest('.col-resize');
     if (!handle) return;
@@ -2113,13 +2123,16 @@ function wireResize() {
   document.addEventListener('mousemove', (e) => {
     if (!active) return;
     const delta = (e.clientX - active.startX) / (state.zoom || 1);
-    setColWidth(active.key, Math.max(48, Math.min(900, Math.round(active.startW + delta))));
-    if (state.tab === 'salessupport') ssApplyFreeze();
+    pendingPx = Math.max(48, Math.min(900, Math.round(active.startW + delta)));
+    if (!rafId) rafId = requestAnimationFrame(flush);
   });
   document.addEventListener('mouseup', () => {
     if (!active) return;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    if (pendingPx !== null) { setColWidth(active.key, pendingPx); if (state.tab === 'salessupport') ssApplyFreeze(); }
     saveColWidths();
     active = null;
+    pendingPx = null;
     document.body.style.cursor = '';
   });
 }
