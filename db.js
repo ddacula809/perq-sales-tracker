@@ -1,7 +1,10 @@
 // db.js — PostgreSQL access layer. Tables are created from the schema definitions
 // on boot, so a fresh Railway Postgres is ready with no manual migration.
 import pg from 'pg';
-import { BOOKING_FIELDS, CHURN_FIELDS, SALES_SUPPORT_FIELDS, SALESFORCE_RECON_FIELDS } from './schema.js';
+import {
+  BOOKING_FIELDS, CHURN_FIELDS, SALES_SUPPORT_FIELDS, SALESFORCE_RECON_FIELDS,
+  LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS,
+} from './schema.js';
 import { hashPassword } from './auth.js';
 
 const { Pool, types } = pg;
@@ -171,6 +174,20 @@ export async function initDb() {
     );
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS legacy_golives (
+      id SERIAL PRIMARY KEY,
+      ${columnsDef(LEGACY_GOLIVE_FIELDS)},
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS legacy_churn (
+      id SERIAL PRIMARY KEY,
+      ${columnsDef(LEGACY_CHURN_FIELDS)},
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -206,6 +223,8 @@ export async function initDb() {
   await ensureColumns('churn', CHURN_FIELDS);
   await ensureColumns('sales_support', SALES_SUPPORT_FIELDS);
   await ensureColumns('salesforce_recon', SALESFORCE_RECON_FIELDS);
+  await ensureColumns('legacy_golives', LEGACY_GOLIVE_FIELDS);
+  await ensureColumns('legacy_churn', LEGACY_CHURN_FIELDS);
   // Link from a License Transfer booking to the churn it offset (kept out of the schema/grid).
   await pool.query('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offset_churn_id integer');
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
@@ -343,6 +362,8 @@ const TABLES = {
   churn: CHURN_FIELDS,
   sales_support: SALES_SUPPORT_FIELDS,
   salesforce_recon: SALESFORCE_RECON_FIELDS,
+  legacy_golives: LEGACY_GOLIVE_FIELDS,
+  legacy_churn: LEGACY_CHURN_FIELDS,
 };
 
 // Normalize an incoming value for a given field type before writing.

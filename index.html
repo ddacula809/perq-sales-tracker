@@ -70,6 +70,7 @@
     <button class="tab" data-tab="churn">Churn Tracker</button>
     <button class="tab" data-tab="billing" hidden>Billing Dashboard</button>
     <button class="tab" data-tab="sfrecon" hidden>Salesforce Recon Data</button>
+    <button class="tab" data-tab="legacy" hidden>Legacy</button>
   </aside>
   <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
 
@@ -145,7 +146,21 @@
       <label class="btn solid" id="sfreconImport">Import Salesforce .xlsx<input type="file" id="sfreconFile" accept=".xlsx" hidden /></label>
     </div>
     <div class="sfrecon-scroller">
-      <table id="sfreconTable"><thead id="sfreconHead"></thead><tbody id="sfreconBody"></tbody></table>
+      <table id="sfreconTable" class="arc-grid"><thead id="sfreconHead"></thead><tbody id="sfreconBody"></tbody></table>
+    </div>
+  </main>
+
+  <main class="sfrecon-view" id="legacyView" hidden>
+    <div class="sfrecon-bar">
+      <div class="legacy-subtabs">
+        <button type="button" class="legacy-subtab active" data-legacy="golives">GoLives</button>
+        <button type="button" class="legacy-subtab" data-legacy="churn">Churn</button>
+      </div>
+      <span class="sfrecon-count" id="legacyCount"></span>
+      <label class="btn solid" id="legacyImport" hidden>Import AR Tracking .xlsx<input type="file" id="legacyFile" accept=".xlsx" hidden /></label>
+    </div>
+    <div class="sfrecon-scroller">
+      <table id="legacyTable" class="arc-grid"><thead id="legacyHead"></thead><tbody id="legacyBody"></tbody></table>
     </div>
   </main>
 

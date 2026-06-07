@@ -9,8 +9,9 @@ const MONEY = new Set([
 const state = {
   tab: 'dashboard',
   schema: null,
-  rows: { bookings: [], churn: [], sales_support: [], salesforce_recon: [] },
+  rows: { bookings: [], churn: [], sales_support: [], salesforce_recon: [], legacy_golives: [], legacy_churn: [] },
   sfPmcs: [], // Account Names from Salesforce Recon Data, for the Sales Support PMC dropdown
+  legacySub: 'golives', // active Legacy sub-tab: 'golives' | 'churn'
   // Dashboard and Bookings filter independently: filtering the grid must not move the
   // dashboard totals, and vice versa.
   filters: {
@@ -621,6 +622,56 @@ function wireSfRecon() {
   };
 }
 
+// ---------- Legacy trackers (admin + billing read-only archive) ----------
+function renderLegacy() {
+  const sub = state.legacySub === 'churn' ? 'legacy_churn' : 'legacy_golives';
+  const fields = (state.schema[sub] && state.schema[sub].editable) || [];
+  const rows = state.rows[sub] || [];
+  document.querySelectorAll('.legacy-subtab').forEach((b) => b.classList.toggle('active', b.dataset.legacy === state.legacySub));
+  $('#legacyCount').textContent = rows.length ? `${fmtNum(rows.length)} records` : 'No data yet';
+  $('#legacyImport').hidden = !isAdmin();
+  const money = new Set(['mrr', 'sf_mrr', 'account_balance']);
+  $('#legacyHead').innerHTML = '<tr><th class="rownum">#</th>'
+    + fields.map((f) => `<th>${escapeHtml(f.label)}</th>`).join('') + '</tr>';
+  $('#legacyBody').innerHTML = rows.length
+    ? rows.map((r, i) => `<tr><td class="rownum">${i + 1}</td>`
+        + fields.map((f) => {
+          const v = r[f.key];
+          const isNum = f.type === 'number' || money.has(f.key);
+          const disp = money.has(f.key) ? fmtMoney(v) : (f.type === 'number' ? fmtNum(v) : (v ?? ''));
+          return `<td class="${isNum ? 'num' : ''}">${escapeHtml(String(disp))}</td>`;
+        }).join('') + '</tr>').join('')
+    : `<tr><td class="muted" colspan="${fields.length + 1}" style="padding:14px">No data yet. ${isAdmin() ? 'Use “Import AR Tracking .xlsx”.' : 'Ask an admin to import the legacy tracker.'}</td></tr>`;
+}
+
+function wireLegacy() {
+  document.querySelectorAll('.legacy-subtab').forEach((b) => {
+    b.onclick = () => { state.legacySub = b.dataset.legacy; renderLegacy(); };
+  });
+  $('#legacyFile').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Importing legacy tracker…');
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/legacy/import', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Import failed');
+      const data = await res.json();
+      state.rows.legacy_golives = await api('/api/legacy_golives');
+      state.rows.legacy_churn = await api('/api/legacy_churn');
+      renderLegacy();
+      showResult('Legacy import complete',
+        '<ul class="result-list">'
+        + `<li><strong>${fmtNum(data.golives)}</strong> GoLive record(s)</li>`
+        + `<li><strong>${fmtNum(data.churn)}</strong> Churn record(s) — Software + PPC combined</li>`
+        + '</ul>');
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+}
+
 // ---------- Data ops ----------
 async function loadAll() {
   state.schema = await api('/api/schema');
@@ -637,6 +688,11 @@ async function loadAll() {
   state.rows.salesforce_recon = isAdmin() ? await api('/api/salesforce_recon') : [];
   state.sfPmcs = ['admin', 'standard', 'sales_admin', 'sales'].includes(role())
     ? await api('/api/salesforce_recon/pmcs') : [];
+  // Legacy trackers (admin + billing only).
+  if (isAdmin() || role() === 'billing') {
+    state.rows.legacy_golives = await api('/api/legacy_golives');
+    state.rows.legacy_churn = await api('/api/legacy_churn');
+  } else { state.rows.legacy_golives = []; state.rows.legacy_churn = []; }
   // A tagged salesperson is scoped to their own name: Sales Support owner filter + the
   // Sales Rep filter on both the Dashboard and Bookings all lock to their Account Owner.
   if (isSales() && salesOwner()) {
@@ -660,12 +716,16 @@ function renderAll() {
   // Salesforce Recon Data is admin-only.
   document.querySelector('[data-tab="sfrecon"]').hidden = !isAdmin();
   if (state.tab === 'sfrecon' && !isAdmin()) state.tab = 'dashboard';
+  // Legacy trackers are for admins and billing users.
+  document.querySelector('[data-tab="legacy"]').hidden = !canBilling;
+  if (state.tab === 'legacy' && !canBilling) state.tab = 'dashboard';
   // (Sales roles see Churn read-only — canEditField returns false for them.)
 
   const isEntry = state.tab === 'newbooking';
   const isSales = state.tab === 'salessupport';
   const isBillingTab = state.tab === 'billing';
   const isSfrecon = state.tab === 'sfrecon';
+  const isLegacy = state.tab === 'legacy';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   $('#currentTab').textContent = TAB_LABELS[state.tab] || '';
   // Account / role-based controls.
@@ -690,8 +750,9 @@ function renderAll() {
   $('#salesView').hidden = !isSales;
   $('#billingView').hidden = !isBillingTab;
   $('#sfreconView').hidden = !isSfrecon;
+  $('#legacyView').hidden = !isLegacy;
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
-  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon) ? 'none' : '';
+  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon || isLegacy) ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
   $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
@@ -700,6 +761,7 @@ function renderAll() {
   if (isSales) renderSalesSupport();
   if (isBillingTab) renderBillingDashboard();
   if (isSfrecon) renderSfRecon();
+  if (isLegacy) renderLegacy();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
@@ -774,7 +836,7 @@ function wireGrid() {
 const TAB_LABELS = {
   dashboard: 'Dashboard', billing: 'Billing Dashboard', salessupport: 'Sales Support',
   newbooking: 'New Booking', bookings: 'Bookings', churn: 'Churn Tracker',
-  sfrecon: 'Salesforce Recon Data',
+  sfrecon: 'Salesforce Recon Data', legacy: 'Legacy',
 };
 
 function closeSidebar() {
@@ -2321,7 +2383,7 @@ function gotoRow(tab, id) {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy();
   applyZoom();
   if (state.token) {
     try {

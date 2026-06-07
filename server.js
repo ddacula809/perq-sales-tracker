@@ -11,12 +11,12 @@ import {
   listNotifications, createNotification, dismissNotification,
 } from './db.js';
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear } from './compute.js';
-import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon } from './importer.js';
+import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
   BOOKING_BILLING_KEYS, CHURN_BILLING_KEYS, USER_ROLES, SALES_SUPPORT_FIELDS,
-  SALESFORCE_RECON_FIELDS,
+  SALESFORCE_RECON_FIELDS, LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS,
 } from './schema.js';
 import { verifyPassword, signToken, verifyToken } from './auth.js';
 
@@ -107,6 +107,8 @@ app.get('/api/schema', async (_req, res, next) => {
       churn: { editable: CHURN_FIELDS, computed: CHURN_COMPUTED, billing: CHURN_BILLING_KEYS },
       sales_support: { editable: ssFields },
       salesforce_recon: { editable: SALESFORCE_RECON_FIELDS },
+      legacy_golives: { editable: LEGACY_GOLIVE_FIELDS },
+      legacy_churn: { editable: LEGACY_CHURN_FIELDS },
     });
   } catch (e) { next(e); }
 });
@@ -268,6 +270,23 @@ app.post('/api/salesforce_recon/import', requireRole('admin'), upload.single('fi
 // Re-clean Sales Rep / Account Owner names against the current Recon master (admin).
 app.post('/api/salesforce_recon/reconcile-owners', requireRole('admin'), async (_req, res, next) => {
   try { await reconcileOwnerNames(); res.json({ ok: true }); } catch (e) { next(e); }
+});
+
+// ---- Legacy trackers (admin + billing): read-only archive from the old AR Tracking workbook ----
+app.get('/api/legacy_golives', requireRole('admin', 'billing'), async (_req, res, next) => {
+  try { res.json(await listRows('legacy_golives')); } catch (e) { next(e); }
+});
+app.get('/api/legacy_churn', requireRole('admin', 'billing'), async (_req, res, next) => {
+  try { res.json(await listRows('legacy_churn')); } catch (e) { next(e); }
+});
+app.post('/api/legacy/import', requireRole('admin'), upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const { golives, churn } = parseLegacyTracker(req.file.buffer);
+    await replaceAll('legacy_golives', golives);
+    await replaceAll('legacy_churn', churn);
+    res.json({ golives: golives.length, churn: churn.length });
+  } catch (e) { next(e); }
 });
 
 // ---- Sales Support rows: edits allowed only within the open quarter ----

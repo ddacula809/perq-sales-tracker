@@ -1,7 +1,10 @@
 // importer.js — parse the original PERQ workbook's "May 2026" and "Churn Tracker"
 // sheets into plain row objects, ready to insert into the DB.
 import XLSX from 'xlsx';
-import { BOOKING_FIELDS, CHURN_FIELDS, BOOKING_SHEET, CHURN_SHEET, SALESFORCE_RECON_FIELDS } from './schema.js';
+import {
+  BOOKING_FIELDS, CHURN_FIELDS, BOOKING_SHEET, CHURN_SHEET, SALESFORCE_RECON_FIELDS,
+  LEGACY_GOLIVE_SHEET, LEGACY_CHURN_SOFTWARE_SHEET, LEGACY_CHURN_PPC_SHEET,
+} from './schema.js';
 
 // Convert an Excel cell into a value appropriate for the field type.
 function coerce(value, type) {
@@ -235,6 +238,83 @@ export function parseSalesforceRecon(buffer) {
     if (hasContent) out.push(obj);
   }
   return out;
+}
+
+// Generic header-matched sheet parser: cols = [[label, key, type]]. Finds the header row
+// by the best label match (handles a banner row above the header), maps and coerces values.
+function parseSheetByCols(ws, cols) {
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+  const wantNorm = cols.map(([l]) => normHeader(l));
+  let headerIdx = -1;
+  let best = 0;
+  for (let i = 0; i < Math.min(aoa.length, 30); i++) {
+    const present = new Set((aoa[i] || []).map(normHeader));
+    const matches = wantNorm.filter((l) => present.has(l)).length;
+    if (matches > best) { best = matches; headerIdx = i; }
+  }
+  if (headerIdx < 0 || best < 3) return [];
+  const header = (aoa[headerIdx] || []).map(normHeader);
+  const colOf = {};
+  for (const [label, key] of cols) colOf[key] = header.indexOf(normHeader(label));
+  const out = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const obj = {};
+    let has = false;
+    for (const [, key, type] of cols) {
+      const ci = colOf[key];
+      let v = null;
+      if (ci >= 0) v = type === 'date' ? coerceExcelDate(row[ci]) : coerce(row[ci], type);
+      obj[key] = v;
+      if (v !== null && v !== '') has = true;
+    }
+    if (has) out.push(obj);
+  }
+  return out;
+}
+
+const LEGACY_GOLIVE_COLS = [
+  ['Division', 'division', 'text'], ['Date Added', 'date_added', 'text'], ['Sage ID', 'sage_id', 'text'],
+  ['Property', 'property', 'text'], ['Parent PMC', 'parent_pmc', 'text'], ['PMC Buying Center', 'pmc_buying_center', 'text'],
+  ['Product', 'product', 'text'], ['MRR', 'mrr', 'number'], ['Go Live Date', 'golive_date', 'date'],
+  ['Salesforce Property ID', 'salesforce_property_id', 'text'], ['Note', 'note', 'text'],
+  ['Billed in Sage', 'billed_in_sage', 'text'], ['Template Created', 'template_created', 'text'],
+];
+const LEGACY_CHURN_SOFTWARE_COLS = [
+  ['Division', 'division', 'text'], ['Date Added', 'date_added', 'text'], ['Property ID', 'property_id', 'text'],
+  ['Sage ID', 'sage_id', 'text'], ['PMC/Logo', 'pmc_logo', 'text'], ['Property: Name', 'property_name', 'text'],
+  ['Product', 'product', 'text'], ['SF MRR', 'sf_mrr', 'number'], ['Last Date Under Contract', 'last_date_under_contract', 'date'],
+  ['Reason Lost', 'reason_lost', 'text'], ['Client Success Manager', 'client_success_manager', 'text'],
+  ['Software Revenue for Final Month', 'software_revenue_final_month', 'text'], ['Last Invoice Month', 'last_invoice_month', 'text'],
+  ['Account Balance', 'account_balance', 'number'], ['Updated in Saas Financials', 'updated_saas_financials', 'text'],
+  ['Brittany Review', 'brittany_review', 'text'], ['Cancellation date added', 'cancellation_date_added', 'text'],
+  ['Prorated final invoice', 'prorated_final_invoice', 'text'], ['Note', 'note', 'text'],
+];
+const LEGACY_CHURN_PPC_COLS = [
+  ['Date Added', 'date_added', 'text'], ['Property ID', 'property_id', 'text'], ['Sage ID', 'sage_id', 'text'],
+  ['PMC/Logo', 'pmc_logo', 'text'], ['Property: Name', 'property_name', 'text'], ['Product', 'product', 'text'],
+  ['SF MRR', 'sf_mrr', 'number'], ['Last Date Under Contract', 'last_date_under_contract', 'date'],
+  ['Reason Lost', 'reason_lost', 'text'], ['Client Success Manager', 'client_success_manager', 'text'],
+  ['PPC MGMT Fee Revenue for Final Month', 'ppc_mgmt_fee_final_month', 'text'],
+  ['PPC Spend Revenue for Final Month', 'ppc_spend_final_month', 'text'], ['SEO', 'seo', 'text'],
+  ['Last Invoice Month', 'last_invoice_month', 'text'], ['Account Balance', 'account_balance', 'number'],
+  ['Updated in Saas Financials', 'updated_saas_financials', 'text'], ['Updated in Digital Ad Sheet', 'updated_da_sheet', 'text'],
+  ['Brittany Review', 'brittany_review', 'text'], ['Prorated final invoice', 'prorated_final_invoice', 'text'],
+  ['Note', 'note', 'text'],
+];
+
+// Parse the legacy "AR Tracking" workbook: Go Lives + the two Notices Churn tabs (combined).
+export function parseLegacyTracker(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const golives = wb.Sheets[LEGACY_GOLIVE_SHEET] ? parseSheetByCols(wb.Sheets[LEGACY_GOLIVE_SHEET], LEGACY_GOLIVE_COLS) : [];
+  const sw = wb.Sheets[LEGACY_CHURN_SOFTWARE_SHEET]
+    ? parseSheetByCols(wb.Sheets[LEGACY_CHURN_SOFTWARE_SHEET], LEGACY_CHURN_SOFTWARE_COLS).map((r) => ({ ...r, section: 'Software' })) : [];
+  const ppc = wb.Sheets[LEGACY_CHURN_PPC_SHEET]
+    ? parseSheetByCols(wb.Sheets[LEGACY_CHURN_PPC_SHEET], LEGACY_CHURN_PPC_COLS).map((r) => ({ ...r, section: 'PPC' })) : [];
+  if (!golives.length && !sw.length && !ppc.length) {
+    throw new Error('Could not find the “Go Lives”, “Notices Churn - Software”, or “Notices Churn - PPC” tabs in the file.');
+  }
+  return { golives, churn: [...sw, ...ppc] };
 }
 
 export function parseWorkbook(buffer) {

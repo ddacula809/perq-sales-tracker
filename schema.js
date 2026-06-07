@@ -87,6 +87,57 @@ export const CHURN_COMPUTED = [
 export const BOOKING_SHEET = 'May 2026';
 export const CHURN_SHEET = 'Churn Tracker';
 
+// Legacy trackers — read-only archive migrated from the old "AR Tracking" workbook
+// (admin + billing). GoLives from the "Go Lives" tab; Churn combines "Notices Churn -
+// Software" and "Notices Churn - PPC" into one table tagged by Section.
+export const LEGACY_GOLIVE_FIELDS = [
+  { key: 'division',               label: 'Division',              type: 'text' },
+  { key: 'date_added',             label: 'Date Added',            type: 'text' },
+  { key: 'sage_id',                label: 'Sage ID',               type: 'text' },
+  { key: 'property',               label: 'Property',              type: 'text' },
+  { key: 'parent_pmc',             label: 'Parent PMC',            type: 'text' },
+  { key: 'pmc_buying_center',      label: 'PMC Buying Center',     type: 'text' },
+  { key: 'product',                label: 'Product',               type: 'text' },
+  { key: 'mrr',                    label: 'MRR',                   type: 'number' },
+  { key: 'golive_date',            label: 'Go Live Date',          type: 'date' },
+  { key: 'salesforce_property_id', label: 'Salesforce Property ID', type: 'text' },
+  { key: 'note',                   label: 'Note',                  type: 'text' },
+  { key: 'billed_in_sage',         label: 'Billed in Sage',        type: 'text' },
+  { key: 'template_created',       label: 'Template Created',      type: 'text' },
+];
+export const LEGACY_CHURN_FIELDS = [
+  { key: 'section',                     label: 'Section',                       type: 'text' }, // Software | PPC
+  { key: 'division',                    label: 'Division',                      type: 'text' },
+  { key: 'date_added',                  label: 'Date Added',                    type: 'text' },
+  { key: 'property_id',                 label: 'Property ID',                   type: 'text' },
+  { key: 'sage_id',                     label: 'Sage ID',                       type: 'text' },
+  { key: 'pmc_logo',                    label: 'PMC/Logo',                      type: 'text' },
+  { key: 'property_name',               label: 'Property: Name',                type: 'text' },
+  { key: 'product',                     label: 'Product',                       type: 'text' },
+  { key: 'sf_mrr',                      label: 'SF MRR',                        type: 'number' },
+  { key: 'last_date_under_contract',    label: 'Last Date Under Contract',      type: 'date' },
+  { key: 'reason_lost',                 label: 'Reason Lost',                   type: 'text' },
+  { key: 'client_success_manager',      label: 'Client Success Manager',        type: 'text' },
+  { key: 'software_revenue_final_month', label: 'Software Rev (Final Month)',   type: 'text' },
+  { key: 'ppc_mgmt_fee_final_month',    label: 'PPC Mgmt Fee (Final Month)',    type: 'text' },
+  { key: 'ppc_spend_final_month',       label: 'PPC Spend (Final Month)',       type: 'text' },
+  { key: 'seo',                         label: 'SEO',                           type: 'text' },
+  { key: 'last_invoice_month',          label: 'Last Invoice Month',            type: 'text' },
+  { key: 'account_balance',             label: 'Account Balance',               type: 'number' },
+  { key: 'updated_saas_financials',     label: 'Updated in SaaS Financials',    type: 'text' },
+  { key: 'updated_da_sheet',            label: 'Updated in Digital Ad Sheet',   type: 'text' },
+  { key: 'brittany_review',             label: 'Brittany Review',               type: 'text' },
+  { key: 'prorated_final_invoice',      label: 'Prorated Final Invoice',        type: 'text' },
+  { key: 'accel_impl_fee',              label: 'Accel. Impl. Fee',              type: 'text' },
+  { key: 'cancellation_date_added',     label: 'Cancellation Date Added',       type: 'text' },
+  { key: 'template_action',             label: 'Template Deleted/Created',      type: 'text' },
+  { key: 'sale_of_property',            label: 'Sale of Property',              type: 'text' },
+  { key: 'note',                        label: 'Note',                          type: 'text' },
+];
+export const LEGACY_GOLIVE_SHEET = 'Go Lives';
+export const LEGACY_CHURN_SOFTWARE_SHEET = 'Notices Churn - Software';
+export const LEGACY_CHURN_PPC_SHEET = 'Notices Churn - PPC';
+
 // Salesforce Recon Data — a master reference exported from Salesforce (admin-only).
 // Labels match the export's header row exactly so the importer can map by header.
 // Account Name is the PMC; its values feed the Sales Support PMC dropdown.
