@@ -816,6 +816,7 @@ function renderAll() {
   applyColHide();
   applyColWidths();
   if (isSales) ssApplyFreeze();
+  applyGridFreeze();
 }
 
 function updateRowInState(table, updated) {
@@ -2112,9 +2113,30 @@ function wireView() {
     state.zoom = Math.min(2, Math.max(0.5, Math.round(z * 10) / 10)); // clamp 50%–200%, 10% steps
     localStorage.setItem('perqZoom', String(state.zoom));
     applyZoom();
+    applyGridFreeze();
   };
   $('#zoomOut').onclick = () => setZoom(state.zoom - 0.1);
   $('#zoomIn').onclick = () => setZoom(state.zoom + 0.1);
+}
+
+// Freeze the leading Bookings columns through Property Name so they stay visible when
+// scrolling right (offsets computed from header widths, after the sticky row-number column).
+const BOOKING_FREEZE = ['booking_month', 'booking_year', 'centralized', 'sales_rep', 'property_id', 'property_name'];
+function applyGridFreeze() {
+  if (state.tab !== 'bookings') { $('#gridFreezeStyle').textContent = ''; return; }
+  const hidden = new Set(state.hiddenCols.bookings || []);
+  const zoom = state.zoom || 1;
+  const rownumTh = $('#thead th.rownum');
+  let left = rownumTh ? rownumTh.getBoundingClientRect().width / zoom : 46;
+  let css = '';
+  for (const key of BOOKING_FREEZE) {
+    if (hidden.has(key)) continue;
+    css += `#grid td[data-col="${key}"]{position:sticky;left:${left}px;z-index:2;}`;
+    css += `#grid th[data-col="${key}"]{position:sticky;left:${left}px;top:0;z-index:5;}`;
+    const th = $(`#thead th[data-col="${key}"]`);
+    left += th ? th.getBoundingClientRect().width / zoom : 0;
+  }
+  $('#gridFreezeStyle').textContent = css;
 }
 
 // ---------- Columns show/hide ----------
@@ -2223,6 +2245,7 @@ function wireResize() {
     if (!active || pendingPx === null) return;
     setColWidth(active.key, pendingPx);
     if (state.tab === 'salessupport') ssApplyFreeze();
+    if (state.tab === 'bookings') applyGridFreeze();
   };
   // Listen on document so the grid (#grid), Sales Support (#ssTable) and Legacy all work.
   document.addEventListener('mousedown', (e) => {
@@ -2245,6 +2268,7 @@ function wireResize() {
     if (!active) return;
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     if (pendingPx !== null) { setColWidth(active.key, pendingPx); if (state.tab === 'salessupport') ssApplyFreeze(); }
+    applyGridFreeze();
     saveColWidths();
     active = null;
     pendingPx = null;
@@ -2277,13 +2301,14 @@ function wireColumns() {
     else if (!cb.checked && i < 0) hidden.push(cb.dataset.col);
     saveHiddenCols();
     applyColHide();
+    applyGridFreeze();
   });
   // "Show all" resets visibility for the current tab.
   $('#colMenu').addEventListener('click', (e) => {
     if (e.target.id !== 'colShowAll') return;
     state.hiddenCols[state.tab] = [];
     saveHiddenCols();
-    renderColMenu(); applyColHide();
+    renderColMenu(); applyColHide(); applyGridFreeze();
   });
   // Click outside closes the menu.
   document.addEventListener('click', (e) => {
