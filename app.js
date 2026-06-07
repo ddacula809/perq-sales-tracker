@@ -2109,6 +2109,7 @@ function wireReconcile() {
 function applyZoom() {
   $('#grid').style.zoom = state.zoom;
   $('#ssTable').style.zoom = state.zoom;
+  $('#bookingTotals').style.zoom = state.zoom; // totals bar scales with the grid zoom control
   $('#zoomLevel').textContent = Math.round(state.zoom * 100) + '%';
 }
 
