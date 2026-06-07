@@ -2119,9 +2119,10 @@ function wireView() {
   $('#zoomIn').onclick = () => setZoom(state.zoom + 0.1);
 }
 
-// Freeze the leading Bookings columns through Property Name so they stay visible when
-// scrolling right (offsets computed from header widths, after the sticky row-number column).
-const BOOKING_FREEZE = ['booking_month', 'booking_year', 'centralized', 'sales_rep', 'property_id', 'property_name'];
+// Freeze only the Property Name column: the columns before it (Booking Month/Year,
+// Centralized, Sales Rep, Property ID) scroll away normally, and once Property Name reaches
+// the left it pins there (right after the sticky row-number) while the rest keeps scrolling.
+const BOOKING_FREEZE = ['property_name'];
 function applyGridFreeze() {
   if (state.tab !== 'bookings') { $('#gridFreezeStyle').textContent = ''; return; }
   const hidden = new Set(state.hiddenCols.bookings || []);
