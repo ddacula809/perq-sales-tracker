@@ -304,6 +304,11 @@ function rowMatchesFilters(r, f) {
   for (const key in f) {
     const v = f[key];
     if (v == null || v === 'All' || v === '') continue;
+    if (key === 'booking_my') { // synthetic combined "Booking Month Year"
+      const my = (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
+      if (my !== String(v)) return false;
+      continue;
+    }
     if (String(r[key] ?? '') !== String(v)) return false;
   }
   return true;
@@ -352,12 +357,23 @@ function renderSummary() {
     `</select></div>`;
 
   // Every column of the active tab is filterable (Dashboard filters use the booking columns).
-  const cols = tab === 'churn'
+  let cols = tab === 'churn'
     ? [...state.schema.churn.editable, ...state.schema.churn.computed]
     : [...state.schema.bookings.editable, ...state.schema.bookings.computed];
+  // Bookings: offer a single combined "Booking Month/Year" filter instead of separate ones.
+  if (tab === 'bookings') {
+    cols = cols.filter((c) => c.key !== 'booking_month' && c.key !== 'booking_year');
+    cols.unshift({ key: 'booking_my', label: 'Booking Month/Year', type: 'text' });
+  }
   const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
+    if (col.key === 'booking_my') {
+      const combos = [...new Set(rows
+        .map((r) => (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '')
+        .filter(Boolean))];
+      return ['All', ...sortMonthYear(combos)];
+    }
     const d = distinct(col.key);
     if (col.key === 'booking_month') { const present = new Set(d); return ['All', ...monthOrder.filter((m) => present.has(m))]; }
     if (MONTH_YEAR_COLS.has(col.key)) return ['All', ...sortMonthYear(d)];
