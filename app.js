@@ -1084,22 +1084,27 @@ async function submitEntries() {
   } catch (err) { toast(err.message, true); }
 }
 
-// Churn quarter (its Prorated Churn Month) — the same-quarter basis for License Transfer offsets.
-function churnQuarterLabel(c) {
-  let m = String(c.prorated_churn_month || '').trim();
-  if (!m || m === '-') m = String(c.final_invoice_month || '').trim(); // end-of-month churns
+// A churn's offset quarter = the quarter its full revenue drop is recognized (Final Churn
+// Month, i.e. the month AFTER Last Date Under Contract). E.g. last date 06/30 -> drops in
+// July -> Q3, not Q2.
+function churnQuarterInfo(c) {
+  const m = String(c.final_churn_month || '').trim();
   if (!m || m === '-') return null;
-  const info = monthYearQuarter(m);
-  return info ? info.label : null;
+  return monthYearQuarter(m); // { q, year, label }
 }
-// Churns eligible to offset: same PMC, same quarter, not already a Contraction.
-function eligibleChurns(pmc, quarterLabel) {
-  if (!pmc || !quarterLabel) return [];
+const qCmp = (a, b) => (a.year - b.year) * 4 + (a.q - b.q); // >0 a is later, 0 same, <0 earlier
+// Churns that can offset a booking in quarter bq: same OR future quarter (never past),
+// each annotated with its quarter and whether it's a future-quarter churn.
+function offsetEligibleChurns(pmc, bq) {
+  if (!pmc || !bq) return [];
   const p = String(pmc).trim().toLowerCase();
-  return state.rows.churn.filter((c) =>
-    String(c.pmc_buying_center || '').trim().toLowerCase() === p
-    && String(c.classification || '') !== 'Contraction'
-    && churnQuarterLabel(c) === quarterLabel);
+  return state.rows.churn
+    .filter((c) => String(c.pmc_buying_center || '').trim().toLowerCase() === p
+      && String(c.classification || '') !== 'Contraction')
+    .map((c) => ({ churn: c, quarter: churnQuarterInfo(c) }))
+    .filter((e) => e.quarter && qCmp(e.quarter, bq) >= 0)
+    .map((e) => ({ ...e, isFuture: qCmp(e.quarter, bq) > 0 }))
+    .sort((a, b) => (a.isFuture - b.isFuture) || qCmp(a.quarter, b.quarter));
 }
 const churnDropAmt = (c) => Math.abs(Number(c && c.mrr) || 0); // monthly MRR that dropped
 
@@ -1111,7 +1116,7 @@ async function renderConfirm() {
   const offsets = state.pendingOffsets || [];
   const qInfo = monthYearQuarter(`${shared.booking_month || ''} ${shared.booking_year || ''}`);
   const qLabel = qInfo ? qInfo.label : null;
-  const elig = eligibleChurns(shared.pmc, qLabel);
+  const elig = offsetEligibleChurns(shared.pmc, qInfo); // [{ churn, quarter, isFuture }]
   // Effective payloads: apply each chosen offset as a License Transfer.
   const eff = base.map((p, i) => offsets[i]
     ? { ...p, pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: offsets[i].amount }
@@ -1139,22 +1144,31 @@ async function renderConfirm() {
     + `<th class="num">${m(sum('company_total_booking'))}</th><th class="num">${m(sum('commissionable_bookings'))}</th>`
     + `<th class="num">${m(sum('one_time_fee'))}</th></tr></tfoot></table>`;
 
-  // Offset section — a churn dropped this quarter under this PMC that can offset a line.
+  // Offset section — a churn (this PMC) that can offset a line. Same-quarter churns are
+  // the normal case; future-quarter churns are shown but clearly flagged.
   if (elig.length) {
+    const hasSame = elig.some((e) => !e.isFuture);
     const lines = base.map((p, i) => {
       const usedByOthers = new Set(offsets.map((o, j) => (o && j !== i) ? String(o.churnId) : null).filter(Boolean));
-      const opts = elig.filter((c) => !usedByOthers.has(String(c.id)));
+      const opts = elig.filter((e) => !usedByOthers.has(String(e.churn.id)));
       const sel = offsets[i] ? String(offsets[i].churnId) : '';
-      const optionHtml = ['<option value="">No offset</option>'].concat(opts.map((c) =>
-        `<option value="${c.id}"${sel === String(c.id) ? ' selected' : ''}>${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo</option>`)).join('');
+      const optionHtml = ['<option value="">No offset</option>'].concat(opts.map((e) => {
+        const c = e.churn;
+        return `<option value="${c.id}"${sel === String(c.id) ? ' selected' : ''}>${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}</option>`;
+      })).join('');
       const amtHtml = offsets[i]
         ? `<label class="offset-amt-l">Offset <input type="text" class="offset-amt" data-offset-amt="${i}" value="${escapeAttr(m(offsets[i].amount))}" /></label>` : '';
       return `<div class="offset-line"><span class="offset-prod">${escapeHtml(p.product || `Line ${i + 1}`)}</span>`
         + `<select class="offset-sel" data-offset-line="${i}">${optionHtml}</select>${amtHtml}</div>`;
     }).join('');
-    html += `<div class="offset-box"><div class="offset-title">License Transfer offset available — ${escapeHtml(shared.pmc || '')} · ${escapeHtml(qLabel || '')}</div>`
-      + lines
-      + '<p class="offset-note">Selecting a churn tags that line as a License Transfer (offset applied) and reclassifies the churn as a Contraction.</p></div>';
+    const title = hasSame
+      ? `License Transfer offset available — ${escapeHtml(shared.pmc || '')} · ${escapeHtml(qLabel || '')}`
+      : `No churn this quarter for ${escapeHtml(shared.pmc || '')} — future-quarter churns below`;
+    const note = hasSame
+      ? 'Selecting a churn tags that line as a License Transfer (offset applied) and reclassifies the churn as a Contraction.'
+      : 'This PMC has no property churning this quarter. The options below are churning in <strong>future quarters</strong> — choose one only if you intend to offset this quarter’s booking against a future drop.';
+    html += `<div class="offset-box${hasSame ? '' : ' offset-future'}"><div class="offset-title">${title}</div>`
+      + lines + `<p class="offset-note">${note}</p></div>`;
   }
   $('#confirmSummary').innerHTML = html;
 }
@@ -1200,8 +1214,8 @@ function offsetCandidates() {
     if (b.offset_churn_id) continue; // already offset
     const bq = monthYearQuarter(`${b.booking_month || ''} ${b.booking_year || ''}`);
     if (!bq) continue;
-    const churns = eligibleChurns(b.pmc, bq.label);
-    if (churns.length) out.push({ booking: b, churns });
+    const eligible = offsetEligibleChurns(b.pmc, bq);
+    if (eligible.length) out.push({ booking: b, eligible });
   }
   return out;
 }
@@ -1209,18 +1223,23 @@ function renderOffsetReview() {
   const m = fmtMoney;
   const cands = offsetCandidates();
   if (!cands.length) {
-    $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC + quarter) available to offset.</p>';
+    $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC, this or a future quarter) available to offset.</p>';
     return;
   }
-  const rows = cands.map(({ booking: b, churns }) => {
-    const opts = churns.map((c) =>
-      `<option value="${c.id}" data-mrr="${Number(c.mrr) || 0}">${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo</option>`).join('');
+  const rows = cands.map(({ booking: b, eligible }) => {
+    const hasSame = eligible.some((e) => !e.isFuture);
+    const opts = eligible.map((e) => {
+      const c = e.churn;
+      return `<option value="${c.id}" data-mrr="${Number(c.mrr) || 0}">${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}</option>`;
+    }).join('');
     const period = `${b.booking_month || ''} ${b.booking_year || ''}`.trim();
     const lineMrr = parseMoney(b.mrr) || 0;
-    const firstMrr = Number(churns[0] && churns[0].mrr) || 0;
+    const firstMrr = Number(eligible[0].churn.mrr) || 0;
     const def = Math.min(lineMrr || firstMrr, firstMrr || lineMrr);
+    const futureNote = hasSame ? ''
+      : '<div class="offset-future-note">⚠ No churn this quarter for this PMC — the option(s) are future-quarter churns.</div>';
     return `<tr data-booking="${b.id}">
-      <td>${escapeHtml(b.property_name || b.property_id || '—')}<div class="muted-sm">${escapeHtml(b.pmc || '')} · ${escapeHtml(period)}</div></td>
+      <td>${escapeHtml(b.property_name || b.property_id || '—')}<div class="muted-sm">${escapeHtml(b.pmc || '')} · ${escapeHtml(period)}</div>${futureNote}</td>
       <td>${escapeHtml(b.product || '—')}</td>
       <td class="num">${m(b.mrr)}</td>
       <td><select class="offset-sel" data-churn-sel>${opts}</select></td>

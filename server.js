@@ -175,13 +175,13 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
     if (String(churn.classification || '') === 'Contraction') {
       return res.status(400).json({ error: 'That churn has already been used to offset a booking.' });
     }
-    const cComp = computeChurn(churn);
-    const cMonth = (cComp.prorated_churn_month && cComp.prorated_churn_month !== '-')
-      ? cComp.prorated_churn_month : cComp.final_invoice_month;
-    const cQ = quarterFromMonthYear(cMonth);
+    // A churn's quarter is when its full drop is recognized (Final Churn Month). Allow the
+    // booking to be offset by a churn in the same quarter or a future one (never a past one).
+    const cQ = quarterFromMonthYear(computeChurn(churn).final_churn_month);
     const bQ = quarterFromMonthName(booking.booking_month, booking.booking_year);
-    if (!cQ || !bQ || cQ.q !== bQ.q || cQ.year !== bQ.year) {
-      return res.status(400).json({ error: 'The churn and the booking are not in the same quarter.' });
+    if (!cQ || !bQ) return res.status(400).json({ error: 'Could not determine the quarter of the booking or churn.' });
+    if (((cQ.year - bQ.year) * 4 + (cQ.q - bQ.q)) < 0) {
+      return res.status(400).json({ error: 'That churn is in a quarter before the booking.' });
     }
     const amt = Number(String(offsetAmount ?? '').replace(/[$,]/g, ''));
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'Enter a valid offset amount.' });
