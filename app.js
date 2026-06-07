@@ -36,6 +36,7 @@ const state = {
   // Which detailed filters are currently shown per tab (added via "Add Filter"); default none.
   activeFilters: (() => { try { return JSON.parse(localStorage.getItem('perqActiveFilters') || '{}'); } catch { return {}; } })(),
   totalsZoom: parseFloat(localStorage.getItem('perqTotalsZoom')) || 1, // Bookings totals-bar zoom
+  filterZoom: parseFloat(localStorage.getItem('perqFilterZoom')) || 1, // filter-tile size (drag to resize)
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
@@ -421,7 +422,8 @@ function renderSummary() {
         .concat(cols.filter((c) => !activeSet.has(c.key)).map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`)).join('');
       addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="addFilterSelect">${addOpts}</select></div>`;
     }
-    filtersHtml = `<div class="filters-row">${tiles}${addTile}</div>`;
+    filtersHtml = `<div class="filters-row" style="zoom:${state.filterZoom}">${tiles}${addTile}</div>`
+      + '<div class="filters-resize" id="filtersResize" title="Drag to resize the filters"></div>';
   }
 
   // Metric cards live on the Dashboard tab only, on their own row below the filters.
@@ -2255,6 +2257,30 @@ function wireQuickFilter() {
   };
 }
 
+// Drag the grip at the bottom of the filter bar to scale the filter tiles up/down.
+function wireFiltersResize() {
+  let active = null;
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('.filters-resize')) return;
+    e.preventDefault();
+    active = { startY: e.clientY, startZoom: state.filterZoom };
+    document.body.style.cursor = 'ns-resize';
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!active) return;
+    const z = Math.min(2, Math.max(0.6, Math.round((active.startZoom + (e.clientY - active.startY) / 200) * 100) / 100));
+    state.filterZoom = z;
+    const row = $('#summary .filters-row');
+    if (row) row.style.zoom = z;
+  });
+  document.addEventListener('mouseup', () => {
+    if (!active) return;
+    localStorage.setItem('perqFilterZoom', String(state.filterZoom));
+    active = null;
+    document.body.style.cursor = '';
+  });
+}
+
 function wireView() {
   $('#toggleFilters').onclick = () => {
     state.filtersHidden = !state.filtersHidden;
@@ -2699,7 +2725,7 @@ function gotoRow(tab, id) {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize();
   applyZoom();
   if (state.token) {
     try {
