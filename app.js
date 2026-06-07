@@ -162,8 +162,13 @@ function rowInnerHtml(row, i) {
     else if (canEditField(f)) html += editCell(f, row);
     else html += readonlyCell(f, row);
   }
-  const del = canAddDelete() ? `<button title="Delete row" data-del="${row.id}">✕</button>` : '';
-  html += `<td class="del">${del}</td>`;
+  let actions = canAddDelete() ? `<button class="row-del" title="Delete row" data-del="${row.id}">✕</button>` : '';
+  // Super-admin only, Bookings only: add a line below / duplicate this row.
+  if (state.tab === 'bookings' && isAdmin()) {
+    actions += `<button class="row-add" title="Add a row below" data-add-below="${row.id}">＋</button>`
+      + `<button class="row-dup" title="Duplicate this row" data-dup="${row.id}">⧉</button>`;
+  }
+  html += `<td class="del">${actions}</td>`;
   return html;
 }
 
@@ -931,18 +936,61 @@ function wireGrid() {
     } catch (err) { toast(err.message, true); }
   });
 
+  // Insert a freshly created row right after the source row so it appears "below" it.
+  const insertRowAfter = (afterId, row) => {
+    const arr = state.rows.bookings;
+    const idx = arr.findIndex((r) => r.id === afterId);
+    if (idx >= 0) arr.splice(idx + 1, 0, row); else arr.push(row);
+  };
+  const afterCreate = (id, row) => {
+    insertRowAfter(id, row);
+    renderBody(); renderSummary(); renderBookingTotals(currentRows('bookings'));
+    $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+  };
+
   tbody.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-del]');
-    if (!btn) return;
-    const id = Number(btn.dataset.del);
-    if (!confirm('Delete this row?')) return;
-    try {
-      await api(`/api/${state.tab}/${id}`, { method: 'DELETE' });
-      state.rows[state.tab] = state.rows[state.tab].filter((r) => r.id !== id);
-      renderBody(); renderSummary();
-      $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
-      toast('Row deleted');
-    } catch (err) { toast(err.message, true); }
+    const del = e.target.closest('[data-del]');
+    if (del) {
+      const id = Number(del.dataset.del);
+      if (!confirm('Delete this row?')) return;
+      try {
+        await api(`/api/${state.tab}/${id}`, { method: 'DELETE' });
+        state.rows[state.tab] = state.rows[state.tab].filter((r) => r.id !== id);
+        renderBody(); renderSummary();
+        if (state.tab === 'bookings') renderBookingTotals(currentRows('bookings'));
+        $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+        toast('Row deleted');
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
+    // Add a blank line below, carrying the row's identifying context (so it stays visible
+    // under the current filter); Bookings + admin only.
+    const add = e.target.closest('[data-add-below]');
+    if (add) {
+      const cur = state.rows.bookings.find((r) => r.id === Number(add.dataset.addBelow));
+      const ctx = {};
+      ['booking_month', 'booking_year', 'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center']
+        .forEach((k) => { if (cur && cur[k] != null && cur[k] !== '') ctx[k] = cur[k]; });
+      try {
+        const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(ctx) });
+        afterCreate(cur.id, row);
+        toast('Row added');
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
+    // Duplicate this row (copy all editable fields); Bookings + admin only.
+    const dup = e.target.closest('[data-dup]');
+    if (dup) {
+      const cur = state.rows.bookings.find((r) => r.id === Number(dup.dataset.dup));
+      if (!cur) return;
+      const payload = {};
+      state.schema.bookings.editable.forEach((fld) => { if (cur[fld.key] != null) payload[fld.key] = cur[fld.key]; });
+      try {
+        const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
+        afterCreate(cur.id, row);
+        toast('Row duplicated');
+      } catch (err) { toast(err.message, true); }
+    }
   });
 }
 

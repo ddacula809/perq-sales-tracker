@@ -303,11 +303,14 @@ tbody td.offset-na .na { display: inline-block; padding: 7px 10px; color: var(--
 tbody td.del {
   position: sticky; right: 0; background: var(--panel); border-left: 1px solid var(--line-strong);
 }
+tbody td.del { white-space: nowrap; text-align: center; }
 tbody td.del button {
-  border: none; background: none; color: var(--ink-soft); cursor: pointer;
-  font-size: 15px; padding: 6px 10px; line-height: 1;
+  display: block; margin: 0 auto; border: none; background: none; color: var(--ink-soft); cursor: pointer;
+  font-size: 14px; padding: 3px 10px; line-height: 1.1;
 }
-tbody td.del button:hover { color: var(--neg); }
+tbody td.del button.row-del:hover { color: var(--neg); }
+tbody td.del button.row-add:hover { color: var(--ok); }
+tbody td.del button.row-dup:hover { color: var(--plum); }
 
 /* Hover popup for long cell text (e.g. Notes) */
 .cell-tip {
