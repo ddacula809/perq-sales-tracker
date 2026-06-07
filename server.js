@@ -19,6 +19,16 @@ import {
   SALESFORCE_RECON_FIELDS, LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS,
 } from './schema.js';
 import { verifyPassword, signToken, verifyToken } from './auth.js';
+import { sendEmail, changeEmailHtml } from './mailer.js';
+
+// Notification email recipients: admin + billing users (their username is their email).
+async function notifyEmails() {
+  try {
+    return (await listUsers())
+      .filter((u) => u.role === 'admin' || u.role === 'billing')
+      .map((u) => u.username);
+  } catch { return []; }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -402,6 +412,7 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
     let changed = 0;
     let unchanged = 0;
     let skippedBlank = 0;
+    const changeLines = [];
     for (const row of incoming) {
       // Rows without a Last Date Under Contract are not real churn events -> skip them.
       const next = row.last_date_under_contract ? String(row.last_date_under_contract).slice(0, 10) : '';
@@ -421,10 +432,18 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       // Last Date Under Contract changed -> update the existing row and notify billing.
       await updateRow('churn', match.id, { last_date_under_contract: next });
       const who = match.property || match.property_id || 'a property';
-      await createNotification('churn', match.id,
-        `Last Date Under Contract changed for ${who} (${match.product || 'product'}) from ${cur || '(blank)'} to ${next || '(blank)'}`);
+      const msg = `Last Date Under Contract changed for ${who} (${match.product || 'product'}) from ${cur || '(blank)'} to ${next || '(blank)'}`;
+      await createNotification('churn', match.id, msg);
+      changeLines.push(msg);
       match.last_date_under_contract = next;
       changed += 1;
+    }
+    if (changeLines.length) {
+      sendEmail({
+        to: await notifyEmails(),
+        subject: `PERQ: ${changeLines.length} Last Date Under Contract change${changeLines.length === 1 ? '' : 's'}`,
+        html: changeEmailHtml('Churn date changes', 'The following Last Date Under Contract values were updated from a churn upload:', changeLines),
+      });
     }
     res.json({ added, changed, unchanged, skippedBlank, total: incoming.length });
   } catch (e) { next(e); }
@@ -449,6 +468,7 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
     let changed = 0;
     let unchanged = 0;
     let notFound = 0;
+    const changeLines = [];
     for (const row of incoming) {
       if (!row.golive_date) continue;
       const matches = byKey.get(key(row));
@@ -464,10 +484,19 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
         } else {
           await updateRow('bookings', b.id, { golive_date: next });
           const who = b.property_name || b.property_id || 'a property';
-          await createNotification('bookings', b.id, `GoLive date changed for ${who} (${b.product || 'product'}) from ${cur} to ${next}`);
+          const msg = `GoLive date changed for ${who} (${b.product || 'product'}) from ${cur} to ${next}`;
+          await createNotification('bookings', b.id, msg);
+          changeLines.push(msg);
           changed += 1;
         }
       }
+    }
+    if (changeLines.length) {
+      sendEmail({
+        to: await notifyEmails(),
+        subject: `PERQ: ${changeLines.length} GoLive date change${changeLines.length === 1 ? '' : 's'}`,
+        html: changeEmailHtml('GoLive date changes', 'The following GoLive dates were updated from a GoLives upload:', changeLines),
+      });
     }
     res.json({ updated, changed, unchanged, notFound, total: incoming.length });
   } catch (e) { next(e); }
