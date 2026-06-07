@@ -359,8 +359,8 @@ function renderSummary() {
   let cols = tab === 'churn'
     ? [...state.schema.churn.editable, ...state.schema.churn.computed]
     : [...state.schema.bookings.editable, ...state.schema.bookings.computed];
-  // Bookings: offer a single combined "Booking Month/Year" filter instead of separate ones.
-  if (tab === 'bookings') {
+  // Bookings + Dashboard: offer a single combined "Booking Month/Year" filter instead of separate ones.
+  if (tab !== 'churn') {
     cols = cols.filter((c) => c.key !== 'booking_month' && c.key !== 'booking_year');
     cols.unshift({ key: 'booking_my', label: 'Booking Month/Year', type: 'text' });
   }
@@ -385,7 +385,7 @@ function renderSummary() {
   // Bookings uses the adjustable "Add Filter" system (removable tiles). Dashboard and Churn
   // keep their original fixed filter sets, independent of Bookings.
   const FIXED = {
-    dashboard: ['booking_month', 'booking_year', 'pmc', 'sales_rep', 'bpr_prod_category'],
+    dashboard: ['booking_my', 'pmc', 'sales_rep', 'bpr_prod_category'],
     churn: ['pmc_buying_center', 'property', 'product', 'final_churn_month'],
   };
   const adjustable = tab === 'bookings';
