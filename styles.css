@@ -159,13 +159,13 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 }
 .view-btn:hover { border-color: var(--accent); color: var(--accent); }
 .zoom { display: flex; align-items: center; gap: 5px; }
-.zoom #zoomLevel {
+.zoom #zoomLevel, .zoom #legacyZoomLevel {
   font-family: 'Fira Mono', monospace; font-size: 11px; color: var(--ink-soft);
   min-width: 40px; text-align: center;
 }
 .pager { display: flex; align-items: center; gap: 5px; }
 .pager select { font: inherit; font-size: 11px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); }
-.pager #pageInfo { font-family: 'Fira Mono', monospace; font-size: 11px; color: var(--ink-soft); min-width: 96px; text-align: center; white-space: nowrap; }
+.pager #pageInfo, .pager #legacyPageInfo { font-family: 'Fira Mono', monospace; font-size: 11px; color: var(--ink-soft); min-width: 96px; text-align: center; white-space: nowrap; }
 .view-btn:disabled { opacity: .4; cursor: default; }
 .view-btn:disabled:hover { border-color: var(--line-strong); color: var(--ink-soft); }
 

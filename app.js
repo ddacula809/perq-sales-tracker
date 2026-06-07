@@ -12,6 +12,9 @@ const state = {
   rows: { bookings: [], churn: [], sales_support: [], salesforce_recon: [], legacy_golives: [], legacy_churn: [] },
   sfPmcs: [], // Account Names from Salesforce Recon Data, for the Sales Support PMC dropdown
   legacySub: 'golives', // active Legacy sub-tab: 'golives' | 'churn'
+  legacyPage: 1,
+  legacyPageSize: localStorage.getItem('perqLegacyPageSize') || '100',
+  legacyZoom: parseFloat(localStorage.getItem('perqLegacyZoom')) || 1,
   // Dashboard and Bookings filter independently: filtering the grid must not move the
   // dashboard totals, and vice versa.
   filters: {
@@ -623,18 +626,37 @@ function wireSfRecon() {
 }
 
 // ---------- Legacy trackers (admin + billing read-only archive) ----------
+function applyLegacyZoom() {
+  $('#legacyTable').style.zoom = state.legacyZoom;
+  $('#legacyZoomLevel').textContent = Math.round(state.legacyZoom * 100) + '%';
+}
 function renderLegacy() {
   const sub = state.legacySub === 'churn' ? 'legacy_churn' : 'legacy_golives';
   const fields = (state.schema[sub] && state.schema[sub].editable) || [];
   const rows = state.rows[sub] || [];
   document.querySelectorAll('.legacy-subtab').forEach((b) => b.classList.toggle('active', b.dataset.legacy === state.legacySub));
-  $('#legacyCount').textContent = rows.length ? `${fmtNum(rows.length)} records` : 'No data yet';
   $('#legacyImport').hidden = !isAdmin();
+  $('#legacyPageSize').value = state.legacyPageSize;
+  applyLegacyZoom();
+
+  // Pagination — render only the current page so resizing a (large) table stays snappy.
+  const size = state.legacyPageSize === 'all' ? (rows.length || 1) : Number(state.legacyPageSize);
+  const totalPages = Math.max(1, Math.ceil(rows.length / size));
+  const page = Math.min(Math.max(1, state.legacyPage), totalPages);
+  state.legacyPage = page;
+  const start = (page - 1) * size;
+  const slice = state.legacyPageSize === 'all' ? rows : rows.slice(start, start + size);
+
+  $('#legacyCount').textContent = rows.length ? `${fmtNum(rows.length)} records` : 'No data yet';
+  $('#legacyPageInfo').textContent = `${rows.length === 0 ? 0 : start + 1}–${start + slice.length} of ${fmtNum(rows.length)}`;
+  $('#legacyPagePrev').disabled = page <= 1;
+  $('#legacyPageNext').disabled = page >= totalPages;
+
   const money = new Set(['mrr', 'sf_mrr', 'account_balance']);
   $('#legacyHead').innerHTML = '<tr><th class="rownum">#</th>'
     + fields.map((f) => `<th data-col="${f.key}">${escapeHtml(f.label)}<span class="col-resize"></span></th>`).join('') + '</tr>';
-  $('#legacyBody').innerHTML = rows.length
-    ? rows.map((r, i) => `<tr><td class="rownum">${i + 1}</td>`
+  $('#legacyBody').innerHTML = slice.length
+    ? slice.map((r, i) => `<tr><td class="rownum">${start + i + 1}</td>`
         + fields.map((f) => {
           const v = r[f.key];
           const isNum = f.type === 'number' || money.has(f.key);
@@ -646,8 +668,23 @@ function renderLegacy() {
 
 function wireLegacy() {
   document.querySelectorAll('.legacy-subtab').forEach((b) => {
-    b.onclick = () => { state.legacySub = b.dataset.legacy; renderLegacy(); applyColWidths(); };
+    b.onclick = () => { state.legacySub = b.dataset.legacy; state.legacyPage = 1; renderLegacy(); applyColWidths(); };
   });
+  $('#legacyPageSize').onchange = (e) => {
+    state.legacyPageSize = e.target.value;
+    localStorage.setItem('perqLegacyPageSize', state.legacyPageSize);
+    state.legacyPage = 1;
+    renderLegacy();
+  };
+  $('#legacyPagePrev').onclick = () => { state.legacyPage -= 1; renderLegacy(); };
+  $('#legacyPageNext').onclick = () => { state.legacyPage += 1; renderLegacy(); };
+  const setLegacyZoom = (z) => {
+    state.legacyZoom = Math.min(2, Math.max(0.5, Math.round(z * 10) / 10));
+    localStorage.setItem('perqLegacyZoom', String(state.legacyZoom));
+    applyLegacyZoom();
+  };
+  $('#legacyZoomOut').onclick = () => setLegacyZoom(state.legacyZoom - 0.1);
+  $('#legacyZoomIn').onclick = () => setLegacyZoom(state.legacyZoom + 0.1);
   $('#legacyFile').onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -2116,13 +2153,13 @@ function wireResize() {
     const th = handle.closest('th');
     if (!th || !th.dataset.col) return;
     e.preventDefault();
-    const zoom = state.zoom || 1;
-    active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom };
+    const zoom = state.tab === 'legacy' ? (state.legacyZoom || 1) : (state.zoom || 1);
+    active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom, zoom };
     document.body.style.cursor = 'col-resize';
   });
   document.addEventListener('mousemove', (e) => {
     if (!active) return;
-    const delta = (e.clientX - active.startX) / (state.zoom || 1);
+    const delta = (e.clientX - active.startX) / (active.zoom || 1);
     pendingPx = Math.max(48, Math.min(900, Math.round(active.startW + delta)));
     if (!rafId) rafId = requestAnimationFrame(flush);
   });
