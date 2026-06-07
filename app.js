@@ -2081,24 +2081,29 @@ function updateQfDatalist() {
   if (!qf || !qf.col) { $('#qfList').innerHTML = ''; return; }
   const vals = [...new Set((state.rows[state.tab] || [])
     .map((r) => r[qf.col]).filter((v) => v !== null && v !== undefined && v !== ''))]
-    .map((v) => String(v)).sort((a, b) => a.localeCompare(b)).slice(0, 1000);
+    .map((v) => String(v)).sort((a, b) => a.localeCompare(b)).slice(0, 400);
   $('#qfList').innerHTML = vals.map((v) => `<option value="${escapeAttr(v)}"></option>`).join('');
 }
+let qfTimer = null;
 function wireQuickFilter() {
   $('#qfColumn').onchange = (e) => {
     const qf = state.quickFilter[state.tab];
+    const hadText = !!qf.text;
     qf.col = e.target.value;
     qf.text = '';
     $('#qfText').value = '';
     $('#qfText').disabled = !qf.col;
-    updateQfDatalist();
-    state.page[state.tab] = 1;
-    renderBody();
+    if (qf.col) $('#qfText').focus();
+    // Build the autocomplete list off the critical path so the field is instantly usable.
+    setTimeout(updateQfDatalist, 0);
+    // Only rebuild the grid if a filter was actually active (i.e. we're clearing one).
+    if (hadText) { state.page[state.tab] = 1; renderBody(); }
   };
+  // Debounce so the grid rebuilds once after typing stops, not on every keystroke.
   $('#qfText').oninput = (e) => {
     state.quickFilter[state.tab].text = e.target.value;
-    state.page[state.tab] = 1;
-    renderBody();
+    clearTimeout(qfTimer);
+    qfTimer = setTimeout(() => { state.page[state.tab] = 1; renderBody(); }, 180);
   };
 }
 
