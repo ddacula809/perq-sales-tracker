@@ -78,7 +78,12 @@
   <nav class="tabs">
     <span class="current-tab" id="currentTab"></span>
     <div class="view-tools">
-      <button class="view-btn" id="toggleFilters">Hide filters</button>
+      <div class="quick-filter" id="quickFilter">
+        <select id="qfColumn" class="view-btn"></select>
+        <input type="text" id="qfText" list="qfList" placeholder="Quick filter…" autocomplete="off" />
+        <datalist id="qfList"></datalist>
+      </div>
+      <button class="view-btn" id="toggleFilters">Multiple Filters</button>
       <div class="col-menu-wrap">
         <button class="view-btn" id="colBtn">Columns</button>
         <div class="col-menu" id="colMenu" hidden></div>

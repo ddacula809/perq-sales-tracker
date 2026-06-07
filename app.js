@@ -35,6 +35,7 @@ const state = {
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
   pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
   page: { bookings: 1, churn: 1 },
+  quickFilter: { bookings: { col: '', text: '' }, churn: { col: '', text: '' } },
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
@@ -167,11 +168,20 @@ function rowInnerHtml(row, i) {
 }
 
 // The rows for the active grid tab, after applying that tab's filters.
+// Quick filter: a single column + free text (contains, case-insensitive), applied on top
+// of the detailed ("Multiple Filters") filters.
+function quickFilterPass(r, tab) {
+  const qf = state.quickFilter[tab];
+  if (!qf || !qf.col || !qf.text) return true;
+  return String(r[qf.col] ?? '').toLowerCase().includes(String(qf.text).toLowerCase());
+}
 function currentRows(tab) {
   const rows = state.rows[tab] || [];
-  if (tab === 'bookings') return rows.filter((r) => bookingMatch(r, state.filters.bookings));
-  if (tab === 'churn') return rows.filter((r) => churnMatch(r, state.filters.churn));
-  return rows;
+  let out = rows;
+  if (tab === 'bookings') out = rows.filter((r) => bookingMatch(r, state.filters.bookings));
+  else if (tab === 'churn') out = rows.filter((r) => churnMatch(r, state.filters.churn));
+  if (tab === 'bookings' || tab === 'churn') out = out.filter((r) => quickFilterPass(r, tab));
+  return out;
 }
 
 // Render only the current page of rows (default 100) — keeps tab-switch/filtering fast
@@ -791,7 +801,8 @@ function renderAll() {
   $('#legacyView').hidden = !isLegacy;
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
   $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon || isLegacy) ? 'none' : '';
-  $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
+  $('#toggleFilters').textContent = state.filtersHidden ? 'Multiple Filters' : 'Hide Multiple Filters';
+  $('#quickFilter').style.display = isGrid ? '' : 'none'; // quick search on Bookings/Churn only
   $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
   $('#colMenu').hidden = true;
@@ -800,6 +811,7 @@ function renderAll() {
   if (isBillingTab) renderBillingDashboard();
   if (isSfrecon) renderSfRecon();
   if (isLegacy) renderLegacy();
+  if (isGrid) renderQuickFilter();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
   applyColWidths();
@@ -2050,11 +2062,50 @@ function applyZoom() {
   $('#zoomLevel').textContent = Math.round(state.zoom * 100) + '%';
 }
 
+// Quick-filter: column dropdown + autocomplete text for the active grid tab.
+function renderQuickFilter() {
+  const tab = state.tab;
+  if (tab !== 'bookings' && tab !== 'churn') return;
+  const { cols } = fieldsForTab();
+  const qf = state.quickFilter[tab];
+  if (qf.col && !cols.some((f) => f.key === qf.col)) { qf.col = ''; qf.text = ''; } // col not in this tab
+  $('#qfColumn').innerHTML = ['<option value="">Quick filter column…</option>']
+    .concat(cols.map((f) => `<option value="${f.key}"${f.key === qf.col ? ' selected' : ''}>${escapeHtml(f.label)}</option>`)).join('');
+  $('#qfText').value = qf.text || '';
+  $('#qfText').disabled = !qf.col;
+  updateQfDatalist();
+}
+function updateQfDatalist() {
+  const qf = state.quickFilter[state.tab];
+  if (!qf || !qf.col) { $('#qfList').innerHTML = ''; return; }
+  const vals = [...new Set((state.rows[state.tab] || [])
+    .map((r) => r[qf.col]).filter((v) => v !== null && v !== undefined && v !== ''))]
+    .map((v) => String(v)).sort((a, b) => a.localeCompare(b)).slice(0, 1000);
+  $('#qfList').innerHTML = vals.map((v) => `<option value="${escapeAttr(v)}"></option>`).join('');
+}
+function wireQuickFilter() {
+  $('#qfColumn').onchange = (e) => {
+    const qf = state.quickFilter[state.tab];
+    qf.col = e.target.value;
+    qf.text = '';
+    $('#qfText').value = '';
+    $('#qfText').disabled = !qf.col;
+    updateQfDatalist();
+    state.page[state.tab] = 1;
+    renderBody();
+  };
+  $('#qfText').oninput = (e) => {
+    state.quickFilter[state.tab].text = e.target.value;
+    state.page[state.tab] = 1;
+    renderBody();
+  };
+}
+
 function wireView() {
   $('#toggleFilters').onclick = () => {
     state.filtersHidden = !state.filtersHidden;
     localStorage.setItem('perqFiltersHidden', state.filtersHidden ? '1' : '0');
-    $('#toggleFilters').textContent = state.filtersHidden ? 'Show filters' : 'Hide filters';
+    $('#toggleFilters').textContent = state.filtersHidden ? 'Multiple Filters' : 'Hide Multiple Filters';
     renderSummary();
   };
   const setZoom = (z) => {
@@ -2468,7 +2519,7 @@ function gotoRow(tab, id) {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter();
   applyZoom();
   if (state.token) {
     try {

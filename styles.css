@@ -152,6 +152,13 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 
 /* View tools (filter toggle + table zoom), right side of the tab bar */
 .view-tools { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.quick-filter { display: inline-flex; align-items: center; gap: 4px; }
+.quick-filter select { max-width: 150px; }
+.quick-filter #qfText {
+  font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line-strong);
+  border-radius: 7px; background: #fff; color: var(--ink); width: 150px;
+}
+.quick-filter #qfText:disabled { background: var(--paper); color: var(--ink-soft); }
 .view-btn {
   font: inherit; font-size: 11.5px; font-weight: 600; line-height: 1;
   background: #fff; border: 1px solid var(--line-strong); border-radius: 6px;
