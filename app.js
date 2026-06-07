@@ -36,6 +36,8 @@ const state = {
   pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
   page: { bookings: 1, churn: 1 },
   quickFilter: { bookings: { col: '', text: '' }, churn: { col: '', text: '' } },
+  // Which detailed filters are currently shown per tab (added via "Add Filter"); default none.
+  activeFilters: (() => { try { return JSON.parse(localStorage.getItem('perqActiveFilters') || '{}'); } catch { return {}; } })(),
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
@@ -354,20 +356,34 @@ function renderSummary() {
     }
   }
 
-  // A tagged salesperson's Sales Rep filter is locked to their own name (Dashboard + Bookings).
+  // Adjustable filters: only the ones the user has added show (each removable); an
+  // "Add Filter" tile picks more. Default is none. A tagged salesperson's Sales Rep filter
+  // is always shown and locked to their own name.
   const lockRep = isSales() && salesOwner();
+  const allById = new Map(filterDefs.map((d) => [d[0], d]));
+  let active = (state.activeFilters[tab] || []).filter((id) => allById.has(id));
+  if (lockRep && allById.has('rep') && !active.includes('rep')) active = ['rep', ...active];
+  const activeSet = new Set(active);
   let filtersHtml = '';
   if (!state.filtersHidden) {
-    filtersHtml = '<div class="filters-row">' +
-      filterDefs.map(([id, label, vals, cur]) => {
-        if (id === 'rep' && lockRep) {
-          const me = salesOwner();
-          const v = vals.includes(me) ? vals : ['All', me, ...vals.filter((x) => x !== 'All')];
-          return sel(id, label, v, me, true);
-        }
-        return sel(id, label, vals, cur);
-      }).join('') +
-      '</div>';
+    const tiles = active.map((id) => {
+      const [, label, vals, cur] = allById.get(id);
+      const lbl = escapeHtml(label.replace(/^Filter by /, ''));
+      if (id === 'rep' && lockRep) {
+        const me = salesOwner();
+        const v = vals.includes(me) ? vals : ['All', me, ...vals.filter((x) => x !== 'All')];
+        return `<div class="filter" data-filter="${id}"><label>${lbl}</label>`
+          + `<select id="${id}" disabled>${v.map((o) => `<option${String(o) === String(me) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
+      }
+      const opts = vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('');
+      return `<div class="filter" data-filter="${id}"><button type="button" class="filter-x" data-remove-filter="${id}" title="Remove filter">✕</button>`
+        + `<label>${lbl}</label><select id="${id}">${opts}</select></div>`;
+    }).join('');
+    const inactive = filterDefs.filter((d) => !activeSet.has(d[0]));
+    const addOpts = ['<option value="">+ Add a filter…</option>']
+      .concat(inactive.map((d) => `<option value="${d[0]}">${escapeHtml(d[1].replace(/^Filter by /, ''))}</option>`)).join('');
+    const addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="addFilterSelect">${addOpts}</select></div>`;
+    filtersHtml = `<div class="filters-row">${tiles}${addTile}</div>`;
   }
 
   // Metric cards live on the Dashboard tab only, on their own row below the filters.
@@ -461,9 +477,28 @@ function renderSummary() {
   el.innerHTML = filtersHtml + metricsHtml;
 
   if (!state.filtersHidden) {
-    filterDefs.forEach(([id]) => {
+    active.forEach((id) => {
       const ctl = $('#' + id);
-      if (ctl) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
+      if (ctl && !ctl.disabled) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
+    });
+    const addSel = $('#addFilterSelect');
+    if (addSel) addSel.onchange = (e) => {
+      const id = e.target.value;
+      if (!id) return;
+      if (!state.activeFilters[tab]) state.activeFilters[tab] = [];
+      if (!state.activeFilters[tab].includes(id)) state.activeFilters[tab].push(id);
+      saveActiveFilters();
+      renderSummary();
+    };
+    el.querySelectorAll('[data-remove-filter]').forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.dataset.removeFilter;
+        state.activeFilters[tab] = (state.activeFilters[tab] || []).filter((x) => x !== id);
+        f[id] = 'All';
+        saveActiveFilters();
+        renderSummary();
+        if (tab !== 'dashboard') renderBody();
+      };
     });
   }
   // Quarter filters live in the metrics area (always present on the dashboard).
@@ -472,6 +507,7 @@ function renderSummary() {
   const bqSel = $('#bookingQuarter');
   if (bqSel) bqSel.onchange = (e) => { state.bookingQuarter = e.target.value; renderSummary(); };
 }
+function saveActiveFilters() { localStorage.setItem('perqActiveFilters', JSON.stringify(state.activeFilters)); }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
 }
