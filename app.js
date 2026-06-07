@@ -186,10 +186,23 @@ function currentRows(tab) {
 
 // Render only the current page of rows (default 100) — keeps tab-switch/filtering fast
 // on large tables. Row numbers reflect the global position within the filtered set.
+function renderBookingTotals(rows) {
+  const el = $('#bookingTotals');
+  if (state.tab !== 'bookings') { el.hidden = true; return; }
+  const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  const cell = (label, k) => `<span class="gt-cell"><span class="gt-k">${label}</span><span class="gt-v">${fmtMoney(sum(k))}</span></span>`;
+  el.innerHTML = `<span class="gt-count">${fmtNum(rows.length)} row${rows.length === 1 ? '' : 's'}</span>`
+    + cell('MRR', 'mrr')
+    + cell('Annual Value', 'annual_value')
+    + cell('Company Total Booking', 'company_total_booking')
+    + cell('Commissionable', 'commissionable_bookings');
+  el.hidden = false;
+}
 function renderBody() {
   const tbody = $('#tbody');
-  if (state.tab !== 'bookings' && state.tab !== 'churn') { tbody.innerHTML = ''; renderPager(0, 1, 1, 0, 0); return; }
+  if (state.tab !== 'bookings' && state.tab !== 'churn') { tbody.innerHTML = ''; renderPager(0, 1, 1, 0, 0); $('#bookingTotals').hidden = true; return; }
   const rows = currentRows(state.tab);
+  renderBookingTotals(rows);
   const size = state.pageSize === 'all' ? (rows.length || 1) : Number(state.pageSize);
   const totalPages = Math.max(1, Math.ceil(rows.length / size));
   let page = Math.min(Math.max(1, state.page[state.tab] || 1), totalPages);
@@ -864,7 +877,7 @@ function wireGrid() {
       } else {
         refreshComputedCells(tr, updated);
       }
-      if (state.tab === 'bookings') renderSummary();
+      if (state.tab === 'bookings') { renderSummary(); renderBookingTotals(currentRows('bookings')); }
       toast('Saved');
     } catch (err) { toast(err.message, true); }
   });

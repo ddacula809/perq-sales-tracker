@@ -227,8 +227,18 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .metric.accent .v { color: var(--accent); }
 
 /* Grid */
-.gridwrap { flex: 1; min-height: 0; padding: 0; }
-.scroller { overflow: auto; height: 100%; }
+.gridwrap { flex: 1; min-height: 0; padding: 0; display: flex; flex-direction: column; }
+.scroller { overflow: auto; flex: 1; min-height: 0; }
+/* Fixed totals row at the bottom of the Bookings grid (reflects the filtered rows) */
+.grid-totals {
+  flex-shrink: 0; display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding: 8px 18px; border-top: 1px solid var(--line-strong); background: var(--panel);
+}
+.grid-totals[hidden] { display: none; }
+.grid-totals .gt-count { font-size: 11px; color: var(--ink-soft); font-family: 'Fira Mono', monospace; }
+.grid-totals .gt-cell { display: inline-flex; align-items: baseline; gap: 7px; }
+.grid-totals .gt-k { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); }
+.grid-totals .gt-v { font-family: 'Fira Mono', monospace; font-size: 14px; font-weight: 700; color: var(--ink); }
 table { border-collapse: separate; border-spacing: 0; width: max-content; }
 thead th {
   position: sticky; top: 0; z-index: 3;
