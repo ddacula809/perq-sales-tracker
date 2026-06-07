@@ -767,6 +767,7 @@ function renderAll() {
   $('#currentTab').textContent = TAB_LABELS[state.tab] || '';
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
+  $('#priorBookingsBtn').hidden = !canImport();
   // In the More PERQs menu these are role-gated only (work from any tab).
   $('#churnUploadBtn').hidden = !canAddDelete();
   $('#reconcileBtn').hidden = !canAddDelete();
@@ -933,6 +934,32 @@ function wireActions() {
       const data = await res.json();
       await loadAll();
       toast(`Imported ${data.imported.bookings} bookings, ${data.imported.churn} churn rows`);
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+
+  // Import prior-period bookings (old single-sheet format, e.g. April 2026) — appends.
+  $('#priorBookingsFile').onchange = async (e) => {
+    $('#moreMenu').hidden = true;
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Importing prior bookings…');
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/bookings/import-prior', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Import failed');
+      const data = await res.json();
+      state.rows.bookings = await api('/api/bookings');
+      renderAll();
+      showResult('Prior bookings imported',
+        '<ul class="result-list">'
+        + `<li><strong>${data.added}</strong> booking(s) added (MRR = Month 1; Contract &amp; Booked Term = 12)</li>`
+        + `<li><strong>${data.skipped}</strong> skipped (already in Bookings)</li>`
+        + `<li><strong>${data.filledIds}</strong> Property ID(s) filled from Salesforce Recon</li>`
+        + `<li class="muted">${data.total} row(s) in the file</li>`
+        + '</ul>');
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };

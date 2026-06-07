@@ -303,6 +303,96 @@ const LEGACY_CHURN_PPC_COLS = [
   ['Note', 'note', 'text'],
 ];
 
+// Prior-period bookings (old single-sheet format, e.g. "April 2026 sales Results"). Maps to
+// the Bookings inputs: MRR = Month 1, Contract Term = Booked Term = 12, tagged by the file's
+// Booking Month/Year. Totals are then auto-computed by computeBooking like any other booking.
+const APRIL_COLS = [
+  ['booking month', 'booking_month', 'text', 'exact'],
+  ['booking year', 'booking_year', 'number', 'exact'],
+  ['centralized', 'centralized', 'text', 'starts'],
+  ['sales rep', 'sales_rep', 'text', 'exact'],
+  ['property id', 'property_id', 'text', 'exact'],
+  ['property name', 'property_name', 'text', 'exact'],
+  ['pmc', 'pmc', 'text', 'exact'],
+  ['buying center', 'buying_center', 'text', 'exact'],
+  ['pilot or ctam', 'pilot_or_ctam', 'text', 'exact'],
+  ['pilot type', 'pilot_type', 'text', 'starts'],
+  ['ctam type', 'ctam_type', 'text', 'starts'],
+  ['product', 'product', 'text', 'exact'],
+  ['mql', 'mql', 'text', 'exact'],
+  ['date agreement signed', 'date_signed', 'date', 'exact'],
+  ['month 1', 'month1', 'number', 'exact'],
+  ['month 2', 'month2', 'number', 'exact'],
+  ['month 3', 'month3', 'number', 'exact'],
+  ['one time charges', 'one_time_fee', 'number', 'exact'],
+  ['notes', 'notes', 'text', 'exact'],
+  ['to discuss', 'discuss_in_review', 'text', 'starts'],
+  ['salesforce oppty', 'salesforce_oppty', 'text', 'exact'],
+  ['sales support', 'sales_support', 'text', 'exact'],
+  ['sf reconciled', 'sf_reconciled', 'text', 'exact'],
+];
+const PRODUCT_FIX = { 'ai lead captur agent': 'AI Lead Capture Agent', 'ai google booking agent': 'AI Google Bookings Agent' };
+
+export function parsePriorBookings(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('The uploaded file has no sheets.');
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+  const match = (h, label, mode) => (mode === 'starts' ? h.startsWith(label) : h === label);
+  let headerIdx = -1;
+  let best = 0;
+  for (let i = 0; i < Math.min(aoa.length, 15); i++) {
+    const hs = (aoa[i] || []).map(normHeader);
+    const m = APRIL_COLS.filter(([l, , , mode]) => hs.some((h) => match(h, l, mode))).length;
+    if (m > best) { best = m; headerIdx = i; }
+  }
+  if (headerIdx < 0 || best < 8) {
+    throw new Error('Could not find the expected booking columns (Booking Month, Property Name, Product, Month 1, …) in the file.');
+  }
+  const header = (aoa[headerIdx] || []).map(normHeader);
+  const colOf = {};
+  for (const [l, key, , mode] of APRIL_COLS) colOf[key] = header.findIndex((h) => match(h, l, mode));
+  const out = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const get = (key) => { const ci = colOf[key]; return ci >= 0 ? row[ci] : null; };
+    const property_name = coerce(get('property_name'), 'text');
+    const pmc = coerce(get('pmc'), 'text');
+    if (!property_name && !pmc) continue; // skip blank/footer rows
+    let product = coerce(get('product'), 'text');
+    if (product && PRODUCT_FIX[product.toLowerCase()]) product = PRODUCT_FIX[product.toLowerCase()];
+    out.push({
+      booking_month: coerce(get('booking_month'), 'text'),
+      booking_year: coerce(get('booking_year'), 'number'),
+      centralized: coerce(get('centralized'), 'text'),
+      sales_rep: coerce(get('sales_rep'), 'text'),
+      property_id: coerce(get('property_id'), 'text'),
+      property_name,
+      pmc,
+      buying_center: coerce(get('buying_center'), 'text'),
+      pilot_or_ctam: coerce(get('pilot_or_ctam'), 'text'),
+      pilot_type: coerce(get('pilot_type'), 'text'),
+      ctam_type: coerce(get('ctam_type'), 'text'),
+      product,
+      mql: coerce(get('mql'), 'text'),
+      date_signed: coerceExcelDate(get('date_signed')),
+      mrr: coerce(get('month1'), 'number'),   // MRR = Month 1
+      contract_term: 12,
+      booked_term: 12,
+      month1: coerce(get('month1'), 'number'),
+      month2: coerce(get('month2'), 'number'),
+      month3: coerce(get('month3'), 'number'),
+      one_time_fee: coerce(get('one_time_fee'), 'number'),
+      notes: coerce(get('notes'), 'text'),
+      discuss_in_review: coerce(get('discuss_in_review'), 'text'),
+      salesforce_oppty: coerce(get('salesforce_oppty'), 'text'),
+      sales_support: coerce(get('sales_support'), 'text'),
+      sf_reconciled: coerce(get('sf_reconciled'), 'text'),
+    });
+  }
+  return out;
+}
+
 // Parse the legacy "AR Tracking" workbook: Go Lives + the two Notices Churn tabs (combined).
 export function parseLegacyTracker(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });

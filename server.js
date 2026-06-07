@@ -11,7 +11,7 @@ import {
   listNotifications, createNotification, dismissNotification,
 } from './db.js';
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear } from './compute.js';
-import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker } from './importer.js';
+import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
@@ -497,6 +497,41 @@ app.post('/api/import', requireRole('admin'), upload.single('file'), async (req,
     await replaceAll('bookings', bookings);
     await replaceAll('churn', churn);
     res.json({ imported: { bookings: bookings.length, churn: churn.length } });
+  } catch (e) { next(e); }
+});
+
+// ---- Import prior-period bookings (old single-sheet format, e.g. April 2026) — appends ----
+app.post('/api/bookings/import-prior', requireRole('admin'), upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const rows = parsePriorBookings(req.file.buffer);
+    // Fill blank Property IDs from Salesforce Recon by property name (best effort).
+    const recon = await listRows('salesforce_recon');
+    const reconByName = new Map();
+    for (const r of recon) {
+      const nm = String(r.property_name ?? '').trim().toLowerCase();
+      if (nm && r.property_id_18 && !reconByName.has(nm)) reconByName.set(nm, r.property_id_18);
+    }
+    const propTail = (full) => { const p = String(full || '').split(' - '); return p[p.length - 1].trim().toLowerCase(); };
+    const existing = await listRows('bookings');
+    const dkey = (r) => `${norm(r.property_id) || norm(r.property_name)}|${norm(r.product)}|${norm(r.booking_month)}|${norm(r.booking_year)}`;
+    const seen = new Set(existing.map(dkey));
+    let added = 0;
+    let skipped = 0;
+    let filledIds = 0;
+    for (const r of rows) {
+      if (!r.property_id) {
+        const id = reconByName.get(propTail(r.property_name));
+        if (id) { r.property_id = id; filledIds += 1; }
+      }
+      const k = dkey(r);
+      if (seen.has(k)) { skipped += 1; continue; }
+      seen.add(k);
+      await insertRow('bookings', r);
+      added += 1;
+    }
+    if (added) await reconcileOwnerNames(); // bring Sales Rep names in line with Salesforce Recon
+    res.json({ added, skipped, filledIds, total: rows.length });
   } catch (e) { next(e); }
 });
 
