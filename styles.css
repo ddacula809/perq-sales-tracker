@@ -304,13 +304,27 @@ tbody td.del {
   position: sticky; right: 0; background: var(--panel); border-left: 1px solid var(--line-strong);
 }
 tbody td.del { white-space: nowrap; text-align: center; }
-tbody td.del button {
+tbody td.del > button, tbody td.del .row-more-btn {
   display: block; margin: 0 auto; border: none; background: none; color: var(--ink-soft); cursor: pointer;
-  font-size: 14px; padding: 3px 10px; line-height: 1.1;
+  font-size: 13px; padding: 2px 10px; line-height: 1.1;
 }
-tbody td.del button.row-del:hover { color: var(--neg); }
-tbody td.del button.row-add:hover { color: var(--ok); }
-tbody td.del button.row-dup:hover { color: var(--plum); }
+tbody td.del .row-del:hover { color: var(--neg); }
+tbody td.del .row-more-btn:hover { color: var(--plum); }
+/* ▾ reveals the Add-below / Duplicate menu */
+.row-more { position: relative; }
+.row-more-menu {
+  position: absolute; right: calc(100% + 4px); top: -2px; z-index: 40;
+  background: var(--panel); border: 1px solid var(--line-strong); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; gap: 2px;
+}
+.row-more-menu[hidden] { display: none; }
+td.del .row-more-menu button {
+  display: block; width: 100%; text-align: left; white-space: nowrap; border: none; background: none;
+  cursor: pointer; font: inherit; font-size: 12px; color: var(--ink); padding: 6px 12px; border-radius: 6px;
+}
+td.del .row-more-menu button:hover { background: var(--paper); }
+td.del .row-more-menu .row-add:hover { color: var(--ok); }
+td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 
 /* Hover popup for long cell text (e.g. Notes) */
 .cell-tip {

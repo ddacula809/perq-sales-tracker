@@ -163,10 +163,14 @@ function rowInnerHtml(row, i) {
     else html += readonlyCell(f, row);
   }
   let actions = canAddDelete() ? `<button class="row-del" title="Delete row" data-del="${row.id}">✕</button>` : '';
-  // Super-admin only, Bookings only: add a line below / duplicate this row.
+  // Super-admin only, Bookings only: a ▾ reveals Add-below / Duplicate.
   if (state.tab === 'bookings' && isAdmin()) {
-    actions += `<button class="row-add" title="Add a row below" data-add-below="${row.id}">＋</button>`
-      + `<button class="row-dup" title="Duplicate this row" data-dup="${row.id}">⧉</button>`;
+    actions += '<div class="row-more">'
+      + '<button type="button" class="row-more-btn" title="More row actions">▾</button>'
+      + '<div class="row-more-menu" hidden>'
+      + `<button type="button" class="row-add" data-add-below="${row.id}">＋ Add row below</button>`
+      + `<button type="button" class="row-dup" data-dup="${row.id}">⧉ Duplicate row</button>`
+      + '</div></div>';
   }
   html += `<td class="del">${actions}</td>`;
   return html;
@@ -948,11 +952,29 @@ function wireGrid() {
     $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
   };
 
+  // Close any open row-action menu when clicking elsewhere.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.row-more')) tbody.querySelectorAll('.row-more-menu').forEach((m) => { m.hidden = true; });
+  });
+
   tbody.addEventListener('click', async (e) => {
+    // Toggle the ▾ "more actions" menu.
+    const moreBtn = e.target.closest('.row-more-btn');
+    if (moreBtn) {
+      const menu = moreBtn.nextElementSibling;
+      const open = menu && menu.hidden;
+      tbody.querySelectorAll('.row-more-menu').forEach((m) => { m.hidden = true; });
+      if (menu) menu.hidden = !open;
+      return;
+    }
     const del = e.target.closest('[data-del]');
     if (del) {
       const id = Number(del.dataset.del);
-      if (!confirm('Delete this row?')) return;
+      const r = state.rows[state.tab].find((x) => x.id === id);
+      const name = state.tab === 'bookings'
+        ? (r && (r.property_name || r.property_id) || 'this booking')
+        : (r && r.property || 'this row');
+      if (!confirm(`⚠  Delete ${name}?\n\nThis permanently removes the row and cannot be undone.`)) return;
       try {
         await api(`/api/${state.tab}/${id}`, { method: 'DELETE' });
         state.rows[state.tab] = state.rows[state.tab].filter((r) => r.id !== id);
