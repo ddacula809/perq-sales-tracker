@@ -155,8 +155,8 @@ function renderHead() {
     `<th class="del"></th></tr>`;
 }
 
-function rowInnerHtml(row, i) {
-  const { cols, computedKeys } = fieldsForTab();
+function rowInnerHtml(row, i, fields) {
+  const { cols, computedKeys } = fields || fieldsForTab();
   let html = `<td class="rownum">${i + 1}</td>`;
   for (const f of cols) {
     if (computedKeys.has(f.key)) html += computedCell(f, row);
@@ -243,13 +243,10 @@ function renderBody() {
   state.page[state.tab] = page;
   const start = (page - 1) * size;
   const slice = state.pageSize === 'all' ? rows : rows.slice(start, start + size);
-  tbody.innerHTML = '';
-  slice.forEach((row, i) => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = row.id;
-    tr.innerHTML = rowInnerHtml(row, start + i);
-    tbody.appendChild(tr);
-  });
+  // Build the whole page as one HTML string (one parse + one layout) — far faster than
+  // creating/appending each row, which forced a reflow per row on the wide grid.
+  const fields = fieldsForTab();
+  tbody.innerHTML = slice.map((row, i) => `<tr data-id="${row.id}">${rowInnerHtml(row, start + i, fields)}</tr>`).join('');
   renderPager(rows.length, page, totalPages, start, slice.length);
 }
 
@@ -341,7 +338,8 @@ function monthYearQuarter(my) {
 function onFilterChange() {
   if (state.tab === 'dashboard') { renderSummary(); return; }
   state.page[state.tab] = 1;
-  renderBody();
+  // Defer so the filter dropdown repaints its new value immediately, then the grid rebuilds.
+  requestAnimationFrame(renderBody);
 }
 
 function renderSummary() {
