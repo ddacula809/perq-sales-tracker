@@ -358,18 +358,26 @@ function renderSummary() {
   };
   const colByKey = new Map(cols.map((c) => [c.key, c]));
 
-  // Adjustable filters: only the ones the user has added show (each removable); an
-  // "Add Filter" tile picks any other column. Default is none. A tagged salesperson's
-  // Sales Rep filter is always shown and locked to their own name.
+  // Bookings uses the adjustable "Add Filter" system (removable tiles). Dashboard and Churn
+  // keep their original fixed filter sets, independent of Bookings.
+  const FIXED = {
+    dashboard: ['booking_month', 'booking_year', 'pmc', 'sales_rep', 'bpr_prod_category'],
+    churn: ['pmc_buying_center', 'property', 'product', 'final_churn_month'],
+  };
+  const adjustable = tab === 'bookings';
   const lockRep = isSales() && salesOwner();
-  let active = (state.activeFilters[tab] || []).filter((k) => colByKey.has(k));
-  if (lockRep && colByKey.has('sales_rep') && !active.includes('sales_rep')) active = ['sales_rep', ...active];
+  let active = adjustable
+    ? (state.activeFilters.bookings || []).filter((k) => colByKey.has(k))
+    : (FIXED[tab] || []).filter((k) => colByKey.has(k));
+  if (lockRep && tab !== 'churn' && colByKey.has('sales_rep') && !active.includes('sales_rep')) {
+    active = adjustable ? ['sales_rep', ...active] : active; // dashboard already includes sales_rep
+  }
   const activeSet = new Set(active);
   let filtersHtml = '';
   if (!state.filtersHidden) {
     const tiles = active.map((key) => {
       const col = colByKey.get(key);
-      const lbl = escapeHtml(col.label);
+      const lbl = escapeHtml(adjustable ? col.label : `Filter by ${col.label}`);
       const vals = valuesFor(col);
       if (key === 'sales_rep' && lockRep) {
         const me = salesOwner();
@@ -379,12 +387,15 @@ function renderSummary() {
       }
       const cur = f[key] || 'All';
       const opts = vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('');
-      return `<div class="filter" data-filter="${key}"><button type="button" class="filter-x" data-remove-filter="${key}" title="Remove filter">✕</button>`
-        + `<label>${lbl}</label><select id="${key}">${opts}</select></div>`;
+      const x = adjustable ? `<button type="button" class="filter-x" data-remove-filter="${key}" title="Remove filter">✕</button>` : '';
+      return `<div class="filter" data-filter="${key}">${x}<label>${lbl}</label><select id="${key}">${opts}</select></div>`;
     }).join('');
-    const addOpts = ['<option value="">+ Add a filter…</option>']
-      .concat(cols.filter((c) => !activeSet.has(c.key)).map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`)).join('');
-    const addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="addFilterSelect">${addOpts}</select></div>`;
+    let addTile = '';
+    if (adjustable) {
+      const addOpts = ['<option value="">+ Add a filter…</option>']
+        .concat(cols.filter((c) => !activeSet.has(c.key)).map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`)).join('');
+      addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="addFilterSelect">${addOpts}</select></div>`;
+    }
     filtersHtml = `<div class="filters-row">${tiles}${addTile}</div>`;
   }
 
