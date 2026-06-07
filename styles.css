@@ -203,9 +203,12 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 }
 .summary.hidden { display: none; }
 .filters-row, .metrics-row { display: flex; flex-wrap: wrap; gap: 10px; }
-/* Drag grip to resize the filter tiles */
-.filters-resize { height: 11px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; margin: 3px 0 2px; }
-.filters-resize::after { content: ''; width: 46px; height: 3px; border-radius: 3px; background: var(--line-strong); }
+/* Thin drag handle at the top of the grid: drag up to shrink the filter bar, down to grow. */
+.filters-resize {
+  flex-shrink: 0; height: 6px; cursor: ns-resize; display: flex; align-items: center; justify-content: center;
+  border-top: 1px solid var(--line-strong);
+}
+.filters-resize::after { content: ''; width: 46px; height: 3px; border-radius: 3px; background: var(--line); }
 .filters-resize:hover::after { background: var(--accent); }
 .metrics-title {
   font-size: 11px; text-transform: uppercase; letter-spacing: .08em;

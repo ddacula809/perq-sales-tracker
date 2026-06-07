@@ -422,8 +422,7 @@ function renderSummary() {
         .concat(cols.filter((c) => !activeSet.has(c.key)).map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`)).join('');
       addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="addFilterSelect">${addOpts}</select></div>`;
     }
-    filtersHtml = `<div class="filters-row" style="zoom:${state.filterZoom}">${tiles}${addTile}</div>`
-      + '<div class="filters-resize" id="filtersResize" title="Drag to resize the filters"></div>';
+    filtersHtml = `<div class="filters-row" style="zoom:${state.filterZoom}">${tiles}${addTile}</div>`;
   }
 
   // Metric cards live on the Dashboard tab only, on their own row below the filters.
