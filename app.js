@@ -17,11 +17,8 @@ const state = {
   legacyZoom: parseFloat(localStorage.getItem('perqLegacyZoom')) || 1,
   // Dashboard and Bookings filter independently: filtering the grid must not move the
   // dashboard totals, and vice versa.
-  filters: {
-    dashboard: { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All', recbill: 'All', impbill: 'All' },
-    bookings:  { month: 'All', year: 'All', pmc: 'All', prop: 'All', rep: 'All', cat: 'All', recbill: 'All', impbill: 'All' },
-    churn:     { pmcbc: 'All', property: 'All', product: 'All', fcm: 'All' },
-  },
+  // Generic per-tab filters keyed by column key: { <columnKey>: <selectedValue> }. Empty = none.
+  filters: { dashboard: {}, bookings: {}, churn: {} },
   token: localStorage.getItem('perqToken') || '',
   user: null, // { id, username, role }
   filtersHidden: localStorage.getItem('perqFiltersHidden') === '1',
@@ -292,26 +289,18 @@ function readonlyCell(f, row) {
 function escapeAttr(v) { return String(v).replace(/"/g, '&quot;'); }
 
 // ---------- Filters + summary metrics ----------
-// True when a booking row passes the given filter selection (f = one filter set,
-// e.g. state.filters.dashboard or state.filters.bookings).
-function bookingMatch(r, f) {
-  return (f.month === 'All' || r.booking_month === f.month)
-    && (f.year === 'All' || String(r.booking_year) === String(f.year))
-    && (f.pmc === 'All' || r.pmc === f.pmc)
-    && (f.prop === 'All' || r.property_name === f.prop)
-    && (f.rep === 'All' || r.sales_rep === f.rep)
-    && (f.cat === 'All' || r.bpr_prod_category === f.cat)
-    && (!f.recbill || f.recbill === 'All' || r.recurring_billing_status === f.recbill)
-    && (!f.impbill || f.impbill === 'All' || r.implementation_billing_status === f.impbill);
+// Generic: a row passes if, for every active column filter, its value matches. f is keyed
+// by column key, e.g. { sales_rep: 'Kirk Flatter', booking_month: 'April' }.
+function rowMatchesFilters(r, f) {
+  for (const key in f) {
+    const v = f[key];
+    if (v == null || v === 'All' || v === '') continue;
+    if (String(r[key] ?? '') !== String(v)) return false;
+  }
+  return true;
 }
-
-// True when a churn row passes the churn filter selection.
-function churnMatch(r, f) {
-  return (f.pmcbc === 'All' || r.pmc_buying_center === f.pmcbc)
-    && (f.property === 'All' || r.property === f.property)
-    && (f.product === 'All' || r.product === f.product)
-    && (f.fcm === 'All' || r.final_churn_month === f.fcm);
-}
+const bookingMatch = rowMatchesFilters;
+const churnMatch = rowMatchesFilters;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -353,60 +342,48 @@ function renderSummary() {
     vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('') +
     `</select></div>`;
 
-  let filterDefs;
-  if (tab === 'churn') {
-    filterDefs = [
-      ['pmcbc', 'Filter by PMC Buying Center', ['All', ...distinct('pmc_buying_center').sort()], f.pmcbc],
-      ['property', 'Filter by Property', ['All', ...distinct('property').sort()], f.property],
-      ['product', 'Filter by Product', ['All', ...distinct('product').sort()], f.product],
-      ['fcm', 'Filter by Final Churn Month', ['All', ...sortMonthYear(distinct('final_churn_month'))], f.fcm],
-    ];
-  } else {
-    // Months in calendar order (from the schema), restricted to those present in the data.
-    const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
-    const presentMonths = new Set(distinct('booking_month'));
-    filterDefs = [
-      ['month', 'Filter by Booking Month', ['All', ...monthOrder.filter((m) => presentMonths.has(m))], f.month],
-      ['year', 'Filter by Booking Year', ['All', ...distinct('booking_year').sort((a, b) => a - b)], f.year],
-      ['pmc', 'Filter by PMC', ['All', ...distinct('pmc').sort()], f.pmc],
-    ];
-    // Property Name is only offered on the Bookings tab (too granular for dashboard totals).
-    if (tab === 'bookings') filterDefs.push(['prop', 'Filter by Property Name', ['All', ...distinct('property_name').sort()], f.prop]);
-    filterDefs.push(['rep', 'Filter by Sales Rep', ['All', ...distinct('sales_rep').sort()], f.rep]);
-    filterDefs.push(['cat', 'Filter by BPR Category', ['All', ...distinct('bpr_prod_category').sort()], f.cat]);
-    // Billing-status filters: Bookings tab, admin/billing roles only.
-    if (tab === 'bookings' && (isAdmin() || role() === 'billing')) {
-      filterDefs.push(['recbill', 'Filter by Recurring Billing', ['All', ...distinct('recurring_billing_status').sort()], f.recbill]);
-      filterDefs.push(['impbill', 'Filter by Impl. Billing', ['All', ...distinct('implementation_billing_status').sort()], f.impbill]);
-    }
-  }
+  // Every column of the active tab is filterable (Dashboard filters use the booking columns).
+  const cols = tab === 'churn'
+    ? [...state.schema.churn.editable, ...state.schema.churn.computed]
+    : [...state.schema.bookings.editable, ...state.schema.bookings.computed];
+  const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
+  const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
+  const valuesFor = (col) => {
+    const d = distinct(col.key);
+    if (col.key === 'booking_month') { const present = new Set(d); return ['All', ...monthOrder.filter((m) => present.has(m))]; }
+    if (MONTH_YEAR_COLS.has(col.key)) return ['All', ...sortMonthYear(d)];
+    // Keep the raw values (so they still match r[key]); just order numerically for number cols.
+    if (col.type === 'number') return ['All', ...d.slice().sort((a, b) => Number(a) - Number(b))];
+    return ['All', ...d.map(String).sort((a, b) => a.localeCompare(b))];
+  };
+  const colByKey = new Map(cols.map((c) => [c.key, c]));
 
   // Adjustable filters: only the ones the user has added show (each removable); an
-  // "Add Filter" tile picks more. Default is none. A tagged salesperson's Sales Rep filter
-  // is always shown and locked to their own name.
+  // "Add Filter" tile picks any other column. Default is none. A tagged salesperson's
+  // Sales Rep filter is always shown and locked to their own name.
   const lockRep = isSales() && salesOwner();
-  const allById = new Map(filterDefs.map((d) => [d[0], d]));
-  let active = (state.activeFilters[tab] || []).filter((id) => allById.has(id));
-  if (lockRep && allById.has('rep') && !active.includes('rep')) active = ['rep', ...active];
+  let active = (state.activeFilters[tab] || []).filter((k) => colByKey.has(k));
+  if (lockRep && colByKey.has('sales_rep') && !active.includes('sales_rep')) active = ['sales_rep', ...active];
   const activeSet = new Set(active);
   let filtersHtml = '';
   if (!state.filtersHidden) {
-    const tiles = active.map((id) => {
-      const [, label, vals, cur] = allById.get(id);
-      const lbl = escapeHtml(label.replace(/^Filter by /, ''));
-      if (id === 'rep' && lockRep) {
+    const tiles = active.map((key) => {
+      const col = colByKey.get(key);
+      const lbl = escapeHtml(col.label);
+      const vals = valuesFor(col);
+      if (key === 'sales_rep' && lockRep) {
         const me = salesOwner();
         const v = vals.includes(me) ? vals : ['All', me, ...vals.filter((x) => x !== 'All')];
-        return `<div class="filter" data-filter="${id}"><label>${lbl}</label>`
-          + `<select id="${id}" disabled>${v.map((o) => `<option${String(o) === String(me) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
+        return `<div class="filter" data-filter="${key}"><label>${lbl}</label>`
+          + `<select id="${key}" disabled>${v.map((o) => `<option${String(o) === String(me) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
       }
+      const cur = f[key] || 'All';
       const opts = vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('');
-      return `<div class="filter" data-filter="${id}"><button type="button" class="filter-x" data-remove-filter="${id}" title="Remove filter">✕</button>`
-        + `<label>${lbl}</label><select id="${id}">${opts}</select></div>`;
+      return `<div class="filter" data-filter="${key}"><button type="button" class="filter-x" data-remove-filter="${key}" title="Remove filter">✕</button>`
+        + `<label>${lbl}</label><select id="${key}">${opts}</select></div>`;
     }).join('');
-    const inactive = filterDefs.filter((d) => !activeSet.has(d[0]));
     const addOpts = ['<option value="">+ Add a filter…</option>']
-      .concat(inactive.map((d) => `<option value="${d[0]}">${escapeHtml(d[1].replace(/^Filter by /, ''))}</option>`)).join('');
+      .concat(cols.filter((c) => !activeSet.has(c.key)).map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`)).join('');
     const addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="addFilterSelect">${addOpts}</select></div>`;
     filtersHtml = `<div class="filters-row">${tiles}${addTile}</div>`;
   }
@@ -818,8 +795,8 @@ async function loadAll() {
   // Sales Rep filter on both the Dashboard and Bookings all lock to their Account Owner.
   if (isSales() && salesOwner()) {
     state.ssFilters.owner = salesOwner();
-    state.filters.dashboard.rep = salesOwner();
-    state.filters.bookings.rep = salesOwner();
+    state.filters.dashboard.sales_rep = salesOwner();
+    state.filters.bookings.sales_rep = salesOwner();
   }
   renderAll();
   $('#status').textContent =
@@ -2605,7 +2582,8 @@ function gotoRow(tab, id) {
   if (tab !== 'bookings' && tab !== 'churn') tab = 'bookings';
   state.tab = tab;
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
-  Object.keys(state.filters[tab]).forEach((k) => { state.filters[tab][k] = 'All'; });
+  state.filters[tab] = {}; // clear all filters so the target row is visible
+  state.quickFilter[tab] = { col: '', text: '' };
   const rows = currentRows(tab);
   const idx = rows.findIndex((r) => String(r.id) === String(id));
   if (idx >= 0) {
