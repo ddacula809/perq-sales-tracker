@@ -632,21 +632,21 @@ function renderLegacy() {
   $('#legacyImport').hidden = !isAdmin();
   const money = new Set(['mrr', 'sf_mrr', 'account_balance']);
   $('#legacyHead').innerHTML = '<tr><th class="rownum">#</th>'
-    + fields.map((f) => `<th>${escapeHtml(f.label)}</th>`).join('') + '</tr>';
+    + fields.map((f) => `<th data-col="${f.key}">${escapeHtml(f.label)}<span class="col-resize"></span></th>`).join('') + '</tr>';
   $('#legacyBody').innerHTML = rows.length
     ? rows.map((r, i) => `<tr><td class="rownum">${i + 1}</td>`
         + fields.map((f) => {
           const v = r[f.key];
           const isNum = f.type === 'number' || money.has(f.key);
           const disp = money.has(f.key) ? fmtMoney(v) : (f.type === 'number' ? fmtNum(v) : (v ?? ''));
-          return `<td class="${isNum ? 'num' : ''}">${escapeHtml(String(disp))}</td>`;
+          return `<td class="${isNum ? 'num' : ''}" data-col="${f.key}">${escapeHtml(String(disp))}</td>`;
         }).join('') + '</tr>').join('')
     : `<tr><td class="muted" colspan="${fields.length + 1}" style="padding:14px">No data yet. ${isAdmin() ? 'Use “Import AR Tracking .xlsx”.' : 'Ask an admin to import the legacy tracker.'}</td></tr>`;
 }
 
 function wireLegacy() {
   document.querySelectorAll('.legacy-subtab').forEach((b) => {
-    b.onclick = () => { state.legacySub = b.dataset.legacy; renderLegacy(); };
+    b.onclick = () => { state.legacySub = b.dataset.legacy; renderLegacy(); applyColWidths(); };
   });
   $('#legacyFile').onchange = async (e) => {
     const file = e.target.files[0];
@@ -2014,9 +2014,16 @@ function applyColHide() {
 
 // ---------- Adjustable column widths (any user) ----------
 // Widths are applied via one generated CSS rule per resized column, keyed off data-col.
+// Column-width scope/table. Legacy keeps GoLives and Churn widths separate.
+function colWidthScope() { return state.tab === 'legacy' ? `legacy_${state.legacySub}` : state.tab; }
+function colWidthTableSel() {
+  if (state.tab === 'salessupport') return '#ssTable';
+  if (state.tab === 'legacy') return '#legacyTable';
+  return '#grid';
+}
 function applyColWidths() {
-  const widths = state.colWidths[state.tab] || {};
-  const t = state.tab === 'salessupport' ? '#ssTable' : '#grid';
+  const widths = state.colWidths[colWidthScope()] || {};
+  const t = colWidthTableSel();
   let css = '';
   for (const [key, px] of Object.entries(widths)) {
     css += `${t} [data-col="${key}"]{width:${px}px;min-width:${px}px;max-width:${px}px;overflow:hidden;text-overflow:ellipsis;}`;
@@ -2025,7 +2032,8 @@ function applyColWidths() {
   $('#colWidthStyle').textContent = css;
 }
 function setColWidth(key, px) {
-  (state.colWidths[state.tab] || (state.colWidths[state.tab] = {}))[key] = px;
+  const scope = colWidthScope();
+  (state.colWidths[scope] || (state.colWidths[scope] = {}))[key] = px;
   applyColWidths();
 }
 function saveColWidths() { localStorage.setItem('perqColWidths', JSON.stringify(state.colWidths)); }
