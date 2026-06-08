@@ -307,6 +307,7 @@ function rowMatchesFilters(r, f) {
       if (my !== String(v)) return false;
       continue;
     }
+    if (v === '(blank)') { if (String(r[key] ?? '').trim() !== '') return false; continue; }
     if (String(r[key] ?? '') !== String(v)) return false;
   }
   return true;
@@ -373,12 +374,15 @@ function renderSummary() {
         .filter(Boolean))];
       return ['All', ...sortMonthYear(combos)];
     }
+    // If the column has any empty values, offer "(blank)" as the first selectable option.
+    const hasBlank = rows.some((r) => { const v = r[col.key]; return v === null || v === undefined || String(v).trim() === ''; });
+    const blank = hasBlank ? ['(blank)'] : [];
     const d = distinct(col.key);
-    if (col.key === 'booking_month') { const present = new Set(d); return ['All', ...monthOrder.filter((m) => present.has(m))]; }
-    if (MONTH_YEAR_COLS.has(col.key)) return ['All', ...sortMonthYear(d)];
+    if (col.key === 'booking_month') { const present = new Set(d); return ['All', ...blank, ...monthOrder.filter((m) => present.has(m))]; }
+    if (MONTH_YEAR_COLS.has(col.key)) return ['All', ...blank, ...sortMonthYear(d)];
     // Keep the raw values (so they still match r[key]); just order numerically for number cols.
-    if (col.type === 'number') return ['All', ...d.slice().sort((a, b) => Number(a) - Number(b))];
-    return ['All', ...d.map(String).sort((a, b) => a.localeCompare(b))];
+    if (col.type === 'number') return ['All', ...blank, ...d.slice().sort((a, b) => Number(a) - Number(b))];
+    return ['All', ...blank, ...d.map(String).sort((a, b) => a.localeCompare(b))];
   };
   const colByKey = new Map(cols.map((c) => [c.key, c]));
 
