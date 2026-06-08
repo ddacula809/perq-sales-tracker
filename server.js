@@ -8,7 +8,7 @@ import {
   getUserByUsername, listUsers, createUser, updateUser, deleteUser, getUserById, countAdmins,
   listPeriods, getOpenPeriod, closeAllOpenPeriods, latestPeriod, createPeriod, getRowPeriod,
   getPeriod, closePeriod, reconcileOwnerNames,
-  listNotifications, createNotification, dismissNotification,
+  listNotifications, createNotification, dismissNotification, resolveNotification,
 } from './db.js';
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings } from './importer.js';
@@ -528,8 +528,13 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
 app.get('/api/notifications', requireRole('admin', 'billing'), async (_req, res, next) => {
   try { res.json(await listNotifications()); } catch (e) { next(e); }
 });
+// Bell "✕" — acknowledge only (keeps the dashboard warning).
 app.post('/api/notifications/:id/dismiss', requireRole('admin', 'billing'), async (req, res, next) => {
   try { await dismissNotification(Number(req.params.id)); res.json(await listNotifications()); } catch (e) { next(e); }
+});
+// Dashboard "Resolve" — clears the warning (and the bell entry).
+app.post('/api/notifications/:id/resolve', requireRole('admin', 'billing'), async (req, res, next) => {
+  try { await resolveNotification(Number(req.params.id)); res.json(await listNotifications()); } catch (e) { next(e); }
 });
 
 // ---- Reconcile: parse an uploaded bookings file; the client diffs it against current data ----

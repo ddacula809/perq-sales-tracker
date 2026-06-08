@@ -565,6 +565,16 @@ function bdCanEdit(key) {
 }
 const BD_DETAIL_KEYS = ['property_id', 'property_name', 'pmc', 'product', 'mrr', 'one_time_fee',
   'billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'golive_date'];
+// Columns shown in the Churn "For Immediate Action" drill-down (editable so billing can act).
+const CHURN_DETAIL_KEYS = ['property_id', 'property', 'product', 'mrr', 'last_date_under_contract',
+  'template_deleted', 'completed', 'notes'];
+// Who can edit a churn cell in the drill-down: admin/standard all; billing = churn billing columns.
+function churnCanEdit(key) {
+  const r = role();
+  if (r === 'admin' || r === 'standard') return true;
+  if (r === 'billing') return BILLING_KEYS.churn.has(key);
+  return false;
+}
 
 function renderBillingDashboard() {
   const rows = state.rows.bookings;
@@ -655,23 +665,27 @@ function renderActionSection() {
   else if (state.bdAction === 'churn' && churn.length) html += renderActionDetail('churn', churn);
   return html;
 }
+// Drill-down for the changed rows. Same editable detail as the metric tiles, so billing can
+// take action inline; a Resolve button sits at the START of each row to clear the warning.
 function renderActionDetail(action, notifs) {
   const isGolive = action === 'golive';
-  const byId = new Map((isGolive ? state.rows.bookings : state.rows.churn).map((r) => [String(r.id), r]));
-  const dateKey = isGolive ? 'golive_date' : 'last_date_under_contract';
-  const dateLabel = isGolive ? 'GoLive Date' : 'Last Date Under Contract';
+  const tab = isGolive ? 'bookings' : 'churn';
   const title = isGolive ? 'GoLive Changes' : 'Churn Date Changes';
+  const keys = isGolive ? BD_DETAIL_KEYS : CHURN_DETAIL_KEYS;
+  const canEdit = isGolive ? bdCanEdit : churnCanEdit;
+  const byId = new Map(state.rows[tab].map((r) => [String(r.id), r]));
+  const defs = keys.map((k) => state.schema[tab].editable.find((f) => f.key === k)).filter(Boolean);
+  const headRow = '<th class="bd-act-col">Action</th>' + defs.map((f) => `<th>${escapeHtml(f.label)}</th>`).join('');
   const body = notifs.map((n) => {
-    const r = byId.get(String(n.booking_id)) || {};
-    const prop = isGolive ? (r.property_name || r.property_id) : (r.property || r.property_id);
-    return '<tr>'
-      + `<td>${escapeHtml(prop || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
-      + `<td>${escapeHtml(r[dateKey] || '—')}</td><td>${escapeHtml(n.message || '')}</td>`
-      + `<td><button type="button" class="bd-resolve" data-resolve="${n.id}" title="Mark resolved">⚠ Resolve</button></td></tr>`;
+    const row = byId.get(String(n.booking_id));
+    if (!row) return ''; // the underlying row no longer exists
+    const act = `<td class="bd-act-col"><button type="button" class="bd-resolve" data-resolve="${n.id}" title="${escapeAttr(n.message || 'Mark resolved')}">⚠ Resolve</button></td>`;
+    const cells = defs.map((f) => (canEdit(f.key) ? editCell(f, row) : readonlyCell(f, row))).join('');
+    return `<tr data-id="${row.id}">${act}${cells}</tr>`;
   }).join('');
   return `<div class="metrics-title">${title} (${notifs.length})</div>`
-    + `<div class="bd-detail"><table><thead><tr><th>Property</th><th>Product</th><th>${dateLabel}</th><th>Change</th><th></th></tr></thead>`
-    + `<tbody>${body}</tbody></table></div>`;
+    + `<div class="bd-detail" data-action-tab="${tab}"><table><thead><tr>${headRow}</tr></thead>`
+    + `<tbody>${body || `<tr><td class="muted" colspan="${defs.length + 1}" style="padding:12px">No matching rows.</td></tr>`}</tbody></table></div>`;
 }
 
 function wireBilling() {
@@ -685,12 +699,12 @@ function wireBilling() {
       renderBillingDashboard();
       return;
     }
-    // Resolve a change -> dismiss the notification (removes it from the tile/count).
+    // Resolve a change -> clears the warning entirely (and removes it from the bell).
     const resolveBtn = e.target.closest('[data-resolve]');
     if (resolveBtn) {
       resolveBtn.disabled = true;
       try {
-        state.notifications = await api(`/api/notifications/${resolveBtn.dataset.resolve}/dismiss`, { method: 'POST' });
+        state.notifications = await api(`/api/notifications/${resolveBtn.dataset.resolve}/resolve`, { method: 'POST' });
         const tab = state.bdAction === 'golive' ? 'bookings' : 'churn';
         if (!state.notifications.some((n) => n.target_tab === tab)) state.bdAction = null;
         renderAll(); // refreshes the dashboard tiles and the header bell count
@@ -713,13 +727,17 @@ function wireBilling() {
     const detail = $('#billingInner .bd-detail');
     const outerTop = view ? view.scrollTop : 0;
     const innerTop = detail ? detail.scrollTop : 0;
+    // The Churn action drill-down marks its table; everything else edits bookings.
+    const detailWrap = ctl.closest('.bd-detail');
+    const tab = (detailWrap && detailWrap.dataset.actionTab) || 'bookings';
+    const key = ctl.dataset.key;
     try {
-      const updated = await api(`/api/bookings/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ [ctl.dataset.key]: ctl.value }) });
-      updateRowInState('bookings', updated);
-      // Editing the GoLive date here raises a Billing alert -> reload so the tile/bell reflect it.
-      if (ctl.dataset.key === 'golive_date' && (isAdmin() || role() === 'billing')) {
+      const updated = await api(`/api/${tab}/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ [key]: ctl.value }) });
+      updateRowInState(tab, updated);
+      // Editing a watched date here raises a Billing alert -> reload so the tile/bell reflect it.
+      if ((key === 'golive_date' || key === 'last_date_under_contract') && (isAdmin() || role() === 'billing')) {
         state.notifications = await api('/api/notifications');
-        $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
+        updateBell();
       }
       renderBillingDashboard();
       // Restore scroll positions after the DOM is rebuilt.
@@ -938,7 +956,7 @@ function renderAll() {
   $('#offsetReviewBtn').hidden = !canAddDelete();
   $('#usersBtn').hidden = !isAdmin();
   $('#notifWrap').hidden = !canBilling;
-  $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
+  updateBell();
   $('#userWrap').hidden = !state.user;
   $('#userChip').innerHTML = state.user
     ? `${escapeHtml(state.user.username)} · <span class="role">${escapeHtml(state.user.role)}</span>` : '';
@@ -1021,7 +1039,7 @@ function wireGrid() {
       // Editing a watched date (GoLive / Last Date Under Contract) raises a Billing alert.
       if ((key === 'golive_date' || key === 'last_date_under_contract') && (isAdmin() || role() === 'billing')) {
         state.notifications = await api('/api/notifications');
-        $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
+        updateBell();
       }
       toast('Saved');
     } catch (err) { toast(err.message, true); }
@@ -2742,8 +2760,12 @@ function wireUsers() {
 }
 
 // ---------- Notifications ----------
+// The bell shows only notifications not yet acknowledged (✕). Resolving on the dashboard
+// removes them entirely; bell ✕ just hides them here without resolving the warning.
+function bellNotifs() { return (state.notifications || []).filter((n) => !n.dismissed); }
+function updateBell() { const c = bellNotifs().length; $('#notifCount').textContent = c ? String(c) : ''; }
 function renderNotifMenu() {
-  const list = state.notifications || [];
+  const list = bellNotifs();
   $('#notifMenu').innerHTML = list.length
     ? list.map((n) => `<div class="notif-item" data-go="${n.booking_id}" data-tab="${n.target_tab || 'bookings'}"><span class="notif-msg">${escapeHtml(n.message)}</span><button type="button" class="notif-x" data-dismiss="${n.id}" title="Dismiss">✕</button></div>`).join('')
     : '<div class="notif-empty">No notifications</div>';
@@ -2759,7 +2781,7 @@ function wireNotifications() {
       try {
         state.notifications = await api(`/api/notifications/${dis.dataset.dismiss}/dismiss`, { method: 'POST' });
         renderNotifMenu();
-        $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
+        updateBell();
       } catch (err) { toast(err.message, true); }
       return;
     }

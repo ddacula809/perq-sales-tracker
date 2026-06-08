@@ -209,6 +209,10 @@ export async function initDb() {
     );
   `);
   await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_tab TEXT NOT NULL DEFAULT 'bookings'");
+  // 'dismissed' clears a notification from the header bell; 'resolved' clears the warning
+  // from the Billing Dashboard "For Immediate Action" tile. They are independent: dismissing
+  // in the bell does NOT resolve the warning — only the Resolve button does.
+  await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS resolved BOOLEAN NOT NULL DEFAULT false');
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales_periods (
       period TEXT PRIMARY KEY,
@@ -236,6 +240,11 @@ export async function initDb() {
   await runOnce('reconcile_owner_names_v1', reconcileOwnerNames);
   await runOnce('churn_classification_default_v1', async () => {
     await pool.query(`UPDATE churn SET classification='Churn' WHERE classification IS NULL OR classification=''`);
+  });
+  // Before this release, "dismiss" cleared the warning entirely. Treat anything already
+  // dismissed as resolved so old, handled warnings don't resurface in the new action tile.
+  await runOnce('notif_dismissed_to_resolved_v1', async () => {
+    await pool.query('UPDATE notifications SET resolved = true WHERE dismissed = true');
   });
   await ensureAdmin();
 }
@@ -289,15 +298,22 @@ export async function getRowPeriod(table, id) {
 }
 
 // ---- Notifications (e.g. GoLive date changes, for billing users) ----
+// Returns every unresolved warning (the "For Immediate Action" set), each carrying its
+// own `dismissed` flag so the header bell can hide acknowledged ones without resolving them.
 export async function listNotifications() {
-  const { rows } = await pool.query('SELECT id, target_tab, booking_id, message, created_at FROM notifications WHERE dismissed = false ORDER BY created_at DESC, id DESC');
+  const { rows } = await pool.query('SELECT id, target_tab, booking_id, message, created_at, dismissed FROM notifications WHERE resolved = false ORDER BY created_at DESC, id DESC');
   return rows;
 }
 export async function createNotification(targetTab, rowId, message) {
   await pool.query('INSERT INTO notifications (target_tab, booking_id, message) VALUES ($1, $2, $3)', [targetTab, rowId, message]);
 }
+// Bell "✕": acknowledge — hide from the bell, but keep the warning on the dashboard.
 export async function dismissNotification(id) {
   await pool.query('UPDATE notifications SET dismissed = true WHERE id=$1', [id]);
+}
+// Dashboard "Resolve": clear the warning entirely (also clears it from the bell).
+export async function resolveNotification(id) {
+  await pool.query('UPDATE notifications SET resolved = true, dismissed = true WHERE id=$1', [id]);
 }
 
 // Seed the first admin if there are no users yet, so a fresh deploy isn't locked out.
