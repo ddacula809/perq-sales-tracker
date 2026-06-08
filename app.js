@@ -2385,18 +2385,21 @@ function wireView() {
   $('#zoomIn').onclick = () => setZoom(state.zoom + 0.1);
 }
 
-// Freeze only the Property Name column: the columns before it (Booking Month/Year,
-// Centralized, Sales Rep, Property ID) scroll away normally, and once Property Name reaches
-// the left it pins there (right after the sticky row-number) while the rest keeps scrolling.
+// Freeze one key column per grid: on Bookings it's Property Name; on Churn it's PMC Buying
+// Center. The columns before it scroll away normally, and once the pinned column reaches the
+// left it sticks there (right after the sticky row-number) while the rest keeps scrolling.
 const BOOKING_FREEZE = ['property_name'];
+const CHURN_FREEZE = ['pmc_buying_center'];
+const GRID_FREEZE = { bookings: BOOKING_FREEZE, churn: CHURN_FREEZE };
 function applyGridFreeze() {
-  if (state.tab !== 'bookings') { $('#gridFreezeStyle').textContent = ''; return; }
-  const hidden = new Set(state.hiddenCols.bookings || []);
+  const freezeKeys = GRID_FREEZE[state.tab];
+  if (!freezeKeys) { $('#gridFreezeStyle').textContent = ''; return; }
+  const hidden = new Set(state.hiddenCols[state.tab] || []);
   const zoom = state.zoom || 1;
   const rownumTh = $('#thead th.rownum');
   let left = rownumTh ? rownumTh.getBoundingClientRect().width / zoom : 46;
   let css = '';
-  for (const key of BOOKING_FREEZE) {
+  for (const key of freezeKeys) {
     if (hidden.has(key)) continue;
     css += `#grid td[data-col="${key}"]{position:sticky;left:${left}px;z-index:2;}`;
     css += `#grid th[data-col="${key}"]{position:sticky;left:${left}px;top:0;z-index:5;}`;
@@ -2512,7 +2515,7 @@ function wireResize() {
     if (!active || pendingPx === null) return;
     setColWidth(active.key, pendingPx);
     if (state.tab === 'salessupport') ssApplyFreeze();
-    if (state.tab === 'bookings') applyGridFreeze();
+    if (state.tab === 'bookings' || state.tab === 'churn') applyGridFreeze();
   };
   // Listen on document so the grid (#grid), Sales Support (#ssTable) and Legacy all work.
   document.addEventListener('mousedown', (e) => {
