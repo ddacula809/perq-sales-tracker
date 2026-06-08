@@ -2385,11 +2385,11 @@ function wireView() {
   $('#zoomIn').onclick = () => setZoom(state.zoom + 0.1);
 }
 
-// Freeze one key column per grid: on Bookings it's Property Name; on Churn it's PMC Buying
-// Center. The columns before it scroll away normally, and once the pinned column reaches the
-// left it sticks there (right after the sticky row-number) while the rest keeps scrolling.
+// Freeze key column(s) per grid: on Bookings it's Property Name; on Churn it's PMC Buying
+// Center + Property (a contiguous pinned block). The columns before them scroll away normally,
+// and once pinned they stick to the left (after the sticky row-number) while the rest scrolls.
 const BOOKING_FREEZE = ['property_name'];
-const CHURN_FREEZE = ['pmc_buying_center'];
+const CHURN_FREEZE = ['pmc_buying_center', 'property'];
 const GRID_FREEZE = { bookings: BOOKING_FREEZE, churn: CHURN_FREEZE };
 function applyGridFreeze() {
   const freezeKeys = GRID_FREEZE[state.tab];
