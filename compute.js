@@ -75,7 +75,9 @@ export function computeBooking(r) {
   // Column W: Company Total Booking
   let companyTotal = null;
   if (!(Q === null && S === null)) {
-    if (H === 'New - Free' || (H === 'New - Paid' && I === 'Straight to Pay')) {
+    // New PMC Pilots (Pilot Type New - Free or New - Paid) are recognized at $0 company
+    // booking — both map to the "New PMC Pilot ($0)" bucket. (Commissionable still applies.)
+    if (H === 'New - Free' || H === 'New - Paid') {
       companyTotal = 0;
     } else if (I === 'Re-rate') {
       const v = ((S ?? 0) - (O ?? 0)) * (P ?? 0);
