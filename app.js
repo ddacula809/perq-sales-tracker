@@ -1949,7 +1949,9 @@ const ssFieldDef = (key) => state.schema.sales_support.editable.find((f) => f.ke
 // Offsets are computed from the actual header widths (recomputed on resize).
 const SS_FREEZE = ['product_category', 'section', 'pmc'];
 function ssApplyFreeze() {
-  let left = 0;
+  // Start past the sticky row-number column so the frozen columns don't overlap it.
+  const rownumTh = $('#ssHead th.rownum');
+  let left = rownumTh ? rownumTh.getBoundingClientRect().width / (state.zoom || 1) : 0;
   let css = '';
   for (const key of SS_FREEZE) {
     css += `#ssTable td[data-col="${key}"]{position:sticky;left:${left}px;z-index:1;}`;
@@ -2045,7 +2047,7 @@ function ssSubtotalRowHtml(cols, groupRows, editCol) {
     if (i === 0) return `<td class="ss-subtotal-label" data-col="${k}">Subtotal</td>`;
     return `<td data-col="${k}"></td>`;
   }).join('');
-  return `<tr class="ss-subtotal-row">${cells}${editCol ? '<td></td>' : ''}</tr>`;
+  return `<tr class="ss-subtotal-row"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
 }
 
 // Show/hide the Sales Support toolbar (quarter, filters, close/open) via the toggle.
@@ -2097,7 +2099,7 @@ function renderSalesSupport() {
   applySsBar();
   const cols = ssColumns();
   const editCol = ssEditable();
-  $('#ssHead').innerHTML = '<tr>' +
+  $('#ssHead').innerHTML = '<tr><th class="rownum">#</th>' +
     cols.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}" data-col="${k}">${escapeHtml(label)}<span class="col-resize"></span></th>`).join('') +
     (editCol ? '<th></th>' : '') + '</tr>';
 
@@ -2124,26 +2126,28 @@ function renderSalesSupport() {
   let group = null;
   let groupRows = []; // rows of the current section, for the subtotal
   let alt = 0; // alternating-row counter, reset at each section for clean striping
+  let n = 0;   // running row number across the whole filtered set
   const flushSubtotal = () => { if (group !== null && groupRows.length) html += ssSubtotalRowHtml(cols, groupRows, editCol); };
   for (const row of rows) {
     const g = `${row.product_category || '—'}  ·  ${row.section || '—'}`;
     if (g !== group) {
       flushSubtotal();        // close out the previous section with its subtotal
       group = g; alt = 0; groupRows = [];
-      html += `<tr class="ss-group"><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`;
+      html += `<tr class="ss-group"><td class="rownum"></td><td colspan="${colCount}"><span class="ss-group-label">${escapeHtml(g)}</span></td></tr>`;
     }
     groupRows.push(row);
+    n += 1;
     const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
     const cls = (alt % 2) ? 'ss-alt' : '';
     alt += 1;
-    html += `<tr data-ss-id="${row.id}" class="${cls}">${cols.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
+    html += `<tr data-ss-id="${row.id}" class="${cls}"><td class="rownum">${n}</td>${cols.map(([k]) => ssCell(row, k)).join('')}${del}</tr>`;
   }
   flushSubtotal(); // subtotal for the final section
   if (!rows.length) {
     const msg = !viewed ? `No quarters yet.${isAdmin() ? ' Use “Open New Quarter”.' : ''}`
       : editCol ? 'No rows yet. Use “+ Add row”.'
         : (viewed.status === 'open' ? 'No rows yet.' : 'Archived quarter (read-only).');
-    html = `<tr><td class="muted" colspan="${colCount || 1}" style="padding:14px">${msg}</td></tr>`;
+    html = `<tr><td class="muted" colspan="${colCount + 1}" style="padding:14px">${msg}</td></tr>`;
   }
   $('#ssBody').innerHTML = html;
 }
