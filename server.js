@@ -435,6 +435,8 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
     let unchanged = 0;
     let skippedBlank = 0;
     const changeLines = [];
+    const addedRows = [];   // detail: new churn rows
+    const changedRows = []; // detail: Last Date Under Contract updates
     for (const row of incoming) {
       // Rows without a Last Date Under Contract are not real churn events -> skip them.
       const next = row.last_date_under_contract ? String(row.last_date_under_contract).slice(0, 10) : '';
@@ -446,6 +448,7 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
         const ins = await insertRow('churn', row);
         byKey.set(k, ins);
         added += 1;
+        addedRows.push({ property: ins.property || ins.property_id || '', product: ins.product || '', mrr: ins.mrr, last_date_under_contract: next });
         continue;
       }
       // Same property/product/MRR already exists: compare Last Date Under Contract.
@@ -457,6 +460,7 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       const msg = `Last Date Under Contract changed for ${who} (${match.product || 'product'}) from ${cur || '(blank)'} to ${next || '(blank)'}`;
       await createNotification('churn', match.id, msg);
       changeLines.push(msg);
+      changedRows.push({ property: who, product: match.product || '', mrr: match.mrr, from: cur, to: next });
       match.last_date_under_contract = next;
       changed += 1;
     }
@@ -467,7 +471,7 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
         html: changeEmailHtml('Churn date changes', 'The following Last Date Under Contract values were updated from a churn upload:', changeLines),
       });
     }
-    res.json({ added, changed, unchanged, skippedBlank, total: incoming.length });
+    res.json({ added, changed, unchanged, skippedBlank, total: incoming.length, addedRows, changedRows });
   } catch (e) { next(e); }
 });
 

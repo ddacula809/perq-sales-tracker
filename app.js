@@ -87,6 +87,35 @@ function showResult(title, bodyHtml) {
   $('#resultBody').innerHTML = bodyHtml;
   $('#resultModal').hidden = false;
 }
+// Build the Churn upload result: the count summary, plus detail tables of exactly what was
+// added (property / MRR / last date) and what changed (property / MRR / old -> new date).
+function churnResultHtml(data) {
+  const addedRows = data.addedRows || [];
+  const changedRows = data.changedRows || [];
+  let html = '<ul class="result-list">'
+    + `<li><strong>${data.added}</strong> new churn row(s) added</li>`
+    + `<li><strong>${data.changed}</strong> Last Date Under Contract changed (billing notified)</li>`
+    + `<li><strong>${data.unchanged}</strong> unchanged (already present)</li>`
+    + `<li><strong>${data.skippedBlank || 0}</strong> skipped (blank Last Date Under Contract)</li>`
+    + `<li class="muted">${data.total} row(s) in the file</li>`
+    + '</ul>';
+  if (addedRows.length) {
+    html += `<div class="result-detail-title">Added (${addedRows.length})</div>`
+      + '<div class="result-detail"><table><thead><tr><th>Property</th><th>Product</th><th>MRR</th><th>Last Date Under Contract</th></tr></thead><tbody>'
+      + addedRows.map((r) => `<tr><td>${escapeHtml(r.property || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+        + `<td class="num">${fmtMoney(r.mrr)}</td><td>${escapeHtml(r.last_date_under_contract || '—')}</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  if (changedRows.length) {
+    html += `<div class="result-detail-title">Last Date Under Contract updated (${changedRows.length})</div>`
+      + '<div class="result-detail"><table><thead><tr><th>Property</th><th>Product</th><th>MRR</th><th>Old date</th><th>New date</th></tr></thead><tbody>'
+      + changedRows.map((r) => `<tr><td>${escapeHtml(r.property || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+        + `<td class="num">${fmtMoney(r.mrr)}</td><td>${escapeHtml(r.from || '(blank)')}</td><td><strong>${escapeHtml(r.to || '(blank)')}</strong></td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  return html;
+}
+
 function wireResult() {
   const close = () => { $('#resultModal').hidden = true; };
   $('#resultClose').onclick = close;
@@ -1231,14 +1260,7 @@ function wireActions() {
       if (isAdmin() || role() === 'billing') state.notifications = await api('/api/notifications');
       renderAll();
       $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
-      showResult('Churn upload complete',
-        '<ul class="result-list">'
-        + `<li><strong>${data.added}</strong> new churn row(s) added</li>`
-        + `<li><strong>${data.changed}</strong> Last Date Under Contract changed (billing notified)</li>`
-        + `<li><strong>${data.unchanged}</strong> unchanged (already present)</li>`
-        + `<li><strong>${data.skippedBlank || 0}</strong> skipped (blank Last Date Under Contract)</li>`
-        + `<li class="muted">${data.total} row(s) in the file</li>`
-        + '</ul>');
+      showResult('Churn upload complete', churnResultHtml(data));
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };

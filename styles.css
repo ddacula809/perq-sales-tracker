@@ -500,9 +500,18 @@ tr.ss-group td {
 
 /* Result dialog */
 #resultBody { font-size: 13px; }
+/* Grow to fit detail tables (up to the viewport), shrink for a plain summary list. */
+#resultModal .modal-card { width: auto; min-width: 320px; max-width: 92vw; max-height: 88vh; overflow: auto; }
 .result-list { margin: 0 0 4px; padding-left: 18px; line-height: 1.7; }
 .result-list .muted { list-style: none; margin-left: -18px; color: var(--ink-soft); font-size: 12px; }
 #resultModal .modal-card .btn { width: auto; }
+.result-detail-title { margin: 14px 0 6px; font-weight: 600; font-size: 13px; }
+.result-detail { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.result-detail table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.result-detail th, .result-detail td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.result-detail tr:last-child td { border-bottom: none; }
+.result-detail th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.result-detail td.num, .result-detail th.num { text-align: right; }
 
 /* License Transfer offset (confirm dialog + review) */
 .offset-box { margin-top: 14px; border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; background: var(--accent-soft); }
