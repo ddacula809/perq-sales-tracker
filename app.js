@@ -636,12 +636,12 @@ function renderChurnDetail(quarterLabel) {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td>${escapeHtml(x.prop)}</td><td>${escapeHtml(x.pmc || '—')}</td><td class="num">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      ? list.map((x) => `<tr><td>${escapeHtml(x.pmc || '—')}</td><td>${escapeHtml(x.prop)}</td><td class="num">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
       : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
       + '<div class="churn-detail-scroll">'
-      + `<table><thead><tr><th>Property</th><th>PMC</th><th class="num">MRR Dropped</th><th>${thirdLabel}</th></tr></thead>`
+      + `<table><thead><tr><th>PMC</th><th>Property</th><th class="num">MRR Dropped</th><th>${thirdLabel}</th></tr></thead>`
       + `<tbody>${body}</tbody>`
       + (list.length ? `<tfoot><tr><td>Total</td><td></td><td class="num">${fmtMoney(total)}</td><td></td></tr></tfoot>` : '')
       + '</table></div></div>';
