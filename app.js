@@ -232,17 +232,20 @@ function applyTotalsZoom() {
   const lvl = $('#gtZoomLevel');
   if (lvl) lvl.textContent = Math.round(state.totalsZoom * 100) + '%';
 }
+// Which money columns the bottom totals row sums, per grid. Totals reflect the filtered set.
+const TOTALS_FIELDS = {
+  bookings: [['MRR', 'mrr'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings']],
+  churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
+};
 function renderBookingTotals(rows) {
   const el = $('#bookingTotals');
-  if (state.tab !== 'bookings') { el.hidden = true; return; }
+  const fields = TOTALS_FIELDS[state.tab];
+  if (!fields) { el.hidden = true; return; }
   const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
   const cell = (label, k) => `<span class="gt-cell"><span class="gt-k">${label}</span><span class="gt-v">${fmtMoney(sum(k))}</span></span>`;
   el.innerHTML = `<div class="gt-content">`
     + `<span class="gt-count">${fmtNum(rows.length)} row${rows.length === 1 ? '' : 's'}</span>`
-    + cell('MRR', 'mrr')
-    + cell('Annual Value', 'annual_value')
-    + cell('Company Total Booking', 'company_total_booking')
-    + cell('Commissionable', 'commissionable_bookings')
+    + fields.map(([label, k]) => cell(label, k)).join('')
     + '</div>'
     + '<div class="gt-zoom" title="Totals size">'
     + '<button type="button" class="view-btn" data-gt-zoom="out" aria-label="Smaller">&minus;</button>'
@@ -1064,7 +1067,7 @@ function wireGrid() {
       } else {
         refreshComputedCells(tr, updated);
       }
-      if (state.tab === 'bookings') { renderSummary(); renderBookingTotals(currentRows('bookings')); }
+      if (state.tab === 'bookings' || state.tab === 'churn') { renderSummary(); renderBookingTotals(currentRows(state.tab)); }
       // Editing a watched date (GoLive / Last Date Under Contract) raises a Billing alert.
       if ((key === 'golive_date' || key === 'last_date_under_contract') && (isAdmin() || role() === 'billing')) {
         state.notifications = await api('/api/notifications');
@@ -1113,7 +1116,7 @@ function wireGrid() {
         await api(`/api/${state.tab}/${id}`, { method: 'DELETE' });
         state.rows[state.tab] = state.rows[state.tab].filter((r) => r.id !== id);
         renderBody(); renderSummary();
-        if (state.tab === 'bookings') renderBookingTotals(currentRows('bookings'));
+        renderBookingTotals(currentRows(state.tab));
         $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
         toast('Row deleted');
       } catch (err) { toast(err.message, true); }
