@@ -43,6 +43,7 @@ const state = {
   ssBarCollapsed: localStorage.getItem('perqSsBarCollapsed') === '1', // Sales Support toolbar collapsed
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
+  bdAction: null,     // active "For Immediate Action" drill-down: 'golive' | 'churn'
   pendingBookings: [], // new-booking payloads awaiting confirmation
   pendingShared: {},   // shared booking details for the confirm dialog
   pendingOffsets: [],  // per-line License Transfer offset selections (null or {churnId, amount})
@@ -597,7 +598,10 @@ function renderBillingDashboard() {
   const card = (label, value, bd, accent) =>
     `<div class="metric clickable${accent ? ' accent' : ''}${state.bdDetail === bd ? ' active' : ''}" data-bd="${bd}"><span class="k">${label}</span><span class="v">${value}</span></div>`;
 
-  let html = `<div class="bd-bar"><button type="button" class="view-btn" data-bd-toggle>${state.bdCollapsed ? 'Show metrics ▾' : 'Hide metrics ▴'}</button></div>`;
+  // "For Immediate Action": GoLive / Churn-date changes from uploads (the notifications).
+  let html = renderActionSection();
+
+  html += `<div class="bd-bar"><button type="button" class="view-btn" data-bd-toggle>${state.bdCollapsed ? 'Show metrics ▾' : 'Hide metrics ▴'}</button></div>`;
   if (!state.bdCollapsed) html +=
     '<div class="metrics-title">Implementation Fees</div><div class="metrics-row">'
     + card('Properties w/ Impl. Fee', String(distinctProps(hasImplFee)), 'implFee', true)
@@ -635,10 +639,64 @@ function renderBillingDashboard() {
   $('#billingInner').innerHTML = html;
 }
 
+// "For Immediate Action" alert tiles built from the change notifications.
+function renderActionSection() {
+  const golive = state.notifications.filter((n) => n.target_tab === 'bookings');
+  const churn = state.notifications.filter((n) => n.target_tab === 'churn');
+  if (!golive.length && !churn.length) return '';
+  const actionCard = (label, count, action) =>
+    `<div class="metric clickable bd-action${state.bdAction === action ? ' active' : ''}" data-bd-action="${action}">`
+    + `<span class="k">${label}</span><span class="v">${count}</span></div>`;
+  let html = '<div class="metrics-title bd-action-title">⚠ For Immediate Action</div><div class="metrics-row">';
+  if (golive.length) html += actionCard('GoLive Changes', golive.length, 'golive');
+  if (churn.length) html += actionCard('Churn Date Changes', churn.length, 'churn');
+  html += '</div>';
+  if (state.bdAction === 'golive' && golive.length) html += renderActionDetail('golive', golive);
+  else if (state.bdAction === 'churn' && churn.length) html += renderActionDetail('churn', churn);
+  return html;
+}
+function renderActionDetail(action, notifs) {
+  const isGolive = action === 'golive';
+  const byId = new Map((isGolive ? state.rows.bookings : state.rows.churn).map((r) => [String(r.id), r]));
+  const dateKey = isGolive ? 'golive_date' : 'last_date_under_contract';
+  const dateLabel = isGolive ? 'GoLive Date' : 'Last Date Under Contract';
+  const title = isGolive ? 'GoLive Changes' : 'Churn Date Changes';
+  const body = notifs.map((n) => {
+    const r = byId.get(String(n.booking_id)) || {};
+    const prop = isGolive ? (r.property_name || r.property_id) : (r.property || r.property_id);
+    return '<tr>'
+      + `<td>${escapeHtml(prop || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+      + `<td>${escapeHtml(r[dateKey] || '—')}</td><td>${escapeHtml(n.message || '')}</td>`
+      + `<td><button type="button" class="bd-resolve" data-resolve="${n.id}" title="Mark resolved">⚠ Resolve</button></td></tr>`;
+  }).join('');
+  return `<div class="metrics-title">${title} (${notifs.length})</div>`
+    + `<div class="bd-detail"><table><thead><tr><th>Property</th><th>Product</th><th>${dateLabel}</th><th>Change</th><th></th></tr></thead>`
+    + `<tbody>${body}</tbody></table></div>`;
+}
+
 function wireBilling() {
   // Click a tile -> toggle its drill-down.
-  $('#billingInner').addEventListener('click', (e) => {
+  $('#billingInner').addEventListener('click', async (e) => {
     if (e.target.closest('[data-bd-toggle]')) { state.bdCollapsed = !state.bdCollapsed; renderBillingDashboard(); return; }
+    // "For Immediate Action" tile -> toggle its drill-down.
+    const actionTile = e.target.closest('[data-bd-action]');
+    if (actionTile) {
+      state.bdAction = state.bdAction === actionTile.dataset.bdAction ? null : actionTile.dataset.bdAction;
+      renderBillingDashboard();
+      return;
+    }
+    // Resolve a change -> dismiss the notification (removes it from the tile/count).
+    const resolveBtn = e.target.closest('[data-resolve]');
+    if (resolveBtn) {
+      resolveBtn.disabled = true;
+      try {
+        state.notifications = await api(`/api/notifications/${resolveBtn.dataset.resolve}/dismiss`, { method: 'POST' });
+        const tab = state.bdAction === 'golive' ? 'bookings' : 'churn';
+        if (!state.notifications.some((n) => n.target_tab === tab)) state.bdAction = null;
+        renderAll(); // refreshes the dashboard tiles and the header bell count
+      } catch (err) { resolveBtn.disabled = false; toast(err.message, true); }
+      return;
+    }
     const tile = e.target.closest('[data-bd]');
     if (!tile) return;
     state.bdDetail = state.bdDetail === tile.dataset.bd ? null : tile.dataset.bd;

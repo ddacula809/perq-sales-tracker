@@ -357,6 +357,17 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 .metric.clickable { cursor: pointer; }
 .metric.clickable:hover { border-color: var(--accent); }
 .metric.active { box-shadow: inset 0 0 0 2px var(--accent); }
+/* "For Immediate Action" alert tiles */
+.bd-action-title { color: var(--neg); }
+.metric.bd-action { background: #fdecea; border-color: #e3a6a0; }
+.metric.bd-action .v { color: var(--neg); }
+.metric.bd-action.active { box-shadow: inset 0 0 0 2px var(--neg); }
+.bd-resolve {
+  border: 1px solid #e3a6a0; background: #fff; color: var(--neg); cursor: pointer;
+  font: inherit; font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 6px; white-space: nowrap;
+}
+.bd-resolve:hover { background: var(--neg); color: #fff; }
+.bd-resolve:disabled { opacity: .5; cursor: default; }
 .bd-detail { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .bd-detail table { width: max-content; }
 .bd-bar { display: flex; }
