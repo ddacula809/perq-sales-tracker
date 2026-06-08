@@ -600,48 +600,56 @@ function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
 }
 
-// Per-month Churn Details for a quarter: 3 tables (one per month) listing each property whose
-// churn lands in that month, the MRR that dropped (the churn amount that month), and its
-// Last Date Under Contract. Sums reconcile with the quarter's month tiles above.
+// Per-month Churn Details for a quarter. Two sets of 3 tables (one per month):
+//   1. Real churn (classification != Contraction): Property / MRR dropped / Last Date Under Contract.
+//   2. Contracted churn — churn used to offset a License Transfer booking: Property / MRR dropped /
+//      Notes (truncated, full text on hover). Sums reconcile with the quarter's month tiles above.
 function renderChurnDetail(quarterLabel) {
   const m = String(quarterLabel).match(/Q(\d)\s+(\d{4})/);
   if (!m) return '';
   const q = Number(m[1]);
   const year = m[2];
   const months = (QUARTER_MONTHS[q] || []).map((mo) => `${mo} ${year}`);
-  const rowsFor = (monthLabel) => {
+  // Entries for a month, split by whether the row is a Contraction (offset) or real churn.
+  const rowsFor = (monthLabel, wantContraction) => {
     const out = [];
     for (const r of state.rows.churn) {
-      if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
-      const prop = r.property || r.property_id || '—';
-      const last = r.last_date_under_contract || '';
+      const isContraction = String(r.classification || '') === 'Contraction';
+      if (isContraction !== wantContraction) continue;
+      const e = { prop: r.property || r.property_id || '—', last: r.last_date_under_contract || '', note: r.notes || '' };
       // A churn event can land a prorated remainder one month and the full amount the next.
       if (String(r.prorated_churn_month || '').trim() === monthLabel) {
         const a = Number(r.prorated_churn_amount);
-        if (Number.isFinite(a) && a !== 0) out.push({ prop, amt: a, last });
+        if (Number.isFinite(a) && a !== 0) out.push({ ...e, amt: a });
       }
       if (String(r.final_churn_month || '').trim() === monthLabel) {
         const a = Number(r.final_churn_amount);
-        if (Number.isFinite(a)) out.push({ prop, amt: a, last });
+        if (Number.isFinite(a)) out.push({ ...e, amt: a });
       }
     }
     return out;
   };
-  const table = (monthLabel) => {
-    const list = rowsFor(monthLabel);
+  const lastCell = (x) => `<td class="churn-date">${escapeHtml(x.last || '—')}</td>`;
+  const noteCell = (x) => `<td class="churn-note"><span title="${escapeAttr(x.note || '')}">${escapeHtml(x.note || '—')}</span></td>`;
+  // Build one month's table for the given set.
+  const table = (monthLabel, wantContraction, thirdLabel, thirdCell, emptyLabel) => {
+    const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td>${escapeHtml(x.prop)}</td><td class="num">${fmtMoney(x.amt)}</td><td>${escapeHtml(x.last || '—')}</td></tr>`).join('')
-      : '<tr><td class="muted" colspan="3" style="padding:10px">No churn this month.</td></tr>';
+      ? list.map((x) => `<tr><td>${escapeHtml(x.prop)}</td><td class="num">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      : `<tr><td class="muted" colspan="3" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
-      + '<table><thead><tr><th>Property</th><th class="num">MRR Dropped</th><th>Last Date Under Contract</th></tr></thead>'
+      + `<table><thead><tr><th>Property</th><th class="num">MRR Dropped</th><th>${thirdLabel}</th></tr></thead>`
       + `<tbody>${body}</tbody>`
       + (list.length ? `<tfoot><tr><td>Total</td><td class="num">${fmtMoney(total)}</td><td></td></tr></tfoot>` : '')
       + '</table></div>';
   };
-  return `<div class="metrics-title">Churn Details — ${escapeHtml(quarterLabel)}</div>`
-    + `<div class="churn-detail-grid">${months.map(table).join('')}</div>`;
+  let html = `<div class="metrics-title">Churn Details — ${escapeHtml(quarterLabel)}</div>`
+    + `<div class="churn-detail-grid">${months.map((mo) => table(mo, false, 'Last Date Under Contract', lastCell, 'No churn this month.')).join('')}</div>`;
+  html += `<div class="metrics-title">Contracted Churn (offsets) — ${escapeHtml(quarterLabel)}</div>`
+    + `<div class="churn-detail-grid">${months.map((mo) => table(mo, true, 'Notes', noteCell, 'No contracted churn this month.')).join('')}</div>`;
+  return html;
 }
 
 // ---------- Billing Dashboard (admin + billing) ----------

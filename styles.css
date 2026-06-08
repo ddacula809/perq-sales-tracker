@@ -224,12 +224,16 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .churn-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
 .churn-detail-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
 .churn-detail-month { padding: 8px 12px; font-weight: 600; font-size: 12px; background: var(--paper); border-bottom: 1px solid var(--line); }
-.churn-detail-card table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.churn-detail-card th, .churn-detail-card td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+.churn-detail-card table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+.churn-detail-card th, .churn-detail-card td { padding: 4px 7px; text-align: left; border-bottom: 1px solid var(--line); }
 .churn-detail-card th.num, .churn-detail-card td.num { text-align: right; white-space: nowrap; }
+.churn-detail-card td.churn-date { white-space: nowrap; } /* keep the date on one line */
 .churn-detail-card thead th { background: var(--panel); color: var(--ink-soft); font-weight: 600; }
 .churn-detail-card tfoot td { font-weight: 700; border-top: 2px solid var(--line-strong); border-bottom: none; }
 .churn-detail-card tbody tr:last-child td { border-bottom: none; }
+/* Notes can be long: truncate with an ellipsis; full text shows on hover (title). */
+.churn-detail-card td.churn-note { max-width: 140px; }
+.churn-detail-card td.churn-note span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filter, .metric {
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   padding: 9px 13px; box-shadow: var(--shadow);
