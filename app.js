@@ -610,6 +610,7 @@ function renderSummary() {
       renderSummary();
     };
   });
+  applyChurnDetailWidths(); // re-apply any saved Churn Details column widths to the new tables
 }
 function saveActiveFilters() { localStorage.setItem('perqActiveFilters', JSON.stringify(state.activeFilters)); }
 function metric(k, v, accent = false) {
@@ -649,27 +650,30 @@ function renderChurnDetail(quarterLabel) {
     out.sort((a, b) => (a.pmc || '').localeCompare(b.pmc || '') || (a.prop || '').localeCompare(b.prop || ''));
     return out;
   };
-  const lastCell = (x) => `<td class="churn-date">${escapeHtml(x.last || '—')}</td>`;
-  const noteCell = (x) => `<td class="churn-note"><span title="${escapeAttr(x.note || '')}">${escapeHtml(x.note || '—')}</span></td>`;
+  const lastCell = (x) => `<td class="churn-date" data-col="last">${escapeHtml(x.last || '—')}</td>`;
+  const noteCell = (x) => `<td class="churn-note" data-col="note"><span title="${escapeAttr(x.note || '')}">${escapeHtml(x.note || '—')}</span></td>`;
+  // Column headers carry a resize handle (data-col matches the body cells); widths are shared
+  // across all month tables so they stay aligned. thirdKey is 'last' or 'note'.
+  const th = (label, key, cls) => `<th${cls ? ` class="${cls}"` : ''} data-col="${key}">${label}<span class="col-resize"></span></th>`;
   // Build one month's table for the given set.
-  const table = (monthLabel, wantContraction, thirdLabel, thirdCell, emptyLabel) => {
+  const table = (monthLabel, wantContraction, thirdLabel, thirdKey, thirdCell, emptyLabel) => {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td>${escapeHtml(x.pmc || '—')}</td><td>${escapeHtml(x.prop)}</td><td class="num">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      ? list.map((x) => `<tr><td data-col="pmc">${escapeHtml(x.pmc || '—')}</td><td data-col="prop">${escapeHtml(x.prop)}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
       : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
       + '<div class="churn-detail-scroll">'
-      + `<table><thead><tr><th>PMC</th><th>Property</th><th class="num">MRR Dropped</th><th>${thirdLabel}</th></tr></thead>`
+      + `<table><thead><tr>${th('PMC', 'pmc')}${th('Property', 'prop')}${th('MRR Dropped', 'mrr', 'num')}${th(thirdLabel, thirdKey)}</tr></thead>`
       + `<tbody>${body}</tbody>`
       + (list.length ? `<tfoot><tr><td>Total</td><td></td><td class="num">${fmtMoney(total)}</td><td></td></tr></tfoot>` : '')
       + '</table></div></div>';
   };
   let html = `<div class="metrics-title">Churn Details — ${escapeHtml(quarterLabel)}</div>`
-    + `<div class="churn-detail-grid">${months.map((mo) => table(mo, false, 'Last Date Under Contract', lastCell, 'No churn this month.')).join('')}</div>`;
+    + `<div class="churn-detail-grid">${months.map((mo) => table(mo, false, 'Last Date Under Contract', 'last', lastCell, 'No churn this month.')).join('')}</div>`;
   html += `<div class="metrics-title">Contracted Churn (offsets) — ${escapeHtml(quarterLabel)}</div>`
-    + `<div class="churn-detail-grid">${months.map((mo) => table(mo, true, 'Notes', noteCell, 'No contracted churn this month.')).join('')}</div>`;
+    + `<div class="churn-detail-grid">${months.map((mo) => table(mo, true, 'Notes', 'note', noteCell, 'No contracted churn this month.')).join('')}</div>`;
   return html;
 }
 
@@ -2587,6 +2591,21 @@ function setColWidth(key, px) {
 }
 function saveColWidths() { localStorage.setItem('perqColWidths', JSON.stringify(state.colWidths)); }
 
+// Shared column widths for the dashboard Churn Details tables (applied to every month table so
+// they stay aligned). Stored under the 'churn_detail' scope of state.colWidths.
+function applyChurnDetailWidths() {
+  const widths = state.colWidths.churn_detail || {};
+  let css = '';
+  for (const [key, px] of Object.entries(widths)) {
+    css += `.churn-detail-card [data-col="${key}"]{width:${px}px;min-width:${px}px;max-width:${px}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}`;
+  }
+  $('#churnDetailWidthStyle').textContent = css;
+}
+function setChurnDetailWidth(key, px) {
+  (state.colWidths.churn_detail || (state.colWidths.churn_detail = {}))[key] = px;
+  applyChurnDetailWidths();
+}
+
 // ---------- Hover popup for long Notes cells ----------
 function wireCellTip() {
   const tip = $('#cellTip');
@@ -2655,19 +2674,22 @@ function wireResize() {
   const flush = () => {
     rafId = 0;
     if (!active || pendingPx === null) return;
+    if (active.churnDetail) { setChurnDetailWidth(active.key, pendingPx); return; }
     setColWidth(active.key, pendingPx);
     if (state.tab === 'salessupport') ssApplyFreeze();
     if (state.tab === 'bookings' || state.tab === 'churn') applyGridFreeze();
   };
-  // Listen on document so the grid (#grid), Sales Support (#ssTable) and Legacy all work.
+  // Listen on document so the grid (#grid), Sales Support (#ssTable), Legacy, and the dashboard
+  // Churn Details tables all work.
   document.addEventListener('mousedown', (e) => {
     const handle = e.target.closest('.col-resize');
     if (!handle) return;
     const th = handle.closest('th');
     if (!th || !th.dataset.col) return;
     e.preventDefault();
-    const zoom = state.tab === 'legacy' ? (state.legacyZoom || 1) : (state.zoom || 1);
-    active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom, zoom };
+    const churnDetail = !!th.closest('.churn-detail-card');
+    const zoom = churnDetail ? 1 : (state.tab === 'legacy' ? (state.legacyZoom || 1) : (state.zoom || 1));
+    active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom, zoom, churnDetail };
     document.body.style.cursor = 'col-resize';
   });
   document.addEventListener('mousemove', (e) => {
@@ -2679,8 +2701,10 @@ function wireResize() {
   document.addEventListener('mouseup', () => {
     if (!active) return;
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    if (pendingPx !== null) { setColWidth(active.key, pendingPx); if (state.tab === 'salessupport') ssApplyFreeze(); }
-    applyGridFreeze();
+    if (pendingPx !== null) {
+      if (active.churnDetail) { setChurnDetailWidth(active.key, pendingPx); }
+      else { setColWidth(active.key, pendingPx); if (state.tab === 'salessupport') ssApplyFreeze(); applyGridFreeze(); }
+    }
     saveColWidths();
     active = null;
     pendingPx = null;
