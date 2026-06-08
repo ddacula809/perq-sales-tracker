@@ -645,6 +645,8 @@ function renderChurnDetail(quarterLabel) {
         if (Number.isFinite(a)) out.push({ ...e, amt: a });
       }
     }
+    // Sort by PMC A–Z (then Property) for a predictable, easy-to-scan order.
+    out.sort((a, b) => (a.pmc || '').localeCompare(b.pmc || '') || (a.prop || '').localeCompare(b.prop || ''));
     return out;
   };
   const lastCell = (x) => `<td class="churn-date">${escapeHtml(x.last || '—')}</td>`;
