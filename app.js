@@ -28,6 +28,7 @@ const state = {
   // User-set column widths (px) per tab, e.g. { bookings: { mrr: 120 }, churn: {} }.
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
   churnQuarter: 'All',   // dashboard churn-by-month quarter filter
+  churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
   pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
@@ -534,15 +535,20 @@ function renderSummary() {
       const info = monthYearQuarter(m);
       if (info) qTotals.set(info.label, (qTotals.get(info.label) || 0) + churnByMonth[m]);
     }
+    // Quarter-total tiles are clickable: selecting one opens its per-month Churn Details below.
+    if (state.churnDetailQuarter && !qTotals.has(state.churnDetailQuarter)) state.churnDetailQuarter = null;
     const qTotalCards = [...qTotals.keys()]
       .sort((a, b) => { const ia = quarterMap.get(a); const ib = quarterMap.get(b); return (ia.year - ib.year) || (ia.q - ib.q); })
-      .map((label) => metric(`${label} total`, qTotals.get(label), true))
+      .map((label) => `<div class="metric accent clickable${state.churnDetailQuarter === label ? ' active' : ''}" data-churn-quarter="${escapeAttr(label)}">`
+        + `<span class="k">${label} total</span><span class="v">${fmtMoney(qTotals.get(label))}</span></div>`)
       .join('');
     const quarterSel = '<select id="churnQuarter" class="churn-quarter">' +
       quarterVals.map((q) => `<option${q === state.churnQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
     metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>${quarterSel}</div>`;
     if (qTotalCards) metricsHtml += `<div class="metrics-row">${qTotalCards}</div>`;
     metricsHtml += `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
+    // Churn Details: one table per month of the selected quarter (property / MRR dropped / last date).
+    if (state.churnDetailQuarter) metricsHtml += renderChurnDetail(state.churnDetailQuarter);
   }
 
   // Nothing to show (filters hidden and not the dashboard) — collapse the whole bar.
@@ -580,10 +586,62 @@ function renderSummary() {
   if (qSel) qSel.onchange = (e) => { state.churnQuarter = e.target.value; renderSummary(); };
   const bqSel = $('#bookingQuarter');
   if (bqSel) bqSel.onchange = (e) => { state.bookingQuarter = e.target.value; renderSummary(); };
+  // Click a quarter-total tile -> toggle its per-month Churn Details breakdown.
+  el.querySelectorAll('[data-churn-quarter]').forEach((tile) => {
+    tile.onclick = () => {
+      const label = tile.dataset.churnQuarter;
+      state.churnDetailQuarter = state.churnDetailQuarter === label ? null : label;
+      renderSummary();
+    };
+  });
 }
 function saveActiveFilters() { localStorage.setItem('perqActiveFilters', JSON.stringify(state.activeFilters)); }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
+}
+
+// Per-month Churn Details for a quarter: 3 tables (one per month) listing each property whose
+// churn lands in that month, the MRR that dropped (the churn amount that month), and its
+// Last Date Under Contract. Sums reconcile with the quarter's month tiles above.
+function renderChurnDetail(quarterLabel) {
+  const m = String(quarterLabel).match(/Q(\d)\s+(\d{4})/);
+  if (!m) return '';
+  const q = Number(m[1]);
+  const year = m[2];
+  const months = (QUARTER_MONTHS[q] || []).map((mo) => `${mo} ${year}`);
+  const rowsFor = (monthLabel) => {
+    const out = [];
+    for (const r of state.rows.churn) {
+      if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
+      const prop = r.property || r.property_id || '—';
+      const last = r.last_date_under_contract || '';
+      // A churn event can land a prorated remainder one month and the full amount the next.
+      if (String(r.prorated_churn_month || '').trim() === monthLabel) {
+        const a = Number(r.prorated_churn_amount);
+        if (Number.isFinite(a) && a !== 0) out.push({ prop, amt: a, last });
+      }
+      if (String(r.final_churn_month || '').trim() === monthLabel) {
+        const a = Number(r.final_churn_amount);
+        if (Number.isFinite(a)) out.push({ prop, amt: a, last });
+      }
+    }
+    return out;
+  };
+  const table = (monthLabel) => {
+    const list = rowsFor(monthLabel);
+    const total = list.reduce((s, x) => s + x.amt, 0);
+    const body = list.length
+      ? list.map((x) => `<tr><td>${escapeHtml(x.prop)}</td><td class="num">${fmtMoney(x.amt)}</td><td>${escapeHtml(x.last || '—')}</td></tr>`).join('')
+      : '<tr><td class="muted" colspan="3" style="padding:10px">No churn this month.</td></tr>';
+    return '<div class="churn-detail-card">'
+      + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
+      + '<table><thead><tr><th>Property</th><th class="num">MRR Dropped</th><th>Last Date Under Contract</th></tr></thead>'
+      + `<tbody>${body}</tbody>`
+      + (list.length ? `<tfoot><tr><td>Total</td><td class="num">${fmtMoney(total)}</td><td></td></tr></tfoot>` : '')
+      + '</table></div>';
+  };
+  return `<div class="metrics-title">Churn Details — ${escapeHtml(quarterLabel)}</div>`
+    + `<div class="churn-detail-grid">${months.map(table).join('')}</div>`;
 }
 
 // ---------- Billing Dashboard (admin + billing) ----------
