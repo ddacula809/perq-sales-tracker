@@ -224,7 +224,9 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .churn-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
 .churn-detail-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
 .churn-detail-month { padding: 8px 12px; font-weight: 600; font-size: 12px; background: var(--paper); border-bottom: 1px solid var(--line); }
-.churn-detail-card table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+/* Horizontal scroller per table so the right-most columns (e.g. Last Date) stay reachable. */
+.churn-detail-scroll { overflow-x: auto; }
+.churn-detail-card table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 10.5px; }
 .churn-detail-card th, .churn-detail-card td { padding: 4px 7px; text-align: left; border-bottom: 1px solid var(--line); }
 .churn-detail-card th.num, .churn-detail-card td.num { text-align: right; white-space: nowrap; }
 .churn-detail-card td.churn-date { white-space: nowrap; } /* keep the date on one line */

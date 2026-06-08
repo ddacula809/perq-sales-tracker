@@ -616,7 +616,7 @@ function renderChurnDetail(quarterLabel) {
     for (const r of state.rows.churn) {
       const isContraction = String(r.classification || '') === 'Contraction';
       if (isContraction !== wantContraction) continue;
-      const e = { prop: r.property || r.property_id || '—', last: r.last_date_under_contract || '', note: r.notes || '' };
+      const e = { prop: r.property || r.property_id || '—', pmc: r.pmc_buying_center || '', last: r.last_date_under_contract || '', note: r.notes || '' };
       // A churn event can land a prorated remainder one month and the full amount the next.
       if (String(r.prorated_churn_month || '').trim() === monthLabel) {
         const a = Number(r.prorated_churn_amount);
@@ -636,14 +636,15 @@ function renderChurnDetail(quarterLabel) {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td>${escapeHtml(x.prop)}</td><td class="num">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
-      : `<tr><td class="muted" colspan="3" style="padding:10px">${emptyLabel}</td></tr>`;
+      ? list.map((x) => `<tr><td>${escapeHtml(x.prop)}</td><td>${escapeHtml(x.pmc || '—')}</td><td class="num">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
-      + `<table><thead><tr><th>Property</th><th class="num">MRR Dropped</th><th>${thirdLabel}</th></tr></thead>`
+      + '<div class="churn-detail-scroll">'
+      + `<table><thead><tr><th>Property</th><th>PMC</th><th class="num">MRR Dropped</th><th>${thirdLabel}</th></tr></thead>`
       + `<tbody>${body}</tbody>`
-      + (list.length ? `<tfoot><tr><td>Total</td><td class="num">${fmtMoney(total)}</td><td></td></tr></tfoot>` : '')
-      + '</table></div>';
+      + (list.length ? `<tfoot><tr><td>Total</td><td></td><td class="num">${fmtMoney(total)}</td><td></td></tr></tfoot>` : '')
+      + '</table></div></div>';
   };
   let html = `<div class="metrics-title">Churn Details — ${escapeHtml(quarterLabel)}</div>`
     + `<div class="churn-detail-grid">${months.map((mo) => table(mo, false, 'Last Date Under Contract', lastCell, 'No churn this month.')).join('')}</div>`;
