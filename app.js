@@ -716,6 +716,11 @@ function wireBilling() {
     try {
       const updated = await api(`/api/bookings/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ [ctl.dataset.key]: ctl.value }) });
       updateRowInState('bookings', updated);
+      // Editing the GoLive date here raises a Billing alert -> reload so the tile/bell reflect it.
+      if (ctl.dataset.key === 'golive_date' && (isAdmin() || role() === 'billing')) {
+        state.notifications = await api('/api/notifications');
+        $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
+      }
       renderBillingDashboard();
       // Restore scroll positions after the DOM is rebuilt.
       if (view) view.scrollTop = outerTop;
@@ -1013,6 +1018,11 @@ function wireGrid() {
         refreshComputedCells(tr, updated);
       }
       if (state.tab === 'bookings') { renderSummary(); renderBookingTotals(currentRows('bookings')); }
+      // Editing a watched date (GoLive / Last Date Under Contract) raises a Billing alert.
+      if ((key === 'golive_date' || key === 'last_date_under_contract') && (isAdmin() || role() === 'billing')) {
+        state.notifications = await api('/api/notifications');
+        $('#notifCount').textContent = state.notifications.length ? String(state.notifications.length) : '';
+      }
       toast('Saved');
     } catch (err) { toast(err.message, true); }
   });

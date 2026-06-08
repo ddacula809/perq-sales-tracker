@@ -124,6 +124,14 @@ app.get('/api/schema', async (_req, res, next) => {
 });
 
 // ---- Generic CRUD wired to both tables (with role-based authorization) ----
+// Manual edits to these date fields raise the same "For Immediate Action" notification
+// as the GoLives / Churn uploads do, so Billing sees the change either way.
+const WATCHED_EDIT = {
+  bookings: { key: 'golive_date', label: 'GoLive Date', name: (r) => r.property_name || r.property_id || `Booking #${r.id}` },
+  churn: { key: 'last_date_under_contract', label: 'Last Date Under Contract', name: (r) => r.property || r.property_id || `Churn #${r.id}` },
+};
+const sameDate = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
+
 function crud(table, computeFn) {
   // Read: any authenticated user.
   app.get(`/api/${table}`, async (_req, res, next) => {
@@ -157,8 +165,22 @@ function crud(table, computeFn) {
         const bad = Object.keys(req.body || {}).filter((k) => !allowed.includes(k));
         if (bad.length) return res.status(403).json({ error: 'Billing users can only edit the billing columns.' });
       }
-      const row = await updateRow(table, Number(req.params.id), req.body || {});
+      const id = Number(req.params.id);
+      // If this edit touches a watched date field, capture the old value first so we can
+      // tell whether it actually changed (and raise a notification for Billing if so).
+      const watch = WATCHED_EDIT[table];
+      let oldVal;
+      if (watch && Object.prototype.hasOwnProperty.call(req.body || {}, watch.key)) {
+        const prev = await pool.query(`SELECT ${watch.key} AS v FROM ${table} WHERE id=$1`, [id]);
+        oldVal = prev.rows[0] ? prev.rows[0].v : undefined;
+      }
+      const row = await updateRow(table, id, req.body || {});
       if (!row) return res.status(404).json({ error: 'Not found' });
+      if (watch && oldVal !== undefined && !sameDate(oldVal, row[watch.key])) {
+        const from = oldVal ? oldVal : '(blank)';
+        const to = row[watch.key] ? row[watch.key] : '(blank)';
+        await createNotification(table, row.id, `${watch.label} changed for ${watch.name(row)}: ${from} → ${to}`);
+      }
       res.json(withComputed(row, computeFn));
     } catch (e) { next(e); }
   });
