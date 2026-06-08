@@ -132,12 +132,35 @@ const WATCHED_EDIT = {
 };
 const sameDate = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
 
+// Attach an Account Owner to each churn row, looked up from the Salesforce Recon master
+// (churn has no owner column). Match by Property ID -> Property ID 18 Digit, falling back to
+// PMC Buying Center -> Account Name. Lets the dashboard filter Churn by Account Owner.
+async function attachChurnOwners(rows) {
+  const recon = await listRows('salesforce_recon');
+  const byPid = new Map();
+  const byPmc = new Map();
+  for (const r of recon) {
+    const owner = String(r.account_owner ?? '').trim();
+    if (!owner) continue;
+    const pid = String(r.property_id_18 ?? '').trim().toLowerCase();
+    const pmc = String(r.account_name ?? '').trim().toLowerCase();
+    if (pid && !byPid.has(pid)) byPid.set(pid, owner);
+    if (pmc && !byPmc.has(pmc)) byPmc.set(pmc, owner);
+  }
+  return rows.map((r) => ({
+    ...r,
+    account_owner: byPid.get(String(r.property_id ?? '').trim().toLowerCase())
+      || byPmc.get(String(r.pmc_buying_center ?? '').trim().toLowerCase()) || '',
+  }));
+}
+
 function crud(table, computeFn) {
-  // Read: any authenticated user.
+  // Read: any authenticated user. Churn rows are enriched with their Account Owner (from Recon).
   app.get(`/api/${table}`, async (_req, res, next) => {
     try {
-      const rows = await listRows(table);
-      res.json(rows.map((r) => withComputed(r, computeFn)));
+      let out = (await listRows(table)).map((r) => withComputed(r, computeFn));
+      if (table === 'churn') out = await attachChurnOwners(out);
+      res.json(out);
     } catch (e) { next(e); }
   });
   // Create / delete rows: admin or standard only.

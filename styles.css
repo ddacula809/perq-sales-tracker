@@ -219,6 +219,11 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
   font: inherit; font-size: 12px; padding: 4px 7px; text-transform: none; letter-spacing: 0;
   border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink);
 }
+.churn-quarter:disabled { background: var(--paper); color: var(--ink-soft); }
+.churn-filter-lbl {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  text-transform: none; letter-spacing: 0; color: var(--ink-soft);
+}
 .muted { color: var(--ink-soft); font-size: 12px; }
 /* Churn Details: 3 month tables shown when a quarter-total tile is selected. */
 .churn-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }

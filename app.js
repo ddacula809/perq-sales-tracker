@@ -28,6 +28,7 @@ const state = {
   // User-set column widths (px) per tab, e.g. { bookings: { mrr: 120 }, churn: {} }.
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
   churnQuarter: 'All',   // dashboard churn-by-month quarter filter
+  churnOwner: 'All',     // dashboard churn Account Owner filter (sales users default to their name)
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
@@ -499,6 +500,13 @@ function renderSummary() {
     metricsHtml += `<div class="metrics-title metrics-title-row"><span>Booking Per Product Category</span>${bQuarterSel}</div>` +
       `<div class="metrics-row">${catCards || '<span class="muted">No data.</span>'}</div>`;
 
+    // Account Owner filter for the whole Churn section (tiles + details). Sales users default
+    // to their own name on login; the value is validated against the owners actually present.
+    const churnOwners = [...new Set(state.rows.churn.map((r) => String(r.account_owner || '').trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+    if (state.churnOwner !== 'All' && !churnOwners.includes(state.churnOwner)) state.churnOwner = 'All';
+    const churnOwnerMatch = (r) => state.churnOwner === 'All' || String(r.account_owner || '').trim() === state.churnOwner;
+
     // Churn by month: prorated churn + final churn amounts landing in each month.
     const churnByMonth = {};
     const addChurn = (month, amt) => {
@@ -509,6 +517,7 @@ function renderSummary() {
     };
     for (const r of state.rows.churn) {
       if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
+      if (!churnOwnerMatch(r)) continue;
       addChurn(r.prorated_churn_month, r.prorated_churn_amount);
       addChurn(r.final_churn_month, r.final_churn_amount);
     }
@@ -544,7 +553,12 @@ function renderSummary() {
       .join('');
     const quarterSel = '<select id="churnQuarter" class="churn-quarter">' +
       quarterVals.map((q) => `<option${q === state.churnQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
-    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>${quarterSel}</div>`;
+    // Account Owner filter (locked to their own name for sales users).
+    const ownerVals = ['All', ...churnOwners];
+    const churnOwnerSel = `<select id="churnOwner" class="churn-quarter"${isSales() ? ' disabled' : ''}>` +
+      ownerVals.map((o) => `<option${o === state.churnOwner ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') + '</select>';
+    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>`
+      + `<label class="churn-filter-lbl">Owner ${churnOwnerSel}</label>${quarterSel}</div>`;
     if (qTotalCards) metricsHtml += `<div class="metrics-row">${qTotalCards}</div>`;
     metricsHtml += `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
     // Churn Details: one table per month of the selected quarter (property / MRR dropped / last date).
@@ -586,6 +600,8 @@ function renderSummary() {
   if (qSel) qSel.onchange = (e) => { state.churnQuarter = e.target.value; renderSummary(); };
   const bqSel = $('#bookingQuarter');
   if (bqSel) bqSel.onchange = (e) => { state.bookingQuarter = e.target.value; renderSummary(); };
+  const coSel = $('#churnOwner');
+  if (coSel) coSel.onchange = (e) => { state.churnOwner = e.target.value; renderSummary(); };
   // Click a quarter-total tile -> toggle its per-month Churn Details breakdown.
   el.querySelectorAll('[data-churn-quarter]').forEach((tile) => {
     tile.onclick = () => {
@@ -616,6 +632,8 @@ function renderChurnDetail(quarterLabel) {
     for (const r of state.rows.churn) {
       const isContraction = String(r.classification || '') === 'Contraction';
       if (isContraction !== wantContraction) continue;
+      // Honor the Churn section's Account Owner filter.
+      if (state.churnOwner !== 'All' && String(r.account_owner || '').trim() !== state.churnOwner) continue;
       const e = { prop: r.property || r.property_id || '—', pmc: r.pmc_buying_center || '', last: r.last_date_under_contract || '', note: r.notes || '' };
       // A churn event can land a prorated remainder one month and the full amount the next.
       if (String(r.prorated_churn_month || '').trim() === monthLabel) {
@@ -1045,6 +1063,7 @@ async function loadAll() {
     state.ssFilters.owner = salesOwner();
     state.filters.dashboard.sales_rep = salesOwner();
     state.filters.bookings.sales_rep = salesOwner();
+    state.churnOwner = salesOwner(); // default the dashboard Churn Account Owner filter to them
   }
   renderAll();
   $('#status').textContent =
