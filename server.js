@@ -321,6 +321,68 @@ app.post('/api/legacy/import', requireRole('admin'), upload.single('file'), asyn
   } catch (e) { next(e); }
 });
 
+// ---- Migrate Legacy Churn -> the active Churn Tracker ----
+// Pulls every legacy churn line (with a Last Date Under Contract) into the live churn table,
+// mapping as many columns as we can and tagging the billing notes "From Legacy" so billing
+// knows it was already handled. Duplicates in the legacy file (same property+product, usually
+// re-listed because the Last Date Under Contract was updated) collapse to the most-recent one
+// (latest Cancellation/Date Added; ties break to the later sheet row). Properties already in
+// the Churn Tracker (same property+product) are skipped so re-running never double-counts.
+app.post('/api/churn/migrate-legacy', requireRole('admin'), async (_req, res, next) => {
+  try {
+    const legacy = await listRows('legacy_churn'); // ascending id == original sheet row order
+    const existing = await listRows('churn');
+    const norm = (v) => String(v ?? '').trim().toLowerCase();
+    const key = (r) => `${norm(r.property_id) || norm(r.property_name || r.property)}|${norm(r.product)}`;
+    const parseD = (v) => { const t = Date.parse(String(v ?? '')); return Number.isFinite(t) ? t : -Infinity; };
+    // "Most recent" legacy row for a duplicate: latest Cancellation/Date Added, then later row.
+    const recency = (r) => Math.max(parseD(r.cancellation_date_added), parseD(r.date_added));
+
+    let skippedBlank = 0;
+    let dupCollapsed = 0;
+    // 1) Collapse legacy duplicates, keeping the most-recently-updated row per property+product.
+    const best = new Map();
+    for (const r of legacy) {
+      if (!r.last_date_under_contract) { skippedBlank += 1; continue; }
+      const k = key(r);
+      if (!k.replace('|', '')) { skippedBlank += 1; continue; }
+      const prev = best.get(k);
+      if (!prev) { best.set(k, r); continue; }
+      dupCollapsed += 1;
+      if (recency(r) >= recency(prev)) best.set(k, r); // later row wins on a tie (>=)
+    }
+
+    // 2) Skip anything already in the live Churn Tracker (same property+product).
+    const existingKeys = new Set(existing.map(key));
+    let added = 0;
+    let skippedExisting = 0;
+    const addedRows = [];
+    for (const [k, r] of best) {
+      if (existingKeys.has(k)) { skippedExisting += 1; continue; }
+      const last = String(r.last_date_under_contract).slice(0, 10);
+      const notes = ['[From Legacy AR Tracker — billing already processed]',
+        r.reason_lost ? `Reason: ${r.reason_lost}` : '', r.note || ''].filter(Boolean).join(' — ');
+      const ins = await insertRow('churn', {
+        property_id: r.property_id || '',
+        sage_id: r.sage_id || '',
+        pmc_buying_center: r.pmc_logo || '',
+        property: r.property_name || '',
+        product: r.product || '',
+        mrr: r.sf_mrr,
+        last_date_under_contract: last,
+        client_success_manager: r.client_success_manager || '',
+        completed: 'No Action needed', // billing: already handled in the legacy workbook
+        notes,
+        classification: 'Churn',
+      });
+      existingKeys.add(k);
+      added += 1;
+      addedRows.push({ property: ins.property || ins.property_id || '', product: ins.product || '', mrr: ins.mrr, last_date_under_contract: last });
+    }
+    res.json({ added, skippedExisting, skippedBlank, dupCollapsed, legacyTotal: legacy.length, addedRows });
+  } catch (e) { next(e); }
+});
+
 // ---- Sales Support rows: edits allowed only within the open quarter ----
 app.get('/api/sales_support', async (_req, res, next) => {
   try { res.json(await listRows('sales_support')); } catch (e) { next(e); }

@@ -915,6 +915,8 @@ function renderLegacy() {
   const rows = state.rows[sub] || [];
   document.querySelectorAll('.legacy-subtab').forEach((b) => b.classList.toggle('active', b.dataset.legacy === state.legacySub));
   $('#legacyImport').hidden = !isAdmin();
+  // Migrate-to-tracker only makes sense on the Churn sub-tab, for admins.
+  $('#legacyMigrateChurn').hidden = !(isAdmin() && state.legacySub === 'churn');
   $('#legacyPageSize').value = state.legacyPageSize;
   applyLegacyZoom();
 
@@ -985,6 +987,33 @@ function wireLegacy() {
         + '</ul>');
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
+  };
+
+  // Migrate Legacy Churn -> the active Churn Tracker (dedup-aware, tags billing "From Legacy").
+  $('#legacyMigrateChurn').onclick = async () => {
+    if (!confirm('Pull Legacy Churn into the Churn Tracker?\n\nDuplicates collapse to the most-recent entry, properties already in the tracker are skipped, and billing is tagged "From Legacy". You can re-run this safely.')) return;
+    try {
+      toast('Migrating legacy churn…');
+      const data = await api('/api/churn/migrate-legacy', { method: 'POST' });
+      state.rows.churn = await api('/api/churn');
+      $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+      let html = '<ul class="result-list">'
+        + `<li><strong>${fmtNum(data.added)}</strong> churn row(s) added to the tracker</li>`
+        + `<li><strong>${fmtNum(data.skippedExisting)}</strong> skipped (already in the tracker)</li>`
+        + `<li><strong>${fmtNum(data.dupCollapsed)}</strong> legacy duplicate(s) collapsed to the latest entry</li>`
+        + `<li><strong>${fmtNum(data.skippedBlank)}</strong> skipped (no Last Date Under Contract)</li>`
+        + `<li class="muted">${fmtNum(data.legacyTotal)} legacy churn record(s) scanned</li>`
+        + '</ul>';
+      const addedRows = data.addedRows || [];
+      if (addedRows.length) {
+        html += `<div class="result-detail-title">Added (${addedRows.length})</div>`
+          + '<div class="result-detail"><table><thead><tr><th>Property</th><th>Product</th><th>MRR</th><th>Last Date Under Contract</th></tr></thead><tbody>'
+          + addedRows.map((r) => `<tr><td>${escapeHtml(r.property || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+            + `<td class="num">${fmtMoney(r.mrr)}</td><td>${escapeHtml(r.last_date_under_contract || '—')}</td></tr>`).join('')
+          + '</tbody></table></div>';
+      }
+      showResult('Legacy churn migrated', html);
+    } catch (err) { toast(err.message, true); }
   };
 }
 
