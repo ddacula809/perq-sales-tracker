@@ -349,6 +349,14 @@ function rowMatchesFilters(r, f) {
       if (q !== String(v)) return false;
       continue;
     }
+    if (key === 'booking_quarter') { // synthetic quarter from Booking Month + Year
+      const my = (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
+      const info = monthYearQuarter(my);
+      const q = info ? info.label : '';
+      if (v === '(blank)') { if (q !== '') return false; continue; }
+      if (q !== String(v)) return false;
+      continue;
+    }
     if (v === '(blank)') { if (String(r[key] ?? '').trim() !== '') return false; continue; }
     if (String(r[key] ?? '') !== String(v)) return false;
   }
@@ -411,6 +419,10 @@ function renderSummary() {
   if (tab === 'churn') {
     cols.unshift({ key: 'churn_quarter', label: 'Quarter', type: 'text' });
   }
+  // Bookings: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from Booking Month/Year.
+  if (tab === 'bookings') {
+    cols.unshift({ key: 'booking_quarter', label: 'Quarter', type: 'text' });
+  }
   const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
@@ -420,11 +432,14 @@ function renderSummary() {
         .filter(Boolean))];
       return ['All', ...sortMonthYear(combos)];
     }
-    if (col.key === 'churn_quarter') {
+    if (col.key === 'churn_quarter' || col.key === 'booking_quarter') {
       const set = new Set();
       let hasBlank = false;
       for (const r of rows) {
-        const info = monthYearQuarter(r.final_churn_month || '');
+        const my = col.key === 'churn_quarter'
+          ? (r.final_churn_month || '')
+          : ((r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '');
+        const info = monthYearQuarter(my);
         if (info) set.add(info.label); else hasBlank = true;
       }
       const sorted = [...set].sort((a, b) => {
@@ -451,6 +466,7 @@ function renderSummary() {
     dashboard: ['booking_my', 'pmc', 'sales_rep', 'bpr_prod_category'],
   };
   if (tab === 'churn' && !state.activeFilters.churn) state.activeFilters.churn = ['churn_quarter'];
+  if (tab === 'bookings' && !state.activeFilters.bookings) state.activeFilters.bookings = ['booking_quarter'];
   const adjustable = tab === 'bookings' || tab === 'churn';
   const lockRep = isSales() && salesOwner();
   let active = adjustable
