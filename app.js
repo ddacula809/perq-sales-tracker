@@ -1760,16 +1760,19 @@ function renderOffsetReview() {
     const def = Math.min(lineMrr || firstMrr, firstMrr || lineMrr);
     const futureNote = hasSame ? ''
       : '<div class="offset-future-note">⚠ No churn this quarter for this PMC — the option(s) are future-quarter churns.</div>';
+    const propFull = b.property_name || b.property_id || '—';
     return `<tr data-booking="${b.id}">
-      <td>${escapeHtml(b.property_name || b.property_id || '—')}<div class="muted-sm">${escapeHtml(b.pmc || '')} · ${escapeHtml(period)}</div>${futureNote}</td>
-      <td>${escapeHtml(b.product || '—')}</td>
+      <td class="offset-prop" title="${escapeAttr(propFull)}"><div class="offset-prop-name">${escapeHtml(propFull)}</div><div class="muted-sm">${escapeHtml(b.pmc || '')} · ${escapeHtml(period)}</div>${futureNote}</td>
+      <td class="offset-prod" title="${escapeAttr(b.product || '')}">${escapeHtml(b.product || '—')}</td>
       <td class="num">${m(b.mrr)}</td>
       <td><select class="offset-sel" data-churn-sel>${opts}</select></td>
       <td class="num"><input type="text" class="offset-amt" data-amt value="${escapeAttr(m(def))}" /></td>
       <td><button type="button" class="btn solid" data-apply-offset>Apply</button></td>
     </tr>`;
   }).join('');
-  $('#offsetBody').innerHTML = `<table class="recon-table"><thead><tr>`
+  $('#offsetBody').innerHTML = '<table class="recon-table offset-table">'
+    + '<colgroup><col class="c-prop"><col class="c-prod"><col class="c-mrr"><col class="c-churn"><col class="c-offset"><col class="c-apply"></colgroup>'
+    + '<thead><tr>'
     + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th class="num">Offset</th><th></th>'
     + `</tr></thead><tbody>${rows}</tbody></table>`;
 }
