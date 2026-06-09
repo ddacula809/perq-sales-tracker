@@ -342,6 +342,13 @@ function rowMatchesFilters(r, f) {
       if (my !== String(v)) return false;
       continue;
     }
+    if (key === 'churn_quarter') { // synthetic quarter from Final Churn Month
+      const info = monthYearQuarter(r.final_churn_month || '');
+      const q = info ? info.label : '';
+      if (v === '(blank)') { if (q !== '') return false; continue; }
+      if (q !== String(v)) return false;
+      continue;
+    }
     if (v === '(blank)') { if (String(r[key] ?? '').trim() !== '') return false; continue; }
     if (String(r[key] ?? '') !== String(v)) return false;
   }
@@ -400,6 +407,10 @@ function renderSummary() {
     cols = cols.filter((c) => c.key !== 'booking_month' && c.key !== 'booking_year');
     cols.unshift({ key: 'booking_my', label: 'Booking Month/Year', type: 'text' });
   }
+  // Churn: offer a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from Final Churn Month.
+  if (tab === 'churn') {
+    cols.unshift({ key: 'churn_quarter', label: 'Quarter', type: 'text' });
+  }
   const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
@@ -408,6 +419,19 @@ function renderSummary() {
         .map((r) => (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '')
         .filter(Boolean))];
       return ['All', ...sortMonthYear(combos)];
+    }
+    if (col.key === 'churn_quarter') {
+      const set = new Set();
+      let hasBlank = false;
+      for (const r of rows) {
+        const info = monthYearQuarter(r.final_churn_month || '');
+        if (info) set.add(info.label); else hasBlank = true;
+      }
+      const sorted = [...set].sort((a, b) => {
+        const qa = a.match(/Q(\d)\s+(\d+)/); const qb = b.match(/Q(\d)\s+(\d+)/);
+        return (Number(qa[2]) - Number(qb[2])) || (Number(qa[1]) - Number(qb[1]));
+      });
+      return ['All', ...(hasBlank ? ['(blank)'] : []), ...sorted];
     }
     // If the column has any empty values, offer "(blank)" as the first selectable option.
     const hasBlank = rows.some((r) => { const v = r[col.key]; return v === null || v === undefined || String(v).trim() === ''; });
@@ -421,16 +445,16 @@ function renderSummary() {
   };
   const colByKey = new Map(cols.map((c) => [c.key, c]));
 
-  // Bookings uses the adjustable "Add Filter" system (removable tiles). Dashboard and Churn
-  // keep their original fixed filter sets, independent of Bookings.
+  // Bookings + Churn use the adjustable "Add Filter" system (removable tiles). The Dashboard
+  // keeps its fixed filter set. Churn defaults to the synthetic Quarter filter on first use.
   const FIXED = {
     dashboard: ['booking_my', 'pmc', 'sales_rep', 'bpr_prod_category'],
-    churn: ['pmc_buying_center', 'property', 'product', 'final_churn_month'],
   };
-  const adjustable = tab === 'bookings';
+  if (tab === 'churn' && !state.activeFilters.churn) state.activeFilters.churn = ['churn_quarter'];
+  const adjustable = tab === 'bookings' || tab === 'churn';
   const lockRep = isSales() && salesOwner();
   let active = adjustable
-    ? (state.activeFilters.bookings || []).filter((k) => colByKey.has(k))
+    ? (state.activeFilters[tab] || []).filter((k) => colByKey.has(k))
     : (FIXED[tab] || []).filter((k) => colByKey.has(k));
   if (lockRep && tab !== 'churn' && colByKey.has('sales_rep') && !active.includes('sales_rep')) {
     active = adjustable ? ['sales_rep', ...active] : active; // dashboard already includes sales_rep
