@@ -650,8 +650,8 @@ function renderChurnDetail(quarterLabel) {
     out.sort((a, b) => (a.pmc || '').localeCompare(b.pmc || '') || (a.prop || '').localeCompare(b.prop || ''));
     return out;
   };
-  const lastCell = (x) => `<td class="churn-date" data-col="last">${escapeHtml(x.last || '—')}</td>`;
-  const noteCell = (x) => `<td class="churn-note" data-col="note"><span title="${escapeAttr(x.note || '')}">${escapeHtml(x.note || '—')}</span></td>`;
+  const lastCell = (x) => `<td class="churn-date" data-col="last" title="${escapeAttr(x.last || '')}">${escapeHtml(x.last || '—')}</td>`;
+  const noteCell = (x) => `<td class="churn-note" data-col="note" title="${escapeAttr(x.note || '')}"><span>${escapeHtml(x.note || '—')}</span></td>`;
   // Column headers carry a resize handle (data-col matches the body cells); widths are shared
   // across all month tables so they stay aligned. thirdKey is 'last' or 'note'.
   const th = (label, key, cls) => `<th${cls ? ` class="${cls}"` : ''} data-col="${key}">${label}<span class="col-resize"></span></th>`;
@@ -660,7 +660,7 @@ function renderChurnDetail(quarterLabel) {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td data-col="pmc">${escapeHtml(x.pmc || '—')}</td><td data-col="prop">${escapeHtml(x.prop)}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      ? list.map((x) => `<tr><td data-col="pmc" title="${escapeAttr(x.pmc || '')}">${escapeHtml(x.pmc || '—')}</td><td data-col="prop" title="${escapeAttr(x.prop || '')}">${escapeHtml(x.prop)}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
       : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
