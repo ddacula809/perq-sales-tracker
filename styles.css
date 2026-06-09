@@ -658,14 +658,17 @@ tr.ss-group td {
    the body scrolls (vertical + horizontal) and the long text columns truncate with a tooltip. */
 #offsetBody { overflow: auto; min-height: 0; }
 .offset-table { table-layout: fixed; }
-.offset-table col.c-prop { width: 34%; }
-.offset-table col.c-prod { width: 18%; }
-.offset-table col.c-mrr { width: 9%; }
-.offset-table col.c-churn { width: 21%; }
-.offset-table col.c-offset { width: 11%; }
-.offset-table col.c-apply { width: 80px; }
+.offset-table col.c-prop { width: 30%; }
+.offset-table col.c-prod { width: 16%; }
+.offset-table col.c-mrr { width: 8%; }
+.offset-table col.c-churn { width: 20%; }
+.offset-table col.c-offset { width: 14%; }
+.offset-table col.c-apply { width: 12%; }
 .offset-table td, .offset-table th { overflow: hidden; }
 .offset-table td.offset-prod { text-overflow: ellipsis; }
 .offset-table .offset-prop-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .offset-table .offset-prop .muted-sm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.offset-table .offset-sel, .offset-table .offset-amt { width: 100%; box-sizing: border-box; }
+/* Inputs/selects/buttons fill their cell exactly (so the Offset value isn't clipped). */
+.offset-table input.offset-amt, .offset-table select.offset-sel { width: 100%; min-width: 0; box-sizing: border-box; }
+.offset-table input.offset-amt { padding: 5px 6px; text-align: right; }
+.offset-table .offset-apply { width: 100%; padding: 7px 6px; justify-content: center; }

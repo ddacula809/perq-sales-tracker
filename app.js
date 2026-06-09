@@ -1791,7 +1791,7 @@ function renderOffsetReview() {
       <td class="num">${m(b.mrr)}</td>
       <td><select class="offset-sel" data-churn-sel>${opts}</select></td>
       <td class="num"><input type="text" class="offset-amt" data-amt value="${escapeAttr(m(def))}" /></td>
-      <td><button type="button" class="btn solid" data-apply-offset>Apply</button></td>
+      <td><button type="button" class="btn solid offset-apply" data-apply-offset>Apply</button></td>
     </tr>`;
   }).join('');
   $('#offsetBody').innerHTML = '<table class="recon-table offset-table">'
