@@ -46,6 +46,7 @@ const state = {
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   bdAction: null,     // active "For Immediate Action" drill-down: 'golive' | 'churn'
+  bdMonth: 'All',     // Billing Dashboard Booking Month/Year filter
   pendingBookings: [], // new-booking payloads awaiting confirmation
   pendingShared: {},   // shared booking details for the confirm dialog
   pendingOffsets: [],  // per-line License Transfer offset selections (null or {churnId, amount})
@@ -751,7 +752,11 @@ function churnCanEdit(key) {
 }
 
 function renderBillingDashboard() {
-  const rows = state.rows.bookings;
+  // Booking Month/Year filter: scopes the metric tiles and their drill-downs.
+  const bookingMY = (r) => (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
+  const myOptions = ['All', ...sortMonthYear([...new Set(state.rows.bookings.map(bookingMY).filter(Boolean))])];
+  if (!myOptions.includes(state.bdMonth)) state.bdMonth = 'All';
+  const rows = state.bdMonth === 'All' ? state.rows.bookings : state.rows.bookings.filter((r) => bookingMY(r) === state.bdMonth);
   const num = (v) => Number(v) || 0;
   const distinctProps = (pred) => {
     const set = new Set();
@@ -785,7 +790,11 @@ function renderBillingDashboard() {
   // "For Immediate Action": GoLive / Churn-date changes from uploads (the notifications).
   let html = renderActionSection();
 
-  html += `<div class="bd-bar"><button type="button" class="view-btn" data-bd-toggle>${state.bdCollapsed ? 'Show metrics ▾' : 'Hide metrics ▴'}</button></div>`;
+  const monthSel = '<select id="bdMonth" class="churn-quarter">'
+    + myOptions.map((o) => `<option${o === state.bdMonth ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') + '</select>';
+  html += '<div class="bd-bar">'
+    + `<label class="churn-filter-lbl">Month/Year ${monthSel}</label>`
+    + `<button type="button" class="view-btn" data-bd-toggle>${state.bdCollapsed ? 'Show metrics ▾' : 'Hide metrics ▴'}</button></div>`;
   if (!state.bdCollapsed) html +=
     '<div class="metrics-title">Implementation Fees</div><div class="metrics-row">'
     + card('Properties w/ Impl. Fee', String(distinctProps(hasImplFee)), 'implFee', true)
@@ -892,6 +901,7 @@ function wireBilling() {
   });
   // Edit a cell in the drill-down -> save to bookings and refresh.
   $('#billingInner').addEventListener('change', async (e) => {
+    if (e.target.id === 'bdMonth') { state.bdMonth = e.target.value; renderBillingDashboard(); return; }
     const ctl = e.target.closest('[data-key]');
     if (!ctl) return;
     const tr = ctl.closest('tr');
