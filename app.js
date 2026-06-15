@@ -331,6 +331,8 @@ function readonlyCell(f, row) {
 function escapeAttr(v) { return String(v).replace(/"/g, '&quot;'); }
 
 // ---------- Filters + summary metrics ----------
+// "Recently added" windows (days) for the synthetic added_recent filter, by option label.
+const ADDED_WINDOWS = { 'Today': 1, 'Last 7 days': 7, 'Last 30 days': 30, 'Last 90 days': 90 };
 // Generic: a row passes if, for every active column filter, its value matches. f is keyed
 // by column key, e.g. { sales_rep: 'Kirk Flatter', booking_month: 'April' }.
 function rowMatchesFilters(r, f) {
@@ -355,6 +357,13 @@ function rowMatchesFilters(r, f) {
       const q = info ? info.label : '';
       if (v === '(blank)') { if (q !== '') return false; continue; }
       if (q !== String(v)) return false;
+      continue;
+    }
+    if (key === 'added_recent') { // synthetic "recently added" window on created_at
+      const days = ADDED_WINDOWS[v];
+      if (!days) continue;
+      const t = Date.parse(r.created_at || '');
+      if (!Number.isFinite(t) || t < Date.now() - days * 86400000) return false;
       continue;
     }
     if (v === '(blank)') { if (String(r[key] ?? '').trim() !== '') return false; continue; }
@@ -415,9 +424,10 @@ function renderSummary() {
     cols = cols.filter((c) => c.key !== 'booking_month' && c.key !== 'booking_year');
     cols.unshift({ key: 'booking_my', label: 'Booking Month/Year', type: 'text' });
   }
-  // Churn: offer a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from Final Churn Month.
+  // Churn: synthetic "Quarter" (from Final Churn Month) + "Added" (recently-added window).
   if (tab === 'churn') {
     cols.unshift({ key: 'churn_quarter', label: 'Quarter', type: 'text' });
+    cols.unshift({ key: 'added_recent', label: 'Added', type: 'text' });
   }
   // Bookings: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from Booking Month/Year.
   if (tab === 'bookings') {
@@ -426,6 +436,7 @@ function renderSummary() {
   const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
+    if (col.key === 'added_recent') return ['All', ...Object.keys(ADDED_WINDOWS)];
     if (col.key === 'booking_my') {
       const combos = [...new Set(rows
         .map((r) => (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '')
