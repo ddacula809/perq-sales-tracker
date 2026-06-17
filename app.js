@@ -47,6 +47,7 @@ const state = {
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   bdAction: null,     // active "For Immediate Action" drill-down: 'golive' | 'churn'
   bdMonth: 'All',     // Billing Dashboard Booking Month/Year filter
+  bdFilters: {},      // Billing Dashboard drill-down column filters { colKey: value }
   aiHistory: [],      // "Ask Claude" conversation [{role, content}]
   aiBusy: false,      // a chat request is in flight
   pendingBookings: [], // new-booking payloads awaiting confirmation
@@ -817,20 +818,70 @@ function renderBillingDashboard() {
     + '</div>';
 
   // Drill-down: editable detail table for the selected tile (edits write back to bookings).
+  // Columns are resizable, and a multi-filter (on any shown column) narrows the rows.
   if (state.bdDetail && BD_PREDS[state.bdDetail]) {
     const { pred, label } = BD_PREDS[state.bdDetail];
     const defs = BD_DETAIL_KEYS.map((k) => state.schema.bookings.editable.find((f) => f.key === k)).filter(Boolean);
     const matching = rows.filter(pred);
-    const headRow = defs.map((f) => `<th>${escapeHtml(f.label)}</th>`).join('');
-    const bodyRows = matching.map((row) =>
+    const shown = matching.filter(bdRowMatches);
+    const headRow = defs.map((f) => `<th data-col="${f.key}">${escapeHtml(f.label)}<span class="col-resize"></span></th>`).join('');
+    const bodyRows = shown.map((row) =>
       `<tr data-id="${row.id}">${defs.map((f) => (bdCanEdit(f.key) ? editCell(f, row) : readonlyCell(f, row))).join('')}</tr>`).join('');
-    html += `<div class="metrics-title">${escapeHtml(label)} (${matching.length})</div>`
+    const count = shown.length === matching.length ? `${matching.length}` : `${shown.length} of ${matching.length}`;
+    html += `<div class="metrics-title">${escapeHtml(label)} (${count})</div>`
+      + bdFilterBarHtml(defs, matching)
       + '<div class="bd-detail"><table><thead><tr>' + headRow + '</tr></thead><tbody>'
       + (bodyRows || `<tr><td class="muted" colspan="${defs.length || 1}" style="padding:12px">No matching properties.</td></tr>`)
       + '</tbody></table></div>';
   }
   $('#billingInner').classList.toggle('bd-collapsed', state.bdCollapsed);
   $('#billingInner').innerHTML = html;
+  applyBillingDetailWidths(); // re-apply any saved drill-down column widths
+}
+
+// Does a row pass the Billing Dashboard drill-down filters?
+function bdRowMatches(r) {
+  return Object.entries(state.bdFilters).every(([k, v]) => {
+    if (v == null || v === 'All' || v === '') return true;
+    if (v === '(blank)') return String(r[k] ?? '').trim() === '';
+    return String(r[k] ?? '') === String(v);
+  });
+}
+// Distinct values for a drill-down column (within the tile's matched rows).
+function bdValuesFor(matching, key) {
+  const hasBlank = matching.some((r) => { const v = r[key]; return v === null || v === undefined || String(v).trim() === ''; });
+  const d = [...new Set(matching.map((r) => r[key]).filter((v) => v !== null && v !== undefined && String(v).trim() !== ''))]
+    .map(String).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return ['All', ...(hasBlank ? ['(blank)'] : []), ...d];
+}
+// Adjustable filter bar (removable tiles + "Add Filter") over the shown drill-down columns.
+function bdFilterBarHtml(defs, matching) {
+  const labelOf = (k) => (defs.find((f) => f.key === k) || {}).label || k;
+  const active = Object.keys(state.bdFilters).filter((k) => defs.some((f) => f.key === k));
+  const tiles = active.map((k) => {
+    const cur = state.bdFilters[k] || 'All';
+    const opts = bdValuesFor(matching, k).map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('');
+    return `<div class="filter" data-filter="${k}"><button type="button" class="filter-x" data-bd-remove-filter="${k}" title="Remove filter">✕</button>`
+      + `<label>${escapeHtml(labelOf(k))}</label><select data-bd-filter="${k}">${opts}</select></div>`;
+  }).join('');
+  const addOpts = ['<option value="">+ Add a filter…</option>']
+    .concat(defs.filter((f) => !active.includes(f.key)).map((f) => `<option value="${f.key}">${escapeHtml(f.label)}</option>`)).join('');
+  const addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="bdAddFilter">${addOpts}</select></div>`;
+  return `<div class="filters-row bd-filters">${tiles}${addTile}</div>`;
+}
+// Saved drill-down column widths (own scope, applied to .bd-detail cells by data-col).
+function applyBillingDetailWidths() {
+  const widths = state.colWidths.billing_detail || {};
+  let css = '';
+  for (const [key, px] of Object.entries(widths)) {
+    css += `.bd-detail [data-col="${key}"]{width:${px}px;min-width:${px}px;max-width:${px}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}`;
+    css += `.bd-detail [data-col="${key}"] input,.bd-detail [data-col="${key}"] select{min-width:0;}`;
+  }
+  $('#billingDetailWidthStyle').textContent = css;
+}
+function setBillingDetailWidth(key, px) {
+  (state.colWidths.billing_detail || (state.colWidths.billing_detail = {}))[key] = px;
+  applyBillingDetailWidths();
 }
 
 // "For Immediate Action" alert tiles built from the change notifications.
@@ -895,14 +946,23 @@ function wireBilling() {
       } catch (err) { resolveBtn.disabled = false; toast(err.message, true); }
       return;
     }
+    // Remove a drill-down filter tile.
+    const rmFilter = e.target.closest('[data-bd-remove-filter]');
+    if (rmFilter) { delete state.bdFilters[rmFilter.dataset.bdRemoveFilter]; renderBillingDashboard(); return; }
     const tile = e.target.closest('[data-bd]');
     if (!tile) return;
+    // Switching tiles clears the drill-down filters (values differ per tile).
+    if (state.bdDetail !== tile.dataset.bd) state.bdFilters = {};
     state.bdDetail = state.bdDetail === tile.dataset.bd ? null : tile.dataset.bd;
     renderBillingDashboard();
   });
   // Edit a cell in the drill-down -> save to bookings and refresh.
   $('#billingInner').addEventListener('change', async (e) => {
     if (e.target.id === 'bdMonth') { state.bdMonth = e.target.value; renderBillingDashboard(); return; }
+    // Drill-down multi-filter controls.
+    if (e.target.id === 'bdAddFilter') { const k = e.target.value; if (k) state.bdFilters[k] = 'All'; renderBillingDashboard(); return; }
+    const bf = e.target.closest('[data-bd-filter]');
+    if (bf) { state.bdFilters[bf.dataset.bdFilter] = e.target.value; renderBillingDashboard(); return; }
     const ctl = e.target.closest('[data-key]');
     if (!ctl) return;
     const tr = ctl.closest('tr');
@@ -2834,12 +2894,13 @@ function wireResize() {
     rafId = 0;
     if (!active || pendingPx === null) return;
     if (active.churnDetail) { setChurnDetailWidth(active.key, pendingPx); return; }
+    if (active.billingDetail) { setBillingDetailWidth(active.key, pendingPx); return; }
     setColWidth(active.key, pendingPx);
     if (state.tab === 'salessupport') ssApplyFreeze();
     if (state.tab === 'bookings' || state.tab === 'churn') applyGridFreeze();
   };
-  // Listen on document so the grid (#grid), Sales Support (#ssTable), Legacy, and the dashboard
-  // Churn Details tables all work.
+  // Listen on document so the grid (#grid), Sales Support (#ssTable), Legacy, the dashboard
+  // Churn Details, and the Billing Dashboard drill-down tables all work.
   document.addEventListener('mousedown', (e) => {
     const handle = e.target.closest('.col-resize');
     if (!handle) return;
@@ -2847,8 +2908,9 @@ function wireResize() {
     if (!th || !th.dataset.col) return;
     e.preventDefault();
     const churnDetail = !!th.closest('.churn-detail-card');
-    const zoom = churnDetail ? 1 : (state.tab === 'legacy' ? (state.legacyZoom || 1) : (state.zoom || 1));
-    active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom, zoom, churnDetail };
+    const billingDetail = !churnDetail && !!th.closest('.bd-detail');
+    const zoom = (churnDetail || billingDetail) ? 1 : (state.tab === 'legacy' ? (state.legacyZoom || 1) : (state.zoom || 1));
+    active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom, zoom, churnDetail, billingDetail };
     document.body.style.cursor = 'col-resize';
   });
   document.addEventListener('mousemove', (e) => {
@@ -2862,6 +2924,7 @@ function wireResize() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     if (pendingPx !== null) {
       if (active.churnDetail) { setChurnDetailWidth(active.key, pendingPx); }
+      else if (active.billingDetail) { setBillingDetailWidth(active.key, pendingPx); }
       else { setColWidth(active.key, pendingPx); if (state.tab === 'salessupport') ssApplyFreeze(); applyGridFreeze(); }
     }
     saveColWidths();

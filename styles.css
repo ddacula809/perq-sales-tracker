@@ -394,6 +394,7 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 .bd-detail { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .bd-detail table { width: max-content; }
 .bd-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.bd-filters { margin: 6px 0 10px; }
 .bd-collapsed .bd-detail { max-height: 82vh; }
 
 /* Sales Support */
