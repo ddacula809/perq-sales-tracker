@@ -610,6 +610,7 @@ tr.ss-group td {
 .entry-card-form .entry-form { overflow: visible; padding: 0; }
 .entry-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .entry-card-title { font-weight: 700; font-size: 13px; }
+.entry-field .req { color: var(--neg); font-weight: 700; }
 .entry-remove {
   border: none; background: none; color: var(--ink-soft); cursor: pointer;
   font-size: 15px; line-height: 1; padding: 4px 8px;

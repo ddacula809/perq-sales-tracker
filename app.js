@@ -1537,6 +1537,9 @@ const PRODUCT_KEYS = ['product', 'mrr', 'one_time_fee', 'offset_amount'];
 // Booking Month/Year default to the dataset's period and "stick" to the last value used.
 let entryDefaults = { booking_month: 'May', booking_year: '2026' };
 
+// Fields a booking can't be submitted without (marked with * and enforced on submit).
+const REQUIRED_ENTRY_KEYS = new Set(['contract_term', 'booked_term', 'date_signed']);
+
 function entryFieldHtml(f) {
   let control;
   if (f.type === 'select') {
@@ -1548,7 +1551,8 @@ function entryFieldHtml(f) {
     control = `<input type="${inputType}"${step} data-key="${f.key}" />`;
   }
   const hidden = f.key === 'offset_amount' ? ' hidden' : '';
-  return `<div class="entry-field" data-field="${f.key}"${hidden}><label>${f.label}</label>${control}</div>`;
+  const req = REQUIRED_ENTRY_KEYS.has(f.key) ? ' <span class="req">*</span>' : '';
+  return `<div class="entry-field" data-field="${f.key}"${hidden}><label>${f.label}${req}</label>${control}</div>`;
 }
 
 function fieldDef(key) { return state.schema.bookings.editable.find((f) => f.key === key); }
@@ -1693,6 +1697,16 @@ async function submitEntries() {
     if (!String(shared.property_name || '').trim() && !String(shared.property_id || '').trim()) {
       toast('Enter the property details for every property.', true);
       return;
+    }
+    // Required fields: Contract Term, Booked Term, Date Signed.
+    for (const key of REQUIRED_ENTRY_KEYS) {
+      if (!String(shared[key] ?? '').trim()) {
+        const f = fieldDef(key);
+        toast(`${f ? f.label : key} is required.`, true);
+        const ctl = block.querySelector(`[data-shared] [data-key="${key}"]`);
+        if (ctl) ctl.focus();
+        return;
+      }
     }
     block.querySelectorAll('[data-products] [data-product]').forEach((line) => {
       const p = { ...shared };
