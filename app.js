@@ -20,6 +20,7 @@ const state = {
   // Generic per-tab filters keyed by column key: { <columnKey>: <selectedValue> }. Empty = none.
   filters: { dashboard: {}, bookings: {}, churn: {} },
   token: localStorage.getItem('perqToken') || '',
+  adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
   filtersHidden: localStorage.getItem('perqFiltersHidden') === '1',
   zoom: parseFloat(localStorage.getItem('perqZoom')) || 1,
@@ -2981,9 +2982,48 @@ function hideLogin() { $('#loginModal').hidden = true; }
 function logout() {
   state.token = '';
   state.user = null;
+  state.adminToken = '';
   localStorage.removeItem('perqToken');
+  localStorage.removeItem('perqAdminToken'); // also drop any impersonation
   // Reload to a clean login screen (clears all logged-in UI/state reliably).
   location.reload();
+}
+
+// ---------- Impersonation ("log in as") ----------
+// Admin only: swap the session to another user's token, keeping the admin token so we can
+// switch back. No page reload — we just reload the data as the target user.
+async function impersonate(id) {
+  const { token, user } = await api(`/api/impersonate/${id}`, { method: 'POST' });
+  if (!state.adminToken) { // remember the real admin token the first time
+    state.adminToken = state.token;
+    localStorage.setItem('perqAdminToken', state.adminToken);
+  }
+  state.token = token;
+  state.user = user;
+  localStorage.setItem('perqToken', token);
+  $('#usersModal').hidden = true;
+  state.tab = 'dashboard';
+  await loadAll();
+  renderImpersonationBanner();
+  toast(`Now viewing as ${user.username}`);
+}
+async function returnToAdmin() {
+  if (!state.adminToken) return;
+  state.token = state.adminToken;
+  localStorage.setItem('perqToken', state.adminToken);
+  state.adminToken = '';
+  localStorage.removeItem('perqAdminToken');
+  state.tab = 'dashboard';
+  await loadAll();
+  renderImpersonationBanner();
+  toast('Back to your admin account');
+}
+function renderImpersonationBanner() {
+  const bar = $('#impersonationBar');
+  if (!bar) return;
+  const on = !!(state.adminToken && state.user);
+  if (on) $('#impUser').textContent = `${state.user.username} (${ROLE_LABELS[state.user.role] || state.user.role})`;
+  bar.hidden = !on;
 }
 
 async function doLogin() {
@@ -3071,10 +3111,14 @@ async function renderUsersList() {
         `<option value="${r}"${r === u.role ? ' selected' : ''}>${ROLE_LABELS[r]}</option>`).join('');
       const ownerSel = u.role === 'sales'
         ? `<select data-owner-for="${u.id}" title="Tagged Account Owner">${ownerOptionsHtml(u.account_owner)}</select>` : '';
+      // "Log in as" for everyone except yourself.
+      const impBtn = (state.user && u.id === state.user.id) ? ''
+        : `<button type="button" class="view-btn" data-imp-user="${u.id}" data-imp-name="${escapeAttr(u.username)}">Log in as</button>`;
       return `<div class="user-row">
         <span class="user-name">${escapeHtml(u.username)}</span>
         <select data-role-for="${u.id}">${opts}</select>
         ${ownerSel}
+        ${impBtn}
         <button type="button" class="view-btn" data-pw-user="${u.id}">Reset password</button>
         <button type="button" class="view-btn danger" data-del-user="${u.id}">Delete</button>
       </div>`;
@@ -3131,8 +3175,14 @@ function wireUsers() {
     }
   });
 
-  // Reset password / delete.
+  // Reset password / delete / log in as.
   $('#usersList').addEventListener('click', async (e) => {
+    const imp = e.target.closest('[data-imp-user]');
+    if (imp) {
+      if (!confirm(`Log in as ${imp.dataset.impName}?\n\nYou'll see the app exactly as they do. Use “Return to admin” at the top to switch back.`)) return;
+      try { await impersonate(imp.dataset.impUser); } catch (err) { toast(err.message, true); }
+      return;
+    }
     const del = e.target.closest('[data-del-user]');
     if (del) {
       if (!confirm('Delete this user?')) return;
@@ -3257,11 +3307,13 @@ function wireAssistant() {
 async function boot() {
   wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireAssistant();
   applyZoom();
+  $('#returnAdminBtn').onclick = returnToAdmin;
   if (state.token) {
     try {
       const { user } = await api('/api/me');
       state.user = user;
       await loadAll();
+      renderImpersonationBanner(); // restore the banner if a page reload happened mid-impersonation
       return;
     } catch { /* token missing/expired — fall through to login */ }
   }

@@ -22,6 +22,17 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
+/* Impersonation banner (admin "log in as") — a flex child at the top of the page. */
+#impersonationBar {
+  display: flex; align-items: center; justify-content: center; gap: 14px; flex-shrink: 0;
+  background: #8b2f18; color: #fff; padding: 7px 14px; font-size: 13px;
+}
+#impersonationBar[hidden] { display: none; }
+#impersonationBar button {
+  border: 1px solid rgba(255,255,255,.6); background: rgba(255,255,255,.14); color: #fff;
+  border-radius: 6px; padding: 4px 12px; font: inherit; font-weight: 600; cursor: pointer;
+}
+#impersonationBar button:hover { background: rgba(255,255,255,.28); }
 body {
   margin: 0;
   background:

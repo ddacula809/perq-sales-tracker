@@ -16,6 +16,11 @@
   <style id="billingDetailWidthStyle"></style>
 </head>
 <body>
+  <!-- Shown only while an admin is impersonating another user. -->
+  <div id="impersonationBar" hidden>
+    <span>👁 Viewing as <strong id="impUser"></strong></span>
+    <button type="button" id="returnAdminBtn">Return to admin</button>
+  </div>
   <header class="topbar">
     <div class="brand">
       <button class="menu-btn" id="menuBtn" aria-label="Menu" title="Menu">☰</button>

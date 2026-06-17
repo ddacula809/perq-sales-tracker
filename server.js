@@ -559,6 +559,16 @@ app.delete('/api/users/:id', requireRole('admin'), async (req, res, next) => {
     res.status(204).end();
   } catch (e) { next(e); }
 });
+// Admin "log in as": mint a session token for another user (impersonation). The token records
+// who initiated it (imp_by) for traceability.
+app.post('/api/impersonate/:id', requireRole('admin'), async (req, res, next) => {
+  try {
+    const target = await getUserById(Number(req.params.id));
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+    const safe = { id: target.id, username: target.username, role: target.role, account_owner: target.account_owner || null };
+    res.json({ token: signToken({ ...safe, imp_by: req.user.username }), user: safe });
+  } catch (e) { next(e); }
+});
 
 // ---- Churn upload: append rows from a churn report, skipping duplicates ----
 // A row is a duplicate if New Value + Property ID + Property + MRR + Last Date Under
