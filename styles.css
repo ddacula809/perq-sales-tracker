@@ -464,6 +464,18 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 #ssTable tbody tr.ss-subtotal-row td.ss-subtotal-label {
   text-transform: uppercase; font-size: 10.5px; letter-spacing: .05em; color: var(--ink);
 }
+/* Fixed Grand Total row pinned to the bottom of the Sales Support table. */
+#ssTable tfoot td {
+  position: sticky; bottom: 0; z-index: 3;
+  background: #e3d8c6; font-weight: 800; padding: 8px 10px; white-space: nowrap;
+  border-top: 2px solid var(--line-strong);
+}
+#ssTable tfoot td.num, #ssTable tfoot td.ss-actual { text-align: right; font-family: 'Fira Mono', monospace; }
+#ssTable tfoot td.ss-actual { background: #c1d3da; color: var(--compute-ink); }
+#ssTable tfoot td.rownum { left: 0; z-index: 7; color: var(--ink-soft); }
+#ssTable tfoot td[data-col="product_category"],
+#ssTable tfoot td[data-col="section"],
+#ssTable tfoot td[data-col="pmc"] { z-index: 7; } /* keep frozen-left cells above the corner */
 #ssTable td input, #ssTable td select {
   font: inherit; border: none; background: transparent; padding: 7px 9px; width: 100%;
   min-width: 90px; color: var(--ink); outline: none;

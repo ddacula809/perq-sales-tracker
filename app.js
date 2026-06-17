@@ -2371,6 +2371,21 @@ function renderSalesSupport() {
     html = `<tr><td class="muted" colspan="${colCount + 1}" style="padding:14px">${msg}</td></tr>`;
   }
   $('#ssBody').innerHTML = html;
+  // Fixed grand-total row across every (filtered) row, pinned to the bottom of the table.
+  $('#ssFoot').innerHTML = rows.length ? ssGrandTotalRowHtml(cols, rows, editCol) : '';
+}
+
+// Bold "Grand Total" row summing every numeric column across all shown rows (pinned at bottom).
+function ssGrandTotalRowHtml(cols, allRows, editCol) {
+  const cells = cols.map(([k], i) => {
+    if (SS_MONEY.has(k)) {
+      const cls = SS_COMPUTED.has(k) ? 'ss-actual' : 'num';
+      return `<td class="${cls}" data-col="${k}">${fmtMoney(ssGroupSubtotal(allRows, k))}</td>`;
+    }
+    if (i === 0) return `<td data-col="${k}">Grand Total</td>`;
+    return `<td data-col="${k}"></td>`;
+  }).join('');
+  return `<tr class="ss-grand-total"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
 }
 
 // Build one field for the "Add row" form (labels reflect the open quarter).
