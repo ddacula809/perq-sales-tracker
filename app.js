@@ -1905,9 +1905,11 @@ async function confirmBookings() {
       }
       added += 1;
     }
-    // Reload so the offset bookings and the contracted churns are reflected everywhere.
+    // Reload so the offset bookings, contracted churns, and any auto-created Sales Support
+    // rows are reflected everywhere.
     state.rows.bookings = await api('/api/bookings');
     state.rows.churn = await api('/api/churn');
+    state.rows.sales_support = await api('/api/sales_support');
     const last = base[base.length - 1];
     if (last.booking_month) entryDefaults.booking_month = last.booking_month;
     if (last.booking_year) entryDefaults.booking_year = last.booking_year;

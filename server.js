@@ -214,7 +214,7 @@ async function attachChurnOwners(rows) {
   }));
 }
 
-function crud(table, computeFn) {
+function crud(table, computeFn, afterInsert) {
   // Read: any authenticated user. Churn rows are enriched with their Account Owner (from Recon).
   app.get(`/api/${table}`, async (_req, res, next) => {
     try {
@@ -227,7 +227,10 @@ function crud(table, computeFn) {
   app.post(`/api/${table}`, requireRole('admin', 'standard'), async (req, res, next) => {
     try {
       const row = await insertRow(table, req.body || {});
-      res.status(201).json(withComputed(row, computeFn));
+      const computed = withComputed(row, computeFn);
+      // Optional side-effect after insert (e.g. auto-track a new booking in Sales Support).
+      if (afterInsert) { try { await afterInsert(computed); } catch (e) { console.error('[afterInsert]', e.message); } }
+      res.status(201).json(computed);
     } catch (e) { next(e); }
   });
   app.delete(`/api/${table}/:id`, requireRole('admin', 'standard'), async (req, res, next) => {
@@ -268,7 +271,40 @@ function crud(table, computeFn) {
     } catch (e) { next(e); }
   });
 }
-crud('bookings', computeBooking);
+// Auto-track a newly created booking in Sales Support: if no row yet exists for its
+// quarter + PMC + product category + section (Pilot vs CTAM, from Pilot or CTAM), create one
+// seeded from the booking — Quarter Target / Worst / Accurate / Best = Company Total Booking,
+// monthly targets = 0. Best-effort: a failure never blocks the booking from being created.
+async function autoTrackBookingInSalesSupport(b) {
+  const month = String(b.booking_month || '').trim();
+  const year = b.booking_year;
+  if (!month || year === null || year === undefined || year === '') return;
+  const info = quarterFromMonthName(month, year);
+  if (!info) return;
+  const period = `Q${info.q} ${info.year}`;
+  if (!(await getPeriod(period))) return; // no forecast quarter for this booking — skip
+  const pmc = String(b.pmc || '').trim();
+  const category = String(b.bpr_prod_category || '').trim();
+  if (!pmc || !category) return;
+  const section = String(b.pilot_or_ctam || '').trim() === 'Pilot' ? 'Pilot / New Logo' : 'CTAM';
+  const norm = (v) => String(v ?? '').trim().toLowerCase();
+  const existing = await listRows('sales_support');
+  const already = existing.some((r) => r.period === period
+    && norm(r.pmc) === norm(pmc) && norm(r.product_category) === norm(category) && norm(r.section) === norm(section));
+  if (already) return;
+  const total = Number(b.company_total_booking) || 0;
+  await insertRow('sales_support', {
+    period,
+    product_category: category,
+    section,
+    pmc,
+    booking_type: section === 'Pilot / New Logo' ? 'Pilot' : (b.ctam_type || ''),
+    account_owner: b.sales_rep || '',
+    q2_target: total, apr_target: 0, may_target: 0, jun_target: 0,
+    worst: total, accurate: total, best: total, notes: '',
+  });
+}
+crud('bookings', computeBooking, autoTrackBookingInSalesSupport);
 crud('churn', computeChurn);
 
 // ---- License Transfer offset: a booking offsets a same-PMC, same-quarter churn ----
