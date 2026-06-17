@@ -20,6 +20,7 @@ import {
 } from './schema.js';
 import { verifyPassword, signToken, verifyToken } from './auth.js';
 import { sendEmail, changeEmailHtml } from './mailer.js';
+import { assistantEnabled, runAssistant } from './assistant.js';
 
 // Notification email recipients: admin + billing users (their username is their email).
 async function notifyEmails() {
@@ -119,7 +120,66 @@ app.get('/api/schema', async (_req, res, next) => {
       salesforce_recon: { editable: SALESFORCE_RECON_FIELDS },
       legacy_golives: { editable: LEGACY_GOLIVE_FIELDS },
       legacy_churn: { editable: LEGACY_CHURN_FIELDS },
+      assistantEnabled: assistantEnabled(),
     });
+  } catch (e) { next(e); }
+});
+
+// ---- "Ask Claude" assistant (read-only Q&A over the app data) ----
+// Available to roles that already see all the data; gives Claude tools to query it.
+function assistantSchemaText() {
+  const cols = (fields) => fields.map((f) => `${f.key} (${f.label})`).join(', ');
+  return [
+    `- bookings: ${cols([...BOOKING_FIELDS, ...BOOKING_COMPUTED])}`,
+    `- churn: ${cols([...CHURN_FIELDS, ...CHURN_COMPUTED])}, account_owner (Account Owner, from recon)`,
+    `- sales_support: ${cols(SALES_SUPPORT_FIELDS)} — note: monthly "actual" figures are computed in the app from bookings, not stored here`,
+    `- salesforce_recon: ${cols(SALESFORCE_RECON_FIELDS)}`,
+  ].join('\n');
+}
+async function assistantLoad(dataset) {
+  if (dataset === 'bookings') return (await listRows('bookings')).map((r) => withComputed(r, computeBooking));
+  if (dataset === 'churn') return attachChurnOwners((await listRows('churn')).map((r) => withComputed(r, computeChurn)));
+  if (dataset === 'sales_support') return listRows('sales_support');
+  if (dataset === 'salesforce_recon') return listRows('salesforce_recon');
+  throw new Error(`Unknown dataset: ${dataset}`);
+}
+const aNorm = (v) => String(v ?? '').trim().toLowerCase();
+function assistantFilter(rows, filters) {
+  if (!filters || typeof filters !== 'object') return rows;
+  const entries = Object.entries(filters);
+  return rows.filter((r) => entries.every(([k, v]) => aNorm(r[k]) === aNorm(v)));
+}
+async function assistantQuery({ dataset, filters, limit }) {
+  const matched = assistantFilter(await assistantLoad(dataset), filters);
+  const lim = Math.min(Math.max(1, Number(limit) || 100), 500);
+  return { dataset, total_matched: matched.length, returned: Math.min(matched.length, lim), rows: matched.slice(0, lim) };
+}
+async function assistantSummarize({ dataset, filters, sum_fields, group_by }) {
+  const matched = assistantFilter(await assistantLoad(dataset), filters);
+  const sumFields = Array.isArray(sum_fields) ? sum_fields : [];
+  const sumRow = (arr) => Object.fromEntries(sumFields.map((f) => [f, arr.reduce((a, r) => a + (Number(r[f]) || 0), 0)]));
+  const result = { dataset, count: matched.length, sums: sumRow(matched) };
+  if (group_by) {
+    const groups = {};
+    for (const r of matched) { const k = String(r[group_by] ?? '(blank)'); (groups[k] || (groups[k] = [])).push(r); }
+    result.groups = Object.fromEntries(Object.entries(groups).map(([k, rs]) => [k, { count: rs.length, sums: sumRow(rs) }]));
+  }
+  return result;
+}
+app.post('/api/chat', requireRole('admin', 'standard', 'billing'), async (req, res, next) => {
+  try {
+    if (!assistantEnabled()) return res.status(503).json({ error: 'The AI assistant is not configured (set ANTHROPIC_API_KEY).' });
+    const messages = Array.isArray(req.body && req.body.messages) ? req.body.messages : [];
+    if (!messages.length) return res.status(400).json({ error: 'No message provided.' });
+    const today = new Date().toISOString().slice(0, 10);
+    const reply = await runAssistant({
+      messages,
+      user: req.user,
+      today,
+      schemaText: assistantSchemaText(),
+      tools: { query_records: assistantQuery, summarize: assistantSummarize },
+    });
+    res.json({ reply });
   } catch (e) { next(e); }
 });
 

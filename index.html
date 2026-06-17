@@ -350,6 +350,22 @@
     </div>
   </div>
 
+  <!-- Ask Claude: floating assistant bubble (bottom-right). Hidden unless configured + allowed. -->
+  <div id="aiWidget" hidden>
+    <div class="ai-panel" id="aiPanel" hidden>
+      <div class="ai-head">
+        <span class="ai-title">✦ Ask Claude</span>
+        <button type="button" class="ai-x" id="aiClose" title="Close">✕</button>
+      </div>
+      <div class="ai-messages" id="aiMessages"></div>
+      <form class="ai-form" id="aiForm" autocomplete="off">
+        <input type="text" id="aiInput" placeholder="Ask about bookings, churn, billing…" autocomplete="off" />
+        <button type="submit" class="btn solid" id="aiSend">Send</button>
+      </form>
+    </div>
+    <button type="button" class="ai-bubble" id="aiBubble" title="Ask Claude" aria-label="Ask Claude">✦</button>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

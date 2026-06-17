@@ -47,6 +47,8 @@ const state = {
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   bdAction: null,     // active "For Immediate Action" drill-down: 'golive' | 'churn'
   bdMonth: 'All',     // Billing Dashboard Booking Month/Year filter
+  aiHistory: [],      // "Ask Claude" conversation [{role, content}]
+  aiBusy: false,      // a chat request is in flight
   pendingBookings: [], // new-booking payloads awaiting confirmation
   pendingShared: {},   // shared booking details for the confirm dialog
   pendingOffsets: [],  // per-line License Transfer offset selections (null or {churnId, amount})
@@ -1171,6 +1173,9 @@ function renderAll() {
   $('#usersBtn').hidden = !isAdmin();
   $('#notifWrap').hidden = !canBilling;
   updateBell();
+  // "Ask Claude" assistant: shown only when configured (API key set) and for full-data roles.
+  const canAssistant = !!(state.schema && state.schema.assistantEnabled) && ['admin', 'standard', 'billing'].includes(role());
+  $('#aiWidget').hidden = !canAssistant;
   $('#userWrap').hidden = !state.user;
   $('#userChip').innerHTML = state.user
     ? `${escapeHtml(state.user.username)} · <span class="role">${escapeHtml(state.user.role)}</span>` : '';
@@ -3051,9 +3056,57 @@ function gotoRow(tab, id) {
   }
 }
 
+// ---------- "Ask Claude" assistant ----------
+function renderAiMessages() {
+  const box = $('#aiMessages');
+  if (!state.aiHistory.length && !state.aiBusy) {
+    box.innerHTML = '<div class="ai-empty">Ask me anything about the Revenue Desk —<br>bookings, churn, billing status, or your sales numbers.</div>';
+    return;
+  }
+  const bubbles = state.aiHistory.map((m) =>
+    `<div class="ai-msg ${m.role === 'user' ? 'user' : (m.error ? 'err' : 'bot')}">${escapeHtml(m.content)}</div>`).join('');
+  box.innerHTML = bubbles + (state.aiBusy ? '<div class="ai-typing">Claude is thinking…</div>' : '');
+  box.scrollTop = box.scrollHeight;
+}
+function setAiOpen(open) {
+  $('#aiPanel').hidden = !open;
+  $('#aiBubble').textContent = open ? '▾' : '✦';
+  if (open) { renderAiMessages(); setTimeout(() => $('#aiInput').focus(), 50); }
+}
+async function sendAiMessage(text) {
+  if (state.aiBusy || !text.trim()) return;
+  state.aiHistory.push({ role: 'user', content: text.trim() });
+  state.aiBusy = true;
+  renderAiMessages();
+  $('#aiSend').disabled = true;
+  try {
+    // Send only the role/content turns (drop our local error flags) as the conversation.
+    const messages = state.aiHistory.map((m) => ({ role: m.role, content: m.content }));
+    const data = await api('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) });
+    state.aiHistory.push({ role: 'assistant', content: data.reply || '(no response)' });
+  } catch (err) {
+    state.aiHistory.push({ role: 'assistant', content: err.message || 'Something went wrong.', error: true });
+  } finally {
+    state.aiBusy = false;
+    $('#aiSend').disabled = false;
+    renderAiMessages();
+  }
+}
+function wireAssistant() {
+  $('#aiBubble').onclick = () => setAiOpen($('#aiPanel').hidden);
+  $('#aiClose').onclick = () => setAiOpen(false);
+  $('#aiForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const inp = $('#aiInput');
+    const text = inp.value;
+    inp.value = '';
+    sendAiMessage(text);
+  });
+}
+
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireAssistant();
   applyZoom();
   if (state.token) {
     try {
