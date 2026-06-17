@@ -388,6 +388,11 @@ function sortMonthYear(arr) {
     return (Number(ya) - Number(yb)) || (MONTHS.indexOf(ma) - MONTHS.indexOf(mb));
   });
 }
+// Today's calendar quarter as a label, e.g. "Q2 2026".
+function currentQuarterLabel() {
+  const d = new Date();
+  return `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`;
+}
 // "May 2026" -> { q: 2, year: 2026, label: 'Q2 2026' } (null if unparseable).
 function monthYearQuarter(my) {
   const [m, y] = String(my).split(' ');
@@ -1191,6 +1196,9 @@ async function loadAll() {
     state.rows.legacy_golives = await api('/api/legacy_golives');
     state.rows.legacy_churn = await api('/api/legacy_churn');
   } else { state.rows.legacy_golives = []; state.rows.legacy_churn = []; }
+  // Dashboard Churn section defaults to the current calendar quarter (falls back to "All"
+  // in renderSummary if there's no churn data for it yet).
+  state.churnQuarter = currentQuarterLabel();
   // A tagged salesperson is scoped to their own name: Sales Support owner filter + the
   // Sales Rep filter on both the Dashboard and Bookings all lock to their Account Owner.
   if (isSales() && salesOwner()) {
