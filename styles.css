@@ -623,6 +623,21 @@ tr.ss-group td {
 .entry-add { width: 100%; justify-content: center; border-style: dashed; margin-top: 4px; }
 .entry-submit { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
 .entry-submit .btn { width: 100%; justify-content: center; font-size: 13px; padding: 11px; }
+/* Multiple property blocks: a subtle group divider + label, and the per-property controls. */
+.property-block { position: relative; }
+.property-block + .property-block {
+  margin-top: 8px; padding-top: 20px; border-top: 2px dashed var(--line-strong);
+}
+.property-remove { font-size: 15px; }
+.entry-add-property {
+  width: 100%; justify-content: center; border-style: dashed; border-color: var(--plum);
+  color: var(--plum); margin: 4px 0 2px; font-weight: 600;
+}
+/* Property subheader row inside the confirm summary table. */
+.confirm-table tr.confirm-prop td {
+  background: var(--paper); font-weight: 700; color: var(--ink); font-size: 12px;
+  border-bottom: 1px solid var(--line-strong);
+}
 
 /* Users admin panel */
 .users-card { width: 560px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }

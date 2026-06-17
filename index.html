@@ -194,15 +194,9 @@
 
   <main class="entry-view" id="entryView" hidden>
     <div class="entry-view-inner">
-      <div class="entry-card-form">
-        <div class="entry-card-head"><span class="entry-card-title">Booking details</span></div>
-        <div class="entry-form" id="sharedFields"></div>
-      </div>
-      <div class="entry-card-form">
-        <div class="entry-card-head"><span class="entry-card-title">Products</span></div>
-        <div id="productLines"></div>
-        <button type="button" class="btn ghost entry-add" id="addEntryFormBtn">+ Add another product</button>
-      </div>
+      <!-- One block per property; each has its own Booking details + Products. Built by app.js. -->
+      <div id="propertyBlocks"></div>
+      <button type="button" class="btn ghost entry-add-property" id="addPropertyBtn">+ Add another property</button>
       <div class="entry-submit">
         <button type="button" class="btn solid" id="submitEntriesBtn">Submit bookings</button>
       </div>

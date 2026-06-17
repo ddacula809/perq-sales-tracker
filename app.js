@@ -50,7 +50,6 @@ const state = {
   aiHistory: [],      // "Ask Claude" conversation [{role, content}]
   aiBusy: false,      // a chat request is in flight
   pendingBookings: [], // new-booking payloads awaiting confirmation
-  pendingShared: {},   // shared booking details for the confirm dialog
   pendingOffsets: [],  // per-line License Transfer offset selections (null or {churnId, amount})
   notifications: [],   // billing notifications (e.g. GoLive changes)
 };
@@ -1196,7 +1195,7 @@ function renderAll() {
   $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
   $('#colBtn').style.display = isGrid ? '' : 'none';
   $('#colMenu').hidden = true;
-  if (isEntry && !$('#productLines').children.length) resetEntryView();
+  if (isEntry && !$('#propertyBlocks').children.length) resetEntryView();
   if (isSales) renderSalesSupport();
   if (isBillingTab) renderBillingDashboard();
   if (isSfrecon) renderSfRecon();
@@ -1554,13 +1553,30 @@ function entryFieldHtml(f) {
 
 function fieldDef(key) { return state.schema.bookings.editable.find((f) => f.key === key); }
 
-function renderSharedFields() {
-  $('#sharedFields').innerHTML = SHARED_KEYS.map(fieldDef).filter(Boolean).map(entryFieldHtml).join('');
-  for (const [k, v] of Object.entries(entryDefaults)) {
-    const ctl = $(`#sharedFields [data-key="${k}"]`);
+// A property block = its own Booking details + Products. Multiple can be entered at once.
+function propertyBlockHtml() {
+  const shared = SHARED_KEYS.map(fieldDef).filter(Boolean).map(entryFieldHtml).join('');
+  return '<div class="property-block" data-block>'
+    + '<div class="entry-card-form"><div class="entry-card-head"><span class="entry-card-title">Booking details</span>'
+    + '<button type="button" class="entry-remove property-remove" title="Remove this property">✕</button></div>'
+    + `<div class="entry-form shared-fields" data-shared>${shared}</div></div>`
+    + '<div class="entry-card-form"><div class="entry-card-head"><span class="entry-card-title">Products</span></div>'
+    + `<div class="product-lines" data-products>${productLineHtml()}</div>`
+    + '<button type="button" class="btn ghost entry-add add-product">+ Add another product</button></div>'
+    + '</div>';
+}
+
+// Read / write the Booking-details (shared) fields of one block.
+function readShared(block) {
+  const out = {};
+  block.querySelectorAll('[data-shared] [data-key]').forEach((ctl) => { out[ctl.dataset.key] = ctl.value; });
+  return out;
+}
+function fillShared(block, values) {
+  for (const [k, v] of Object.entries(values || {})) {
+    const ctl = block.querySelector(`[data-shared] [data-key="${k}"]`);
     if (ctl && v != null && v !== '') ctl.value = v;
   }
-  updatePilotCtam();
 }
 
 // Pilot Type applies only to Pilots and CTAM Type only to CTAMs — grey out and blank the
@@ -1570,31 +1586,30 @@ function setSharedSelect(sel, enabled) {
   if (enabled) { sel.disabled = false; if (sel.selectedIndex < 0) sel.selectedIndex = 0; }
   else { sel.selectedIndex = -1; sel.disabled = true; } // blank (value '') + greyed
 }
-function updatePilotCtam() {
-  const poc = $('#sharedFields [data-key="pilot_or_ctam"]');
+function updatePilotCtam(block) {
+  const poc = block.querySelector('[data-shared] [data-key="pilot_or_ctam"]');
   if (!poc) return;
   const v = poc.value.trim();
-  setSharedSelect($('#sharedFields [data-key="pilot_type"]'), v === 'Pilot');
-  setSharedSelect($('#sharedFields [data-key="ctam_type"]'), v === 'CTAM');
-  setProductOffsets(); // CTAM Type may have changed → refresh product Offset visibility
+  setSharedSelect(block.querySelector('[data-shared] [data-key="pilot_type"]'), v === 'Pilot');
+  setSharedSelect(block.querySelector('[data-shared] [data-key="ctam_type"]'), v === 'CTAM');
+  setProductOffsets(block); // CTAM Type may have changed → refresh product Offset visibility
 }
 
-// Auto-fill Property Name + PMC from the Salesforce Recon master when the entered
-// Property ID matches a Property ID 18 Digit there. Returns true if a match was applied.
-function autofillFromSfRecon() {
-  const pidCtl = $('#sharedFields [data-key="property_id"]');
+// Auto-fill Property Name + PMC (+ Sales Rep) for THIS block from the Salesforce Recon master
+// when the entered Property ID matches a Property ID 18 Digit there. Returns true if applied.
+function autofillFromSfRecon(block) {
+  const pidCtl = block.querySelector('[data-shared] [data-key="property_id"]');
   if (!pidCtl) return false;
   const pid = String(pidCtl.value || '').trim().toLowerCase();
   if (!pid) return false;
   const match = (state.rows.salesforce_recon || []).find(
     (r) => String(r.property_id_18 || '').trim().toLowerCase() === pid);
   if (!match) return false;
-  const nameCtl = $('#sharedFields [data-key="property_name"]');
-  const pmcCtl = $('#sharedFields [data-key="pmc"]');
-  const repCtl = $('#sharedFields [data-key="sales_rep"]');
+  const nameCtl = block.querySelector('[data-shared] [data-key="property_name"]');
+  const pmcCtl = block.querySelector('[data-shared] [data-key="pmc"]');
+  const repCtl = block.querySelector('[data-shared] [data-key="sales_rep"]');
   if (nameCtl) nameCtl.value = match.property_name || '';
   if (pmcCtl) pmcCtl.value = match.account_name || '';
-  // Sales Rep = the property's Account Owner (full name, e.g. "Kirk Flatter").
   if (repCtl && match.account_owner) {
     if (![...repCtl.options].some((o) => o.value === match.account_owner)) {
       repCtl.add(new Option(match.account_owner, match.account_owner)); // ensure it's selectable
@@ -1610,11 +1625,11 @@ function productLineHtml() {
     `<button type="button" class="entry-remove" title="Remove this product">✕</button></div>`;
 }
 
-// Offset Amount shows on every product line only when the shared CTAM Type is License Transfer.
-function setProductOffsets() {
-  const ctam = $('#sharedFields [data-key="ctam_type"]');
+// Offset Amount shows on a block's product lines only when that block's CTAM Type is License Transfer.
+function setProductOffsets(block) {
+  const ctam = block.querySelector('[data-shared] [data-key="ctam_type"]');
   const isLT = !!ctam && ctam.value.trim() === 'License Transfer';
-  $('#productLines').querySelectorAll('[data-product]').forEach((line) => {
+  block.querySelectorAll('[data-products] [data-product]').forEach((line) => {
     const field = line.querySelector('[data-field="offset_amount"]');
     if (!field) return;
     field.hidden = !isLT;
@@ -1622,50 +1637,78 @@ function setProductOffsets() {
   });
 }
 
-function renumberProducts() {
-  const lines = [...$('#productLines').querySelectorAll('[data-product]')];
+function renumberProducts(block) {
+  const lines = [...block.querySelectorAll('[data-products] [data-product]')];
   const showRemove = lines.length > 1;
   lines.forEach((l) => { l.querySelector('.entry-remove').style.visibility = showRemove ? '' : 'hidden'; });
 }
-
-function addProductLine() {
+function addProductLine(block) {
   const tmp = document.createElement('div');
   tmp.innerHTML = productLineHtml();
-  $('#productLines').appendChild(tmp.firstElementChild);
-  setProductOffsets();
-  renumberProducts();
+  block.querySelector('[data-products]').appendChild(tmp.firstElementChild);
+  setProductOffsets(block);
+  renumberProducts(block);
 }
 
-// Reset to the empty shared form with a single product line (on open and after submit).
+// Show the "remove property" ✕ only when there's more than one property block.
+function renumberProperties() {
+  const blocks = [...$('#propertyBlocks').querySelectorAll('[data-block]')];
+  const show = blocks.length > 1;
+  blocks.forEach((b) => { const x = b.querySelector('.property-remove'); if (x) x.style.visibility = show ? '' : 'hidden'; });
+}
+
+// Add a property block. With `copyFrom`, carry over its Booking details EXCEPT the property
+// identity (Property ID + Name), which the user fills in fresh; otherwise seed from defaults.
+function addPropertyBlock(copyFrom) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = propertyBlockHtml();
+  const block = tmp.firstElementChild;
+  $('#propertyBlocks').appendChild(block);
+  if (copyFrom) {
+    const vals = readShared(copyFrom);
+    delete vals.property_id; delete vals.property_name; // new property gets its own identity
+    fillShared(block, vals);
+  } else {
+    fillShared(block, entryDefaults);
+  }
+  updatePilotCtam(block);
+  setProductOffsets(block);
+  renumberProducts(block);
+  renumberProperties();
+  return block;
+}
+
+// Reset to a single empty property block (on open and after submit).
 function resetEntryView() {
-  renderSharedFields();
-  $('#productLines').innerHTML = '';
-  addProductLine();
+  $('#propertyBlocks').innerHTML = '';
+  addPropertyBlock(null);
 }
 
 async function submitEntries() {
-  const shared = {};
-  $('#sharedFields').querySelectorAll('[data-key]').forEach((ctl) => { shared[ctl.dataset.key] = ctl.value; });
-  if (!String(shared.property_name || '').trim() && !String(shared.property_id || '').trim()) {
-    toast('Enter the property details first.', true);
-    return;
-  }
-  // One booking per product line, each carrying the shared details.
-  const payloads = [...$('#productLines').querySelectorAll('[data-product]')].map((line) => {
-    const p = { ...shared };
-    line.querySelectorAll('[data-key]').forEach((ctl) => {
-      const field = ctl.closest('.entry-field');
-      if (field && field.hidden) return; // skip hidden Offset on non-License-Transfers
-      p[ctl.dataset.key] = ctl.value;
+  const blocks = [...$('#propertyBlocks').querySelectorAll('[data-block]')];
+  const payloads = [];
+  // One booking per product line, each carrying its property block's Booking details.
+  for (const block of blocks) {
+    const shared = readShared(block);
+    if (!String(shared.property_name || '').trim() && !String(shared.property_id || '').trim()) {
+      toast('Enter the property details for every property.', true);
+      return;
+    }
+    block.querySelectorAll('[data-products] [data-product]').forEach((line) => {
+      const p = { ...shared };
+      line.querySelectorAll('[data-key]').forEach((ctl) => {
+        const field = ctl.closest('.entry-field');
+        if (field && field.hidden) return; // skip hidden Offset on non-License-Transfers
+        p[ctl.dataset.key] = ctl.value;
+      });
+      payloads.push(p);
     });
-    return p;
-  });
+  }
   if (!payloads.length) { toast('Add at least one product.', true); return; }
   // Preview the computed values, then ask for confirmation before creating anything.
   try {
     await api('/api/bookings/preview', { method: 'POST', body: JSON.stringify({ rows: payloads }) });
     state.pendingBookings = payloads;
-    state.pendingShared = shared;
     state.pendingOffsets = payloads.map(() => null);
     $('#confirmModal').hidden = false;
     await renderConfirm();
@@ -1699,12 +1742,8 @@ const churnDropAmt = (c) => Math.abs(Number(c && c.mrr) || 0); // monthly MRR th
 // Renders the confirm dialog. Re-runs whenever an offset selection changes so the
 // computed Company Total / Commissionable reflect the License Transfer offset.
 async function renderConfirm() {
-  const shared = state.pendingShared || {};
   const base = state.pendingBookings || [];
   const offsets = state.pendingOffsets || [];
-  const qInfo = monthYearQuarter(`${shared.booking_month || ''} ${shared.booking_year || ''}`);
-  const qLabel = qInfo ? qInfo.label : null;
-  const elig = offsetEligibleChurns(shared.pmc, qInfo); // [{ churn, quarter, isFuture }]
   // Effective payloads: apply each chosen offset as a License Transfer.
   const eff = base.map((p, i) => offsets[i]
     ? { ...p, pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: offsets[i].amount }
@@ -1715,48 +1754,59 @@ async function renderConfirm() {
 
   const m = fmtMoney;
   const sum = (k) => computed.reduce((a, r) => a + (Number(r[k]) || 0), 0);
-  const period = `${shared.booking_month || ''} ${shared.booking_year || ''}`.trim();
-  const prop = shared.property_name || shared.property_id || '—';
-  const meta = `<strong>${escapeHtml(prop)}</strong>`
-    + (period ? ` · ${escapeHtml(period)}` : '')
-    + (shared.sales_rep ? ` · ${escapeHtml(shared.sales_rep)}` : '');
-  const body = computed.map((r, i) =>
-    `<tr><td>${escapeHtml(r.product || '—')}${offsets[i] ? ' <span class="lt-badge">License Transfer</span>' : ''}</td>`
-    + `<td class="num">${m(r.mrr)}</td><td class="num">${m(r.company_total_booking)}</td>`
-    + `<td class="num">${m(r.commissionable_bookings)}</td><td class="num">${m(r.one_time_fee)}</td></tr>`).join('');
+  const propName = (p) => p.property_name || p.property_id || '—';
+  const propCount = new Set(base.map(propName)).size;
+  const meta = `<strong>${propCount} propert${propCount === 1 ? 'y' : 'ies'}</strong> · ${computed.length} line item${computed.length === 1 ? '' : 's'}`;
+
+  // Summary grouped by property (a subheader row per property, then its product lines).
+  let rowsHtml = '';
+  let lastProp = null;
+  computed.forEach((r, i) => {
+    const p = base[i];
+    const name = propName(p);
+    if (name !== lastProp) {
+      const period = `${p.booking_month || ''} ${p.booking_year || ''}`.trim();
+      const bits = [escapeHtml(name)];
+      if (p.pmc) bits.push(escapeHtml(p.pmc));
+      if (period) bits.push(escapeHtml(period));
+      rowsHtml += `<tr class="confirm-prop"><td colspan="5">${bits.join(' · ')}</td></tr>`;
+      lastProp = name;
+    }
+    rowsHtml += `<tr><td>${escapeHtml(r.product || '—')}${offsets[i] ? ' <span class="lt-badge">License Transfer</span>' : ''}</td>`
+      + `<td class="num">${m(r.mrr)}</td><td class="num">${m(r.company_total_booking)}</td>`
+      + `<td class="num">${m(r.commissionable_bookings)}</td><td class="num">${m(r.one_time_fee)}</td></tr>`;
+  });
   let html = `<p class="confirm-meta">${meta}</p>`
     + '<table class="confirm-table"><thead><tr><th>Product</th><th class="num">MRR</th>'
     + '<th class="num">Company Total Booking</th><th class="num">Commissionable</th><th class="num">One-Time Fee</th></tr></thead>'
-    + `<tbody>${body}</tbody>`
+    + `<tbody>${rowsHtml}</tbody>`
     + `<tfoot><tr><th>Total (${computed.length})</th><th class="num">${m(sum('mrr'))}</th>`
     + `<th class="num">${m(sum('company_total_booking'))}</th><th class="num">${m(sum('commissionable_bookings'))}</th>`
     + `<th class="num">${m(sum('one_time_fee'))}</th></tr></tfoot></table>`;
 
-  // Offset section — a churn (this PMC) that can offset a line. Same-quarter churns are
-  // the normal case; future-quarter churns are shown but clearly flagged.
-  if (elig.length) {
-    const hasSame = elig.some((e) => !e.isFuture);
-    const lines = base.map((p, i) => {
-      const usedByOthers = new Set(offsets.map((o, j) => (o && j !== i) ? String(o.churnId) : null).filter(Boolean));
-      const opts = elig.filter((e) => !usedByOthers.has(String(e.churn.id)));
-      const sel = offsets[i] ? String(offsets[i].churnId) : '';
-      const optionHtml = ['<option value="">No offset</option>'].concat(opts.map((e) => {
-        const c = e.churn;
-        return `<option value="${c.id}"${sel === String(c.id) ? ' selected' : ''}>${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}</option>`;
-      })).join('');
-      const amtHtml = offsets[i]
-        ? `<label class="offset-amt-l">Offset <input type="text" class="offset-amt" data-offset-amt="${i}" value="${escapeAttr(m(offsets[i].amount))}" /></label>` : '';
-      return `<div class="offset-line"><span class="offset-prod">${escapeHtml(p.product || `Line ${i + 1}`)}</span>`
-        + `<select class="offset-sel" data-offset-line="${i}">${optionHtml}</select>${amtHtml}</div>`;
-    }).join('');
-    const title = hasSame
-      ? `License Transfer offset available — ${escapeHtml(shared.pmc || '')} · ${escapeHtml(qLabel || '')}`
-      : `No churn this quarter for ${escapeHtml(shared.pmc || '')} — future-quarter churns below`;
-    const note = hasSame
-      ? 'Selecting a churn tags that line as a License Transfer (offset applied) and reclassifies the churn as a Contraction.'
-      : 'This PMC has no property churning this quarter. The options below are churning in <strong>future quarters</strong> — choose one only if you intend to offset this quarter’s booking against a future drop.';
-    html += `<div class="offset-box${hasSame ? '' : ' offset-future'}"><div class="offset-title">${title}</div>`
-      + lines + `<p class="offset-note">${note}</p></div>`;
+  // Offsets: per line, eligible churns by that line's own PMC + quarter (same or future).
+  // A churn can only offset one line, so options exclude churns chosen on other lines.
+  const offLines = base.map((p, i) => {
+    const q = monthYearQuarter(`${p.booking_month || ''} ${p.booking_year || ''}`);
+    const list = offsetEligibleChurns(p.pmc, q);
+    if (!list.length) return '';
+    const usedByOthers = new Set(offsets.map((o, j) => (o && j !== i) ? String(o.churnId) : null).filter(Boolean));
+    const opts = list.filter((e) => !usedByOthers.has(String(e.churn.id)));
+    const sel = offsets[i] ? String(offsets[i].churnId) : '';
+    const optionHtml = ['<option value="">No offset</option>'].concat(opts.map((e) => {
+      const c = e.churn;
+      return `<option value="${c.id}"${sel === String(c.id) ? ' selected' : ''}>${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}</option>`;
+    })).join('');
+    const amtHtml = offsets[i]
+      ? `<label class="offset-amt-l">Offset <input type="text" class="offset-amt" data-offset-amt="${i}" value="${escapeAttr(m(offsets[i].amount))}" /></label>` : '';
+    const label = `${escapeHtml(propName(p))} · ${escapeHtml(p.product || `Line ${i + 1}`)}`;
+    return `<div class="offset-line"><span class="offset-prod">${label}</span>`
+      + `<select class="offset-sel" data-offset-line="${i}">${optionHtml}</select>${amtHtml}</div>`;
+  }).filter(Boolean).join('');
+  if (offLines) {
+    html += '<div class="offset-box"><div class="offset-title">License Transfer offsets available</div>'
+      + offLines
+      + '<p class="offset-note">Selecting a churn tags that line as a License Transfer (offset applied) and reclassifies the churn as a Contraction. Future-quarter churns are flagged.</p></div>';
   }
   $('#confirmSummary').innerHTML = html;
 }
@@ -1876,7 +1926,10 @@ function wireOffsetReview() {
 }
 
 function wireEntry() {
-  $('#addEntryFormBtn').onclick = () => addProductLine();
+  $('#addPropertyBtn').onclick = () => {
+    const blocks = [...$('#propertyBlocks').querySelectorAll('[data-block]')];
+    addPropertyBlock(blocks[blocks.length - 1] || null);
+  };
   $('#submitEntriesBtn').onclick = submitEntries;
   // Confirm dialog: Confirm creates the rows; Cancel returns to the entry form unchanged.
   $('#confirmSubmit').onclick = confirmBookings;
@@ -1905,23 +1958,42 @@ function wireEntry() {
       if (state.pendingOffsets[i]) { state.pendingOffsets[i].amount = parseMoney(amtEl.value); renderConfirm(); }
     }
   });
-  // Shared-field changes: CTAM Type toggles product Offset; Pilot/CTAM gates Pilot Type.
-  $('#sharedFields').addEventListener('change', (e) => {
+  // All property blocks share one delegated set of handlers (blocks are added/removed dynamically).
+  const blocks = $('#propertyBlocks');
+  // Booking-details changes (scoped to the block they happened in).
+  blocks.addEventListener('change', (e) => {
     const key = e.target.dataset && e.target.dataset.key;
-    if (key === 'ctam_type') setProductOffsets();
-    if (key === 'pilot_or_ctam') updatePilotCtam();
-    if (key === 'property_id' && autofillFromSfRecon()) toast('Property Name & PMC filled from Salesforce Recon');
+    if (!key) return;
+    const block = e.target.closest('[data-block]');
+    if (!block) return;
+    if (key === 'ctam_type') setProductOffsets(block);
+    if (key === 'pilot_or_ctam') updatePilotCtam(block);
+    if (key === 'property_id' && autofillFromSfRecon(block)) toast('Property Name & PMC filled from Salesforce Recon');
   });
   // Property ID: auto-fill Property Name + PMC as soon as a matching ID is entered/pasted.
-  $('#sharedFields').addEventListener('input', (e) => {
-    if (e.target.dataset && e.target.dataset.key === 'property_id') autofillFromSfRecon();
+  blocks.addEventListener('input', (e) => {
+    if (e.target.dataset && e.target.dataset.key === 'property_id') {
+      const block = e.target.closest('[data-block]');
+      if (block) autofillFromSfRecon(block);
+    }
   });
-  // Remove a product line (keep at least one).
-  $('#productLines').addEventListener('click', (e) => {
-    if (!e.target.closest('.entry-remove')) return;
-    if ($('#productLines').querySelectorAll('[data-product]').length <= 1) return;
-    e.target.closest('[data-product]').remove();
-    renumberProducts();
+  blocks.addEventListener('click', (e) => {
+    const block = e.target.closest('[data-block]');
+    if (!block) return;
+    if (e.target.closest('.add-product')) { addProductLine(block); return; }
+    // Remove this property (keep at least one).
+    if (e.target.closest('.property-remove')) {
+      if ($('#propertyBlocks').querySelectorAll('[data-block]').length <= 1) return;
+      block.remove();
+      renumberProperties();
+      return;
+    }
+    // Remove a product line within the block (keep at least one).
+    if (e.target.closest('.entry-remove')) {
+      if (block.querySelectorAll('[data-products] [data-product]').length <= 1) return;
+      const line = e.target.closest('[data-product]');
+      if (line) { line.remove(); renumberProducts(block); }
+    }
   });
 }
 
