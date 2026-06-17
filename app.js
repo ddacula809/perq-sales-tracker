@@ -742,7 +742,7 @@ function bdCanEdit(key) {
   return false;
 }
 const BD_DETAIL_KEYS = ['property_id', 'property_name', 'pmc', 'product', 'mrr', 'one_time_fee',
-  'billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'golive_date'];
+  'billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'golive_date', 'sage_id'];
 // Columns shown in the Churn "For Immediate Action" drill-down (editable so billing can act).
 const CHURN_DETAIL_KEYS = ['property_id', 'property', 'product', 'mrr', 'last_date_under_contract',
   'template_deleted', 'completed', 'notes'];
@@ -775,6 +775,7 @@ function renderBillingDashboard() {
   const recPending = (r) => r.recurring_billing_status === 'Pending';
   const notLive = (r) => !r.golive_date;
   const live = (r) => !!r.golive_date;
+  const noSage = (r) => !String(r.sage_id || '').trim();
 
   const BD_PREDS = {
     implFee: { label: 'Properties with Implementation Fees', pred: hasImplFee },
@@ -784,6 +785,7 @@ function renderBillingDashboard() {
     recPending: { label: 'Recurring Billing — Pending', pred: recPending },
     notLive: { label: 'Not Live (no GoLive date)', pred: notLive },
     live: { label: 'Live Properties', pred: live },
+    noSage: { label: 'Properties without Sage ID', pred: noSage },
   };
 
   // Tiles are clickable; data-bd ties each to a drill-down predicate.
@@ -816,6 +818,9 @@ function renderBillingDashboard() {
     + card('Not Live MRR', fmtMoney(sumWhere(notLive, 'mrr')), 'notLive')
     + card('Live Properties', String(distinctProps(live)), 'live')
     + card('Live MRR', fmtMoney(sumWhere(live, 'mrr')), 'live')
+    + '</div>'
+    + '<div class="metrics-title">Data Quality</div><div class="metrics-row">'
+    + card('Properties without Sage ID', String(distinctProps(noSage)), 'noSage', true)
     + '</div>';
 
   // Drill-down: editable detail table for the selected tile (edits write back to bookings).
