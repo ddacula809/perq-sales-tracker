@@ -2150,10 +2150,15 @@ function ssActualTipHtml(row, key) {
   const list = ssActualBreakdown(row, key);
   if (!list.length) return '';
   const total = list.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0);
-  const items = list.map((b) =>
-    `<div class="tip-row"><span class="tip-prop">${escapeHtml(b.property_name || b.property_id || '—')}`
-    + `${b.product ? ` <em>${escapeHtml(b.product)}</em>` : ''}</span>`
-    + `<span class="tip-amt">${escapeHtml(fmtMoney(b.company_total_booking))}</span></div>`).join('');
+  const items = list.map((b) => {
+    const isLT = String(b.ctam_type || '').trim() === 'License Transfer' || b.offset_churn_id;
+    const note = String(b.notes || '').trim();
+    return `<div class="tip-row"><span class="tip-prop">${escapeHtml(b.property_name || b.property_id || '—')}`
+      + `${b.product ? ` <em>${escapeHtml(b.product)}</em>` : ''}`
+      + `${isLT ? ' <span class="tip-lt">License Transfer</span>' : ''}</span>`
+      + `<span class="tip-amt">${escapeHtml(fmtMoney(b.company_total_booking))}</span></div>`
+      + (isLT && note ? `<div class="tip-note">${escapeHtml(note)}</div>` : '');
+  }).join('');
   const head = `${escapeHtml(row.pmc || '—')} · ${escapeHtml(row.product_category || '')} · ${list.length} booking${list.length === 1 ? '' : 's'}`;
   return `<div class="tip-head">${head}</div>${items}`
     + `<div class="tip-row tip-total"><span>Actual</span><span class="tip-amt">${escapeHtml(fmtMoney(total))}</span></div>`;
@@ -2205,15 +2210,13 @@ function ssPmcOptions(current) {
 }
 
 function ssCell(row, key) {
-  const p = viewedPeriodObj();
-  const months = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
-  const year = p ? p.year : null;
-  if (key === 'm1_actual' || key === 'm2_actual' || key === 'm3_actual') {
-    const idx = { m1_actual: 0, m2_actual: 1, m3_actual: 2 }[key];
-    return `<td class="ss-actual" data-col="${key}">${fmtMoney(ssActual(row, months[idx], year))}</td>`;
-  }
-  if (key === 'q_actual') {
-    return `<td class="ss-actual" data-col="${key}">${fmtMoney(months.reduce((a, mn) => a + ssActual(row, mn, year), 0))}</td>`;
+  if (SS_COMPUTED.has(key)) {
+    const bd = ssActualBreakdown(row, key);
+    const value = bd.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0);
+    // $0 actual but real bookings came in that were offset to $0 by a License Transfer:
+    // flag it so it's not mistaken for "no activity" (details + notes show on hover).
+    const ltZero = value === 0 && bd.some((b) => String(b.ctam_type || '').trim() === 'License Transfer' || b.offset_churn_id);
+    return `<td class="ss-actual${ltZero ? ' ss-lt-zero' : ''}" data-col="${key}">${fmtMoney(value)}</td>`;
   }
   const f = ssFieldDef(key);
   const val = row[key] ?? '';

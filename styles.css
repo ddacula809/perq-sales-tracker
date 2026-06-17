@@ -380,6 +380,8 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 .cell-tip .tip-prop em { font-style: normal; opacity: .65; font-size: 11px; }
 .cell-tip .tip-amt { font-family: 'Fira Mono', monospace; white-space: nowrap; }
 .cell-tip .tip-total { margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.22); font-weight: 700; }
+.cell-tip .tip-lt { font-size: 10px; font-weight: 700; background: var(--accent); color: #fff; border-radius: 4px; padding: 1px 5px; margin-left: 4px; white-space: nowrap; }
+.cell-tip .tip-note { font-size: 11px; opacity: .8; white-space: normal; margin: 1px 0 4px; padding-left: 2px; }
 #ssTable td.ss-actual { cursor: help; }
 
 /* Billing Dashboard */
@@ -446,6 +448,8 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
   background: var(--compute-bg); color: var(--compute-ink); font-family: 'Fira Mono', monospace;
   text-align: right; padding: 7px 10px; font-weight: 500;
 }
+/* $0 actual that's really a License Transfer (offset to $0) — flag it, don't read as "nothing". */
+#ssTable td.ss-actual.ss-lt-zero { background: #fbe6dc; color: var(--accent-deep); font-weight: 700; }
 #ssTable td.num { text-align: right; }
 /* Zebra striping for legibility (Linen stripe; computed cyan cells keep their tint). */
 #ssTable tbody tr.ss-alt td:not(.ss-actual) { background: var(--paper); }
