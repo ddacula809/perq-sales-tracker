@@ -347,16 +347,20 @@ async function maybeConvertExisting(body) {
   const pid = norm(body.property_id);
   const prod = norm(body.product);
   if (!pid || !prod) return null;
-  const matches = (await listRows('bookings')).filter((b) =>
-    norm(b.property_id) === pid && norm(b.product) === prod
-    && String(b.pilot_or_ctam || '').trim() === 'Pilot' && String(b.pilot_type || '').trim() !== 'Conversion');
+  // Match purely on Property ID + Product (any existing line item for it), so a conversion
+  // always updates the existing record instead of creating a duplicate.
+  const matches = (await listRows('bookings')).filter((b) => norm(b.property_id) === pid && norm(b.product) === prod);
   if (!matches.length) return null;
-  const target = matches[matches.length - 1]; // the most recent pilot for this property + product
+  const target = matches[matches.length - 1]; // the most recent line item for this property + product
   const merged = { ...body, golive_date: null }; // recognized only once the conversion goes live
-  const existingNote = String(body.billing_notes || target.billing_notes || '').trim();
+  // Never overwrite the existing One-Time / implementation fee — it was billed during the pilot.
+  delete merged.one_time_fee;
+  const fee = Number(target.one_time_fee) || 0;
+  const existingNote = String(target.billing_notes || '').trim();
   if (!/converted property/i.test(existingNote)) {
     const when = String(body.date_signed || '').slice(0, 10);
-    const note = `Converted property${when ? ` (converted ${when})` : ''}`;
+    let note = `Converted property${when ? ` (converted ${when})` : ''}`;
+    if (fee > 0) note += ' — one-time/implementation fee already on the original booking; do NOT double-bill';
     merged.billing_notes = existingNote ? `${existingNote} | ${note}` : note;
   }
   return updateRow('bookings', target.id, merged);
