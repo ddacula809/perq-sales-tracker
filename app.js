@@ -30,6 +30,9 @@ const state = {
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
   churnQuarter: 'All',   // dashboard churn-by-month quarter filter
   churnOwner: 'All',     // dashboard churn Account Owner filter (sales users default to their name)
+  saasCategory: 'Multifamily', // SaaS Financials: Multifamily | Digital Advertising
+  saasQuarter: '',       // SaaS Financials quarter label, e.g. 'Q1 2026' (defaults to current)
+  saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
@@ -1226,6 +1229,10 @@ function renderAll() {
   // Legacy trackers are for admins and billing users.
   document.querySelector('[data-tab="legacy"]').hidden = !canBilling;
   if (state.tab === 'legacy' && !canBilling) state.tab = 'dashboard';
+  // SaaS Financials (MRR movement view) — admins, standard, and billing.
+  const canSaas = isAdmin() || role() === 'standard' || role() === 'billing';
+  document.querySelector('[data-tab="saas"]').hidden = !canSaas;
+  if (state.tab === 'saas' && !canSaas) state.tab = 'dashboard';
   // (Sales roles see Churn read-only — canEditField returns false for them.)
 
   const isEntry = state.tab === 'newbooking';
@@ -1233,6 +1240,7 @@ function renderAll() {
   const isBillingTab = state.tab === 'billing';
   const isSfrecon = state.tab === 'sfrecon';
   const isLegacy = state.tab === 'legacy';
+  const isSaas = state.tab === 'saas';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   $('#currentTab').textContent = TAB_LABELS[state.tab] || '';
   // Account / role-based controls.
@@ -1262,8 +1270,9 @@ function renderAll() {
   $('#billingView').hidden = !isBillingTab;
   $('#sfreconView').hidden = !isSfrecon;
   $('#legacyView').hidden = !isLegacy;
+  $('#saasView').hidden = !isSaas;
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
-  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon || isLegacy) ? 'none' : '';
+  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon || isLegacy || isSaas) ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Multiple Filters' : 'Hide Multiple Filters';
   $('#quickFilter').style.display = isGrid ? '' : 'none'; // quick search on Bookings/Churn only
   $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
@@ -1274,6 +1283,7 @@ function renderAll() {
   if (isBillingTab) renderBillingDashboard();
   if (isSfrecon) renderSfRecon();
   if (isLegacy) renderLegacy();
+  if (isSaas) renderSaas();
   if (isGrid) renderQuickFilter();
   renderHead(); renderSummary(); renderBody();
   applyColHide();
@@ -1416,7 +1426,7 @@ function wireGrid() {
 const TAB_LABELS = {
   dashboard: 'Dashboard', billing: 'Billing Dashboard', salessupport: 'Sales Support',
   newbooking: 'New Booking', bookings: 'Bookings', churn: 'Churn Tracker',
-  sfrecon: 'Salesforce Recon Data', legacy: 'Legacy',
+  sfrecon: 'Salesforce Recon Data', legacy: 'Legacy', saas: 'SaaS Financials',
 };
 
 function closeSidebar() {
@@ -3336,9 +3346,155 @@ function wireAssistant() {
   });
 }
 
+// ---------- SaaS Financials (computed MRR-movement view, per property + category) ----------
+// Digital Advertising = the existing "Digital Advertising" bpr category; everything else = Multifamily.
+function saasCategoryOf(b) {
+  return String(b.bpr_prod_category || '').trim() === 'Digital Advertising' ? 'Digital Advertising' : 'Multifamily';
+}
+// Absolute month index = year*12 + (month-1). From a 'YYYY-MM-DD' date or a 'Month Year' string.
+function monthIdxFromDate(d) {
+  const m = String(d || '').match(/^(\d{4})-(\d{2})/);
+  return m ? Number(m[1]) * 12 + (Number(m[2]) - 1) : null;
+}
+function monthIdxFromMonthYear(my) {
+  const [mn, y] = String(my || '').trim().split(' ');
+  const mi = MONTHS.indexOf(mn);
+  return (mi >= 0 && y) ? Number(y) * 12 + mi : null;
+}
+function parseQuarterLabel(label) {
+  const m = String(label || '').match(/Q(\d)\s+(\d{4})/);
+  return m ? { q: Number(m[1]), year: Number(m[2]) } : { q: 1, year: 2000 };
+}
+// The most recent real (non-Contraction) churn for a booking's property + product.
+function saasChurnFor(b) {
+  const pid = String(b.property_id || '').trim().toLowerCase();
+  const prod = String(b.product || '').trim().toLowerCase();
+  let best = null;
+  for (const c of state.rows.churn) {
+    if (String(c.classification || '') === 'Contraction' || !c.last_date_under_contract) continue;
+    if (String(c.property_id || '').trim().toLowerCase() !== pid) continue;
+    if (String(c.product || '').trim().toLowerCase() !== prod) continue;
+    if (!best || String(c.last_date_under_contract) > String(best.last_date_under_contract)) best = c;
+  }
+  return best;
+}
+// MRR a single booking recognizes in absolute month `idx`, with churn proration:
+//  before GoLive -> 0; GoLive..(churn month-1) -> full MRR; churn month -> prorated Final AR; after -> 0.
+function saasBookingMonthMRR(b, churn, idx) {
+  const goLive = monthIdxFromDate(b.golive_date);
+  if (goLive == null || idx < goLive) return 0;
+  const mrr = Number(b.mrr) || 0;
+  if (!churn) return mrr;
+  const finalInv = monthIdxFromMonthYear(churn.final_invoice_month);
+  if (finalInv == null) return mrr;
+  if (idx < finalInv) return mrr;
+  if (idx === finalInv) return Number(churn.ar_final_invoice_amount) || 0;
+  return 0;
+}
+// Quarters present in the data (by go-live / churn months) + the current quarter.
+function saasQuarterOptions() {
+  const set = new Set();
+  const addIdx = (idx) => { if (idx != null) { const y = Math.floor(idx / 12); const q = Math.floor((idx % 12) / 3) + 1; set.add(`Q${q} ${y}`); } };
+  for (const b of state.rows.bookings) addIdx(monthIdxFromDate(b.golive_date));
+  for (const c of state.rows.churn) { addIdx(monthIdxFromMonthYear(c.final_invoice_month)); addIdx(monthIdxFromMonthYear(c.final_churn_month)); }
+  set.add(currentQuarterLabel());
+  return [...set].sort((a, b) => { const A = parseQuarterLabel(a); const B = parseQuarterLabel(b); return (A.year - B.year) || (A.q - B.q); });
+}
+const SAAS_TYPE_CLASS = {
+  Expansion: 'saas-expansion', Upsell: 'saas-upsell',
+  'Churn prorated product': 'saas-churn-pro', 'Churn Product': 'saas-churn',
+};
+function applySaasZoom() {
+  $('#saasTable').style.zoom = state.saasZoom;
+  $('#saasZoomLevel').textContent = Math.round(state.saasZoom * 100) + '%';
+}
+function renderSaas() {
+  const qOpts = saasQuarterOptions();
+  if (!qOpts.includes(state.saasQuarter)) {
+    state.saasQuarter = qOpts.includes(currentQuarterLabel()) ? currentQuarterLabel() : (qOpts[qOpts.length - 1] || currentQuarterLabel());
+  }
+  $('#saasQuarter').innerHTML = qOpts.map((q) => `<option${q === state.saasQuarter ? ' selected' : ''}>${q}</option>`).join('') || '<option>—</option>';
+  $('#saasCategory').value = state.saasCategory;
+  applySaasZoom();
+
+  const { q, year } = parseQuarterLabel(state.saasQuarter);
+  const idxs = [0, 1, 2].map((i) => year * 12 + (q - 1) * 3 + i);
+  const category = state.saasCategory;
+
+  // Property's first-ever go-live month (any category) — drives Expansion vs Upsell.
+  const firstGoLive = new Map();
+  for (const b of state.rows.bookings) {
+    const gi = monthIdxFromDate(b.golive_date);
+    if (gi == null) continue;
+    const pid = String(b.property_id || b.property_name || `#${b.id}`);
+    if (!firstGoLive.has(pid) || gi < firstGoLive.get(pid)) firstGoLive.set(pid, gi);
+  }
+
+  // Group active bookings of the selected category by property.
+  const byProp = new Map();
+  for (const b of state.rows.bookings) {
+    if (!b.golive_date || saasCategoryOf(b) !== category) continue;
+    const pid = String(b.property_id || b.property_name || `#${b.id}`);
+    if (!byProp.has(pid)) byProp.set(pid, { property: b.property_name || b.property_id || '—', bookings: [] });
+    byProp.get(pid).bookings.push(b);
+  }
+
+  const rows = [];
+  for (const [pid, info] of byProp) {
+    const churns = info.bookings.map(saasChurnFor);
+    const monthVals = idxs.map((idx) => info.bookings.reduce((a, b, i) => a + saasBookingMonthMRR(b, churns[i], idx), 0));
+    const types = idxs.map((idx) => {
+      if (info.bookings.some((b) => monthIdxFromDate(b.golive_date) === idx)) {
+        return idx === firstGoLive.get(pid) ? 'Expansion' : 'Upsell';
+      }
+      if (info.bookings.some((b, i) => churns[i] && monthIdxFromMonthYear(churns[i].final_invoice_month) === idx)) return 'Churn prorated product';
+      if (info.bookings.some((b, i) => churns[i] && monthIdxFromMonthYear(churns[i].final_churn_month) === idx)) return 'Churn Product';
+      return '';
+    });
+    if (monthVals.every((v) => !v) && types.every((t) => !t)) continue; // no activity/event this quarter
+    const products = [...new Set(info.bookings.map((b) => String(b.product || '').trim()).filter(Boolean))];
+    rows.push({ property: info.property, products, monthVals, types, total: monthVals.reduce((a, v) => a + v, 0) });
+  }
+  rows.sort((a, b) => String(a.property).localeCompare(String(b.property)));
+
+  const monthHead = idxs.map((idx) => {
+    const mi = idx % 12; const y = Math.floor(idx / 12);
+    return `<th class="num">${MONTHS[mi]} ${y}</th><th class="saas-type-col">${MONTHS[mi][0]}${String(y).slice(2)} MRR Type</th>`;
+  }).join('');
+  $('#saasHead').innerHTML = `<tr><th class="rownum">#</th><th>Property</th><th>Products</th>${monthHead}<th class="num">${escapeHtml(state.saasQuarter)} Total</th></tr>`;
+
+  $('#saasBody').innerHTML = rows.length ? rows.map((r, i) => {
+    const cells = r.monthVals.map((v, j) => {
+      const t = r.types[j];
+      const pill = t ? `<span class="saas-pill ${SAAS_TYPE_CLASS[t] || ''}">${escapeHtml(t)}</span>` : '';
+      return `<td class="num">${fmtMoney(v)}</td><td class="saas-type-col">${pill}</td>`;
+    }).join('');
+    return `<tr><td class="rownum">${i + 1}</td><td>${escapeHtml(r.property)}</td>`
+      + `<td class="saas-products" title="${escapeAttr(r.products.join(', '))}">${escapeHtml(r.products.join(', ') || '—')}</td>`
+      + `${cells}<td class="num">${fmtMoney(r.total)}</td></tr>`;
+  }).join('') : `<tr><td class="muted" colspan="${4 + idxs.length * 2}" style="padding:14px">No ${escapeHtml(category)} properties recognized in ${escapeHtml(state.saasQuarter)}.</td></tr>`;
+
+  if (rows.length) {
+    const monthTotals = idxs.map((_, j) => rows.reduce((a, r) => a + r.monthVals[j], 0));
+    const grand = rows.reduce((a, r) => a + r.total, 0);
+    const tcells = monthTotals.map((v) => `<td class="num">${fmtMoney(v)}</td><td class="saas-type-col"></td>`).join('');
+    $('#saasFoot').innerHTML = `<tr class="saas-total"><td class="rownum"></td><td>Total</td><td>${rows.length} propert${rows.length === 1 ? 'y' : 'ies'}</td>${tcells}<td class="num">${fmtMoney(grand)}</td></tr>`;
+  } else {
+    $('#saasFoot').innerHTML = '';
+  }
+  $('#saasCount').textContent = `${rows.length} ${category} propert${rows.length === 1 ? 'y' : 'ies'} · ${state.saasQuarter}`;
+}
+function wireSaas() {
+  $('#saasCategory').onchange = (e) => { state.saasCategory = e.target.value; renderSaas(); };
+  $('#saasQuarter').onchange = (e) => { state.saasQuarter = e.target.value; renderSaas(); };
+  const setZoom = (z) => { state.saasZoom = Math.min(2, Math.max(0.5, Math.round(z * 10) / 10)); localStorage.setItem('perqSaasZoom', String(state.saasZoom)); applySaasZoom(); };
+  $('#saasZoomOut').onclick = () => setZoom(state.saasZoom - 0.1);
+  $('#saasZoomIn').onclick = () => setZoom(state.saasZoom + 0.1);
+}
+
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireAssistant();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireAssistant(); wireSaas();
   applyZoom();
   $('#returnAdminBtn').onclick = returnToAdmin;
   if (state.token) {

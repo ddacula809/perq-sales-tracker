@@ -77,6 +77,7 @@
     <button class="tab" data-tab="bookings">Bookings</button>
     <button class="tab" data-tab="salessupport">Sales Support</button>
     <button class="tab" data-tab="churn">Churn Tracker</button>
+    <button class="tab" data-tab="saas" hidden>SaaS Financials</button>
     <button class="tab" data-tab="billing" hidden>Billing Dashboard</button>
     <button class="tab" data-tab="sfrecon" hidden>Salesforce Recon Data</button>
     <button class="tab" data-tab="legacy" hidden>Legacy</button>
@@ -195,6 +196,27 @@
     </div>
     <div class="sfrecon-scroller">
       <table id="legacyTable" class="arc-grid"><thead id="legacyHead"></thead><tbody id="legacyBody"></tbody></table>
+    </div>
+  </main>
+
+  <main class="sfrecon-view" id="saasView" hidden>
+    <div class="sfrecon-bar">
+      <label class="ss-period">Category
+        <select id="saasCategory">
+          <option value="Multifamily">Multifamily</option>
+          <option value="Digital Advertising">Digital Advertising</option>
+        </select>
+      </label>
+      <label class="ss-period">Quarter <select id="saasQuarter"></select></label>
+      <span class="sfrecon-count" id="saasCount"></span>
+      <div class="zoom" id="saasZoomGroup" title="Table size">
+        <button class="view-btn" id="saasZoomOut" aria-label="Smaller">&minus;</button>
+        <span id="saasZoomLevel">100%</span>
+        <button class="view-btn" id="saasZoomIn" aria-label="Larger">&plus;</button>
+      </div>
+    </div>
+    <div class="sfrecon-scroller">
+      <table id="saasTable" class="arc-grid"><thead id="saasHead"></thead><tbody id="saasBody"></tbody><tfoot id="saasFoot"></tfoot></table>
     </div>
   </main>
 
