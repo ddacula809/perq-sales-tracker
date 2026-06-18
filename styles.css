@@ -658,10 +658,13 @@ tr.ss-group td {
   margin-top: 8px; padding-top: 20px; border-top: 2px dashed var(--line-strong);
 }
 .property-remove { font-size: 15px; }
+.entry-add-property-row { display: flex; align-items: center; gap: 14px; margin: 4px 0 2px; flex-wrap: wrap; }
 .entry-add-property {
-  width: 100%; justify-content: center; border-style: dashed; border-color: var(--plum);
-  color: var(--plum); margin: 4px 0 2px; font-weight: 600;
+  flex: 1; min-width: 220px; justify-content: center; border-style: dashed; border-color: var(--plum);
+  color: var(--plum); font-weight: 600;
 }
+.mirror-products { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; cursor: pointer; }
+.mirror-products input { margin: 0; }
 /* Property subheader row inside the confirm summary table. */
 .confirm-table tr.confirm-prop td {
   background: var(--paper); font-weight: 700; color: var(--ink); font-size: 12px;

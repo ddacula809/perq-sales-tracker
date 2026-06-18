@@ -1757,6 +1757,23 @@ function addProductLine(block) {
   setProductOffsets(block);
   renumberProducts(block);
 }
+// Copy the product lines (Product / MRR / One-Time Fee / Offset) from one block into another.
+function mirrorProducts(src, dest) {
+  const destProducts = dest.querySelector('[data-products]');
+  destProducts.innerHTML = '';
+  for (const line of src.querySelectorAll('[data-products] [data-product]')) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = productLineHtml();
+    const newLine = tmp.firstElementChild;
+    line.querySelectorAll('[data-key]').forEach((ctl) => {
+      const target = newLine.querySelector(`[data-key="${ctl.dataset.key}"]`);
+      if (target) target.value = ctl.value;
+    });
+    destProducts.appendChild(newLine);
+  }
+  setProductOffsets(dest);
+  renumberProducts(dest);
+}
 
 // Show the "remove property" ✕ only when there's more than one property block.
 function renumberProperties() {
@@ -2049,7 +2066,10 @@ function wireOffsetReview() {
 function wireEntry() {
   $('#addPropertyBtn').onclick = () => {
     const blocks = [...$('#propertyBlocks').querySelectorAll('[data-block]')];
-    addPropertyBlock(blocks[blocks.length - 1] || null);
+    const last = blocks[blocks.length - 1] || null;
+    const block = addPropertyBlock(last);
+    // Optionally mirror the previous property's products + MRR into the new block.
+    if (last && $('#mirrorProducts').checked) mirrorProducts(last, block);
   };
   $('#submitEntriesBtn').onclick = submitEntries;
   // Confirm dialog: Confirm creates the rows; Cancel returns to the entry form unchanged.

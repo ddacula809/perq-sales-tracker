@@ -239,7 +239,10 @@
     <div class="entry-view-inner">
       <!-- One block per property; each has its own Booking details + Products. Built by app.js. -->
       <div id="propertyBlocks"></div>
-      <button type="button" class="btn ghost entry-add-property" id="addPropertyBtn">+ Add another property</button>
+      <div class="entry-add-property-row">
+        <button type="button" class="btn ghost entry-add-property" id="addPropertyBtn">+ Add another property</button>
+        <label class="mirror-products"><input type="checkbox" id="mirrorProducts" /> Same products &amp; MRR as the property above</label>
+      </div>
       <div class="entry-submit">
         <button type="button" class="btn solid" id="submitEntriesBtn">Submit bookings</button>
       </div>
