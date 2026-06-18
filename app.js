@@ -32,6 +32,7 @@ const state = {
   churnOwner: 'All',     // dashboard churn Account Owner filter (sales users default to their name)
   saasCategory: 'Multifamily', // SaaS Financials: Multifamily | Digital Advertising
   saasQuarter: '',       // SaaS Financials quarter label, e.g. 'Q1 2026' (defaults to current)
+  saasSub: 'data',       // SaaS Financials sub-tab: 'data' (MRR table) | 'dashboard' (tiles)
   saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
@@ -3376,6 +3377,12 @@ function wireAssistant() {
 function saasCategoryOf(b) {
   return String(b.bpr_prod_category || '').trim() === 'Digital Advertising' ? 'Digital Advertising' : 'Multifamily';
 }
+// Churn rows carry a product (not a computed category), so map the product to a category the
+// same way bprCategory does (Digital Advertising bucket = Google Search Management + SEO).
+const SAAS_DA_PRODUCTS = new Set(['Google Search Management', 'SEO']);
+function saasProductCategory(product) {
+  return SAAS_DA_PRODUCTS.has(String(product || '').trim()) ? 'Digital Advertising' : 'Multifamily';
+}
 // Absolute month index = year*12 + (month-1). From a 'YYYY-MM-DD' date or a 'Month Year' string.
 function monthIdxFromDate(d) {
   const m = String(d || '').match(/^(\d{4})-(\d{2})/);
@@ -3446,18 +3453,29 @@ function renderSaas() {
   $('#saasQuarter').innerHTML = qOpts.map((q) => `<option${q === state.saasQuarter ? ' selected' : ''}>${q}</option>`).join('') || '<option>—</option>';
   $('#saasCategory').value = state.saasCategory;
   applySaasZoom();
+  // Sub-tabs: "SaaS MRR Data" (the table) vs "SaaS Dashboard" (the tiles).
+  document.querySelectorAll('[data-saas-sub]').forEach((b) => b.classList.toggle('active', b.dataset.saasSub === state.saasSub));
+  const onData = state.saasSub !== 'dashboard';
+  $('#saasTableWrap').hidden = !onData;
+  $('#saasDashboard').hidden = onData;
+  $('#saasZoomGroup').style.display = onData ? '' : 'none';
+  $('#saasNote').style.display = onData ? '' : 'none';
 
   const { q, year } = parseQuarterLabel(state.saasQuarter);
   const idxs = [0, 1, 2].map((i) => year * 12 + (q - 1) * 3 + i);
   const category = state.saasCategory;
 
+  // Shared churn cache (used by both the dashboard tiles and the data table).
+  const churnCache = new Map();
+  const churnOf = (b) => { if (!churnCache.has(b.id)) churnCache.set(b.id, saasChurnFor(b)); return churnCache.get(b.id); };
+
+  if (!onData) { renderSaasDashboard(idxs, category, churnOf); return; }
+
   // Precompute, across ALL active bookings: each property's bookings + first go-live month,
-  // each PMC's first go-live month (for New Logo), and a churn cache.
+  // each PMC's first go-live month (for New Logo).
   const allByProp = new Map();
   const firstGoLive = new Map();   // property -> earliest go-live idx (any category)
   const pmcFirstGoLive = new Map(); // pmc -> earliest go-live idx (drives New Logo)
-  const churnCache = new Map();
-  const churnOf = (b) => { if (!churnCache.has(b.id)) churnCache.set(b.id, saasChurnFor(b)); return churnCache.get(b.id); };
   for (const b of state.rows.bookings) {
     const gi = monthIdxFromDate(b.golive_date);
     if (gi == null) continue;
@@ -3592,9 +3610,41 @@ function renderSaas() {
   $('#saasCount').textContent = `${rows.length} ${category} propert${rows.length === 1 ? 'y' : 'ies'} · ${state.saasQuarter}`;
   applyColWidths(); // re-apply any saved SaaS column widths to the freshly built table
 }
+// SaaS Dashboard sub-tab: monthly Recognized-MRR tiles + monthly Churn tiles for the quarter,
+// scoped to the selected category. Auto-filters to the current quarter via state.saasQuarter.
+function renderSaasDashboard(idxs, category, churnOf) {
+  // Recognized MRR per month: all category bookings (not-live contribute 0).
+  const mrrByMonth = idxs.map((idx) => state.rows.bookings.reduce(
+    (a, b) => (saasCategoryOf(b) === category ? a + saasBookingMonthMRR(b, churnOf(b), idx) : a), 0));
+  // Churn per month (Churn Tracker amounts; category by product; excludes Contraction).
+  const churnByMonth = idxs.map(() => 0);
+  for (const c of state.rows.churn) {
+    if (String(c.classification || '') === 'Contraction') continue;
+    if (saasProductCategory(c.product) !== category) continue;
+    const pIdx = monthIdxFromMonthYear(c.prorated_churn_month);
+    const fIdx = monthIdxFromMonthYear(c.final_churn_month);
+    idxs.forEach((idx, j) => {
+      if (pIdx === idx) churnByMonth[j] += Number(c.prorated_churn_amount) || 0;
+      if (fIdx === idx) churnByMonth[j] += Number(c.final_churn_amount) || 0;
+    });
+  }
+  const monthLabel = (idx) => `${MONTHS[idx % 12]} ${Math.floor(idx / 12)}`;
+  const tile = (label, val, accent) => `<div class="metric${accent ? ' accent' : ''}"><span class="k">${escapeHtml(label)}</span><span class="v">${fmtMoney(val)}</span></div>`;
+  const sum = (arr) => arr.reduce((a, v) => a + v, 0);
+  const mrrTiles = idxs.map((idx, j) => tile(monthLabel(idx), mrrByMonth[j])).join('') + tile(`${state.saasQuarter} Total`, sum(mrrByMonth), true);
+  const churnTiles = idxs.map((idx, j) => tile(monthLabel(idx), churnByMonth[j])).join('') + tile(`${state.saasQuarter} Total`, sum(churnByMonth), true);
+  $('#saasDashboard').innerHTML =
+    `<div class="metrics-title">${escapeHtml(category)} — Recognized MRR by Month</div><div class="metrics-row">${mrrTiles}</div>`
+    + `<div class="metrics-title">${escapeHtml(category)} — Churn by Month</div><div class="metrics-row">${churnTiles}</div>`;
+  $('#saasCount').textContent = `${category} · ${state.saasQuarter}`;
+}
+
 function wireSaas() {
   $('#saasCategory').onchange = (e) => { state.saasCategory = e.target.value; renderSaas(); };
   $('#saasQuarter').onchange = (e) => { state.saasQuarter = e.target.value; renderSaas(); };
+  document.querySelectorAll('[data-saas-sub]').forEach((b) => {
+    b.onclick = () => { state.saasSub = b.dataset.saasSub; renderSaas(); };
+  });
   const setZoom = (z) => { state.saasZoom = Math.min(2, Math.max(0.5, Math.round(z * 10) / 10)); localStorage.setItem('perqSaasZoom', String(state.saasZoom)); applySaasZoom(); };
   $('#saasZoomOut').onclick = () => setZoom(state.saasZoom - 0.1);
   $('#saasZoomIn').onclick = () => setZoom(state.saasZoom + 0.1);

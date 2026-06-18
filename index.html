@@ -201,6 +201,10 @@
 
   <main class="sfrecon-view" id="saasView" hidden>
     <div class="sfrecon-bar">
+      <div class="legacy-subtabs">
+        <button type="button" class="legacy-subtab active" data-saas-sub="data">SaaS MRR Data</button>
+        <button type="button" class="legacy-subtab" data-saas-sub="dashboard">SaaS Dashboard</button>
+      </div>
       <label class="ss-period">Category
         <select id="saasCategory">
           <option value="Multifamily">Multifamily</option>
@@ -220,9 +224,10 @@
       are based only on the data currently loaded. Once historical bookings/churn are imported, a property or PMC that
       looks new here may turn out to be existing — so these types can change (e.g. an “Expansion” or “Upsell” may really be a “New Logo”, or vice-versa).
     </div>
-    <div class="sfrecon-scroller">
+    <div class="sfrecon-scroller" id="saasTableWrap">
       <table id="saasTable" class="arc-grid"><thead id="saasHead"></thead><tbody id="saasBody"></tbody><tfoot id="saasFoot"></tfoot></table>
     </div>
+    <div class="saas-dashboard" id="saasDashboard" hidden></div>
   </main>
 
   <main class="entry-view" id="entryView" hidden>
