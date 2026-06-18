@@ -42,6 +42,7 @@ export const BOOKING_FIELDS = [
   { key: 'completed_by',                    label: 'Completed By',           excel: 37, type: 'select', options: ['', 'Brittany', 'Rose', 'Germaine'] },
   { key: 'completed_date',                  label: 'Completed Date',         excel: 38, type: 'date' },
   { key: 'sage_id',                         label: 'Sage ID',                excel: 39, type: 'text' },
+  { key: 'billing_notes',                   label: 'Billing Notes',          excel: 43, type: 'text' },
 ];
 
 // Computed booking fields (read-only). `excel` = column index for export.
@@ -159,7 +160,7 @@ export const SALESFORCE_RECON_FIELDS = [
 // the UI and to restrict what a "billing" role user is allowed to edit on the server.
 export const BOOKING_BILLING_KEYS = [
   'billing_trigger', 'recurring_billing_status', 'implementation_billing_status',
-  'completed_by', 'completed_date', 'sage_id',
+  'completed_by', 'completed_date', 'sage_id', 'billing_notes',
 ];
 export const CHURN_BILLING_KEYS = ['template_deleted', 'completed', 'notes'];
 

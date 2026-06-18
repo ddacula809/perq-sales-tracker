@@ -165,7 +165,7 @@ function parseMoney(v) {
 // Billing sections (per tab) — shown at the very end, after the computed columns, and
 // tinted blue. Keys are in the order they should appear.
 const BILLING_KEYS = {
-  bookings: new Set(['billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'sage_id']),
+  bookings: new Set(['billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'sage_id', 'billing_notes']),
   churn: new Set(['template_deleted', 'completed', 'notes']),
 };
 function isBilling(key) { return !!(BILLING_KEYS[state.tab] && BILLING_KEYS[state.tab].has(key)); }
@@ -742,7 +742,7 @@ function renderChurnDetail(quarterLabel) {
 }
 
 // ---------- Billing Dashboard (admin + billing) ----------
-const BD_BILLING = new Set(['billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'sage_id']);
+const BD_BILLING = new Set(['billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'sage_id', 'billing_notes']);
 // Who can edit a field in the drill-down: admin/standard all; billing = billing columns.
 function bdCanEdit(key) {
   const r = role();
@@ -751,7 +751,7 @@ function bdCanEdit(key) {
   return false;
 }
 const BD_DETAIL_KEYS = ['property_id', 'property_name', 'pmc', 'product', 'mrr', 'one_time_fee',
-  'billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'golive_date', 'sage_id'];
+  'billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'golive_date', 'sage_id', 'billing_notes'];
 // Columns shown in the Churn "For Immediate Action" drill-down (editable so billing can act).
 const CHURN_DETAIL_KEYS = ['property_id', 'property', 'product', 'mrr', 'last_date_under_contract',
   'template_deleted', 'completed', 'notes'];
