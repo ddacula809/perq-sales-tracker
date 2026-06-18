@@ -781,6 +781,7 @@ tr.ss-group td {
 .saas-pill.saas-upsell { background: var(--accent-soft); color: var(--accent-deep); }
 .saas-pill.saas-reactivation { background: var(--compute-bg); color: var(--compute-ink); }
 .saas-pill.saas-contraction { background: #ece4f0; color: #6a3a86; }
+.saas-pill.saas-downgrade { background: #fbe3cf; color: #9a4a10; }
 .saas-pill.saas-churn-pro { background: #fff0d6; color: #8a5a00; }
 .saas-pill.saas-churn { background: #fdecea; color: var(--neg); }
 .saas-pill[title] { cursor: help; }

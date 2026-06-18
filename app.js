@@ -3438,10 +3438,15 @@ function saasQuarterOptions() {
 }
 const SAAS_TYPE_CLASS = {
   'New Logo': 'saas-newlogo', Expansion: 'saas-expansion', Upsell: 'saas-upsell',
-  Reactivation: 'saas-reactivation', Contraction: 'saas-contraction',
+  Reactivation: 'saas-reactivation', Contraction: 'saas-contraction', Downgrade: 'saas-downgrade',
   'Churn prorated product': 'saas-churn-pro', 'Churn Product': 'saas-churn',
   'Churn Prorated Rooftop': 'saas-churn-pro', 'Churn Rooftop': 'saas-churn',
+  Churn: 'saas-churn',
 };
+// Granular churn-family types that roll up into the single "Churn" bucket (Unit Economics).
+const SAAS_CHURN_TYPES = new Set(['Churn prorated product', 'Churn Product',
+  'Churn Prorated Rooftop', 'Churn Rooftop', 'Downgrade']);
+function saasBucketOf(type) { return SAAS_CHURN_TYPES.has(type) ? 'Churn' : type; }
 function applySaasZoom() {
   $('#saasTable').style.zoom = state.saasZoom;
   $('#saasZoomLevel').textContent = Math.round(state.saasZoom * 100) + '%';
@@ -3503,6 +3508,7 @@ function renderSaas() {
       if (idx === firstGoLive.get(pid)) {
         return { type: pmcFirstGoLive.get(pmc) === idx ? 'New Logo' : 'Expansion', note: '' };
       }
+      if (goLives.some((b) => String(b.ctam_type || '').trim() === 'Downgrade')) return { type: 'Downgrade', note: '' };
       return { type: 'Upsell', note: '' };
     }
     // Churn drops: prorated (final invoice month) then full ($0) the next month.
@@ -3643,9 +3649,9 @@ function renderSaasDashboard(idxs, category, churnOf) {
   $('#saasCount').textContent = `${category} · ${state.saasQuarter}`;
 }
 
-// Order the MRR-type buckets appear in the Unit Economics Report.
-const SAAS_BUCKET_ORDER = ['New Logo', 'Expansion', 'Upsell', 'Reactivation', 'Contraction',
-  'Churn prorated product', 'Churn Product', 'Churn Prorated Rooftop', 'Churn Rooftop'];
+// Order the buckets appear in the Unit Economics Report. "Churn" rolls up the churn-family
+// types (prorated/full, product/rooftop) plus Downgrade.
+const SAAS_BUCKET_ORDER = ['New Logo', 'Expansion', 'Upsell', 'Reactivation', 'Contraction', 'Churn'];
 
 // Unit Economics Report sub-tab: one card per month of the quarter (like Churn Details).
 // Each month's table lists the type buckets (New Logo, Expansion, …) as groups, with
@@ -3665,6 +3671,7 @@ function renderSaasUnit(idxs, category, h) {
     if (gi != null && idxSet.has(gi)) {
       if (b.offset_churn_id) push('Reactivation', gi);
       else if (gi === firstGoLive.get(pid)) push(pmcFirstGoLive.get(String(b.pmc || '').trim().toLowerCase()) === gi ? 'New Logo' : 'Expansion', gi);
+      else if (String(b.ctam_type || '').trim() === 'Downgrade') push('Downgrade', gi); // goes in the Churn bucket
       else push('Upsell', gi);
     }
     // Churn (drop) events.
@@ -3685,12 +3692,13 @@ function renderSaasUnit(idxs, category, h) {
     if (!monthEvents.length) {
       body = '<tr><td class="muted" colspan="3" style="padding:10px">No activity this month.</td></tr>';
     } else {
-      const byType = new Map();
-      for (const e of monthEvents) { if (!byType.has(e.type)) byType.set(e.type, []); byType.get(e.type).push(e); }
-      body = SAAS_BUCKET_ORDER.filter((t) => byType.has(t)).map((t) => {
-        const list = byType.get(t).sort((a, b) => String(a.pmcProperty).localeCompare(b.pmcProperty));
+      // Group by bucket (Churn family rolls up into one "Churn" group).
+      const byBucket = new Map();
+      for (const e of monthEvents) { const bk = saasBucketOf(e.type); if (!byBucket.has(bk)) byBucket.set(bk, []); byBucket.get(bk).push(e); }
+      body = SAAS_BUCKET_ORDER.filter((bk) => byBucket.has(bk)).map((bk) => {
+        const list = byBucket.get(bk).sort((a, b) => String(a.pmcProperty).localeCompare(b.pmcProperty));
         const total = list.reduce((a, e) => a + e.mrr, 0);
-        const head = `<tr class="saas-unit-group"><td colspan="3"><span class="saas-pill ${SAAS_TYPE_CLASS[t] || ''}">${escapeHtml(t)}</span>`
+        const head = `<tr class="saas-unit-group"><td colspan="3"><span class="saas-pill ${SAAS_TYPE_CLASS[bk] || ''}">${escapeHtml(bk)}</span>`
           + `<span class="saas-unit-gcount">${list.length}</span><span class="saas-unit-gtotal">${fmtMoney(total)}</span></td></tr>`;
         const rows = list.map((e) =>
           `<tr><td class="saas-unit-prop" title="${escapeAttr(e.pmcProperty)}">${escapeHtml(e.pmcProperty)}</td>`
