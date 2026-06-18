@@ -3647,8 +3647,9 @@ function renderSaasDashboard(idxs, category, churnOf) {
 const SAAS_BUCKET_ORDER = ['New Logo', 'Expansion', 'Upsell', 'Reactivation', 'Contraction',
   'Churn prorated product', 'Churn Product', 'Churn Prorated Rooftop', 'Churn Rooftop'];
 
-// Unit Economics Report sub-tab: one bucket per MRR Type, listing the property + product +
-// month + MRR for every event of that type in the selected quarter & category.
+// Unit Economics Report sub-tab: one card per month of the quarter (like Churn Details).
+// Each month's table lists the type buckets (New Logo, Expansion, …) as groups, with
+// PMC - Property / Product / MRR rows. Long PMC - Property values truncate; scroll horizontally.
 function renderSaasUnit(idxs, category, h) {
   const { churnOf, firstGoLive, pmcFirstGoLive, propTotalAt } = h;
   const idxSet = new Set(idxs);
@@ -3656,54 +3657,53 @@ function renderSaasUnit(idxs, category, h) {
   for (const b of state.rows.bookings) {
     if (saasCategoryOf(b) !== category) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
-    const propName = b.property_only || b.property_name || b.property_id || '—';
+    const pmcProperty = b.property_name || b.property_id || '—'; // combined "PMC - Property"
     const mrr = Number(b.mrr) || 0;
+    const push = (type, monthIdx) => events.push({ type, pmcProperty, product: b.product || '—', monthIdx, mrr });
     // Go-live (add) event.
     const gi = monthIdxFromDate(b.golive_date);
     if (gi != null && idxSet.has(gi)) {
-      let type;
-      if (b.offset_churn_id) type = 'Reactivation';
-      else if (gi === firstGoLive.get(pid)) type = pmcFirstGoLive.get(String(b.pmc || '').trim().toLowerCase()) === gi ? 'New Logo' : 'Expansion';
-      else type = 'Upsell';
-      events.push({ type, property: propName, product: b.product || '—', monthIdx: gi, mrr });
+      if (b.offset_churn_id) push('Reactivation', gi);
+      else if (gi === firstGoLive.get(pid)) push(pmcFirstGoLive.get(String(b.pmc || '').trim().toLowerCase()) === gi ? 'New Logo' : 'Expansion', gi);
+      else push('Upsell', gi);
     }
     // Churn (drop) events.
     const c = churnOf(b);
     if (c) {
       const isContraction = String(c.classification || '') === 'Contraction';
       const pIdx = monthIdxFromMonthYear(c.final_invoice_month);
-      if (pIdx != null && idxSet.has(pIdx)) {
-        const type = isContraction ? 'Contraction' : (propTotalAt(pid, pIdx + 1) === 0 ? 'Churn Prorated Rooftop' : 'Churn prorated product');
-        events.push({ type, property: propName, product: b.product || '—', monthIdx: pIdx, mrr });
-      }
+      if (pIdx != null && idxSet.has(pIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, pIdx + 1) === 0 ? 'Churn Prorated Rooftop' : 'Churn prorated product'), pIdx);
       const fIdx = monthIdxFromMonthYear(c.final_churn_month);
-      if (fIdx != null && idxSet.has(fIdx)) {
-        const type = isContraction ? 'Contraction' : (propTotalAt(pid, fIdx) === 0 ? 'Churn Rooftop' : 'Churn Product');
-        events.push({ type, property: propName, product: b.product || '—', monthIdx: fIdx, mrr });
-      }
+      if (fIdx != null && idxSet.has(fIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, fIdx) === 0 ? 'Churn Rooftop' : 'Churn Product'), fIdx);
     }
   }
-  const byType = new Map();
-  for (const e of events) { if (!byType.has(e.type)) byType.set(e.type, []); byType.get(e.type).push(e); }
   const monthLabel = (idx) => `${MONTHS[idx % 12]} ${Math.floor(idx / 12)}`;
-  const buckets = SAAS_BUCKET_ORDER.filter((t) => byType.has(t));
-  let html = '';
-  if (!buckets.length) {
-    html = `<p class="muted" style="padding:14px">No MRR-type activity for ${escapeHtml(category)} in ${escapeHtml(state.saasQuarter)}.</p>`;
-  }
-  for (const t of buckets) {
-    const list = byType.get(t).sort((a, b) => (a.monthIdx - b.monthIdx) || String(a.property).localeCompare(b.property));
-    const total = list.reduce((a, e) => a + e.mrr, 0);
-    const rows = list.map((e) =>
-      `<tr><td>${escapeHtml(e.property)}</td><td>${escapeHtml(e.product)}</td><td>${escapeHtml(monthLabel(e.monthIdx))}</td><td class="num">${fmtMoney(e.mrr)}</td></tr>`).join('');
-    html += '<div class="saas-bucket">'
-      + `<div class="saas-bucket-head"><span class="saas-pill ${SAAS_TYPE_CLASS[t] || ''}">${escapeHtml(t)}</span>`
-      + `<span class="saas-bucket-count">${list.length} item${list.length === 1 ? '' : 's'}</span>`
-      + `<span class="saas-bucket-total">${fmtMoney(total)} MRR</span></div>`
-      + '<table class="arc-grid saas-bucket-table"><thead><tr><th>Property</th><th>Product</th><th>Month</th><th class="num">MRR</th></tr></thead>'
-      + `<tbody>${rows}</tbody></table></div>`;
-  }
-  $('#saasUnit').innerHTML = html;
+  // One card per month; inside, group rows by type bucket (in order).
+  const cards = idxs.map((mIdx) => {
+    const monthEvents = events.filter((e) => e.monthIdx === mIdx);
+    let body;
+    if (!monthEvents.length) {
+      body = '<tr><td class="muted" colspan="3" style="padding:10px">No activity this month.</td></tr>';
+    } else {
+      const byType = new Map();
+      for (const e of monthEvents) { if (!byType.has(e.type)) byType.set(e.type, []); byType.get(e.type).push(e); }
+      body = SAAS_BUCKET_ORDER.filter((t) => byType.has(t)).map((t) => {
+        const list = byType.get(t).sort((a, b) => String(a.pmcProperty).localeCompare(b.pmcProperty));
+        const total = list.reduce((a, e) => a + e.mrr, 0);
+        const head = `<tr class="saas-unit-group"><td colspan="3"><span class="saas-pill ${SAAS_TYPE_CLASS[t] || ''}">${escapeHtml(t)}</span>`
+          + `<span class="saas-unit-gcount">${list.length}</span><span class="saas-unit-gtotal">${fmtMoney(total)}</span></td></tr>`;
+        const rows = list.map((e) =>
+          `<tr><td class="saas-unit-prop" title="${escapeAttr(e.pmcProperty)}">${escapeHtml(e.pmcProperty)}</td>`
+          + `<td>${escapeHtml(e.product)}</td><td class="num">${fmtMoney(e.mrr)}</td></tr>`).join('');
+        return head + rows;
+      }).join('');
+    }
+    return '<div class="churn-detail-card"><div class="churn-detail-month">'
+      + `${escapeHtml(monthLabel(mIdx))} <span class="saas-unit-mcount">(${monthEvents.length})</span></div>`
+      + '<div class="churn-detail-scroll"><table><thead><tr><th>PMC - Property</th><th>Product</th><th class="num">MRR</th></tr></thead>'
+      + `<tbody>${body}</tbody></table></div></div>`;
+  }).join('');
+  $('#saasUnit').innerHTML = `<div class="churn-detail-grid">${cards}</div>`;
   $('#saasCount').textContent = `${category} · ${state.saasQuarter} · ${events.length} event${events.length === 1 ? '' : 's'}`;
 }
 
