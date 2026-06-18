@@ -223,7 +223,7 @@ async function attachChurnOwners(rows) {
   }));
 }
 
-function crud(table, computeFn, afterInsert) {
+function crud(table, computeFn, afterInsert, beforeInsert) {
   // Read: any authenticated user. Churn rows are enriched with their Account Owner (from Recon).
   app.get(`/api/${table}`, async (_req, res, next) => {
     try {
@@ -235,7 +235,14 @@ function crud(table, computeFn, afterInsert) {
   // Create / delete rows: admin or standard only.
   app.post(`/api/${table}`, requireRole('admin', 'standard'), async (req, res, next) => {
     try {
-      const row = await insertRow(table, req.body || {});
+      const body = req.body || {};
+      // beforeInsert may handle this as an update of an existing row (e.g. a Conversion that
+      // overrides its pilot booking) and return that row — then no new row is inserted.
+      if (beforeInsert) {
+        const replaced = await beforeInsert(body);
+        if (replaced) return res.json(withComputed(replaced, computeFn));
+      }
+      const row = await insertRow(table, body);
       const computed = withComputed(row, computeFn);
       // Optional side-effect after insert (e.g. auto-track a new booking in Sales Support).
       if (afterInsert) { try { await afterInsert(computed); } catch (e) { console.error('[afterInsert]', e.message); } }
@@ -330,7 +337,31 @@ async function onBookingCreated(b) {
   try { await autoTrackBookingInSalesSupport(b); } catch (e) { console.error('[autoTrack]', e.message); }
   try { await noteConversionBilling(b); } catch (e) { console.error('[conversionNote]', e.message); }
 }
-crud('bookings', computeBooking, onBookingCreated);
+// A Conversion booking should OVERRIDE the property's existing pilot booking (same Property ID +
+// Product) in place rather than create a duplicate. Recognition restarts at the conversion's
+// GoLive (cleared here; set it when the property actually converts/goes live). Returns the
+// updated row, or null if there's no matching pilot to convert (then it inserts normally).
+async function maybeConvertExisting(body) {
+  if (String(body.pilot_type || '').trim() !== 'Conversion') return null;
+  const norm = (v) => String(v ?? '').trim().toLowerCase();
+  const pid = norm(body.property_id);
+  const prod = norm(body.product);
+  if (!pid || !prod) return null;
+  const matches = (await listRows('bookings')).filter((b) =>
+    norm(b.property_id) === pid && norm(b.product) === prod
+    && String(b.pilot_or_ctam || '').trim() === 'Pilot' && String(b.pilot_type || '').trim() !== 'Conversion');
+  if (!matches.length) return null;
+  const target = matches[matches.length - 1]; // the most recent pilot for this property + product
+  const merged = { ...body, golive_date: null }; // recognized only once the conversion goes live
+  const existingNote = String(body.billing_notes || target.billing_notes || '').trim();
+  if (!/converted property/i.test(existingNote)) {
+    const when = String(body.date_signed || '').slice(0, 10);
+    const note = `Converted property${when ? ` (converted ${when})` : ''}`;
+    merged.billing_notes = existingNote ? `${existingNote} | ${note}` : note;
+  }
+  return updateRow('bookings', target.id, merged);
+}
+crud('bookings', computeBooking, onBookingCreated, maybeConvertExisting);
 crud('churn', computeChurn);
 
 // ---- License Transfer offset: a booking offsets a same-PMC, same-quarter churn ----
