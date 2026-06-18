@@ -3499,10 +3499,10 @@ function renderSaas() {
     return { type: '', note: '' };
   }
 
-  // Group active bookings of the selected category by property.
+  // Group ALL bookings of the selected category by property (live AND not-yet-live).
   const byProp = new Map();
   for (const b of state.rows.bookings) {
-    if (!b.golive_date || saasCategoryOf(b) !== category) continue;
+    if (saasCategoryOf(b) !== category) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
     if (!byProp.has(pid)) {
       byProp.set(pid, {
@@ -3516,17 +3516,31 @@ function renderSaas() {
     byProp.get(pid).bookings.push(b);
   }
 
+  // Current calendar month — for the "current MRR" snapshot (excludes products churned by now).
+  const nowD = new Date();
+  const nowIdx = nowD.getFullYear() * 12 + nowD.getMonth();
+
   const rows = [];
   for (const [pid, info] of byProp) {
+    const isLive = info.bookings.some((b) => b.golive_date);
     const monthVals = idxs.map((idx) => info.bookings.reduce((a, b) => a + saasBookingMonthMRR(b, churnOf(b), idx), 0));
     const typeObjs = idxs.map((idx) => saasTypeFor(pid, info.pmc, info.bookings, idx));
-    if (monthVals.every((v) => !v) && typeObjs.every((t) => !t.type)) continue; // no activity/event this quarter
+    // Live rows only show when they have activity/events in the viewed quarter; not-live rows
+    // (pipeline) always show, with their MRR sitting in the MRR column.
+    if (isLive && monthVals.every((v) => !v) && typeObjs.every((t) => !t.type)) continue;
     const products = [...new Set(info.bookings.map((b) => String(b.product || '').trim()).filter(Boolean))];
     const sageId = info.bookings.map((b) => String(b.sage_id || '').trim()).find(Boolean) || '';
     const goLive = info.bookings.map((b) => b.golive_date).filter(Boolean).sort()[0] || ''; // earliest go-live
+    // Current MRR = sum of products' MRR, excluding any fully churned as of this month.
+    const currentMrr = info.bookings.reduce((a, b) => {
+      const c = churnOf(b);
+      const fc = c ? monthIdxFromMonthYear(c.final_churn_month) : null;
+      return a + ((fc != null && nowIdx >= fc) ? 0 : (Number(b.mrr) || 0));
+    }, 0);
     rows.push({
       pmc: info.pmcDisplay, propertyId: info.property_id, property: info.property,
-      sageId, goLive, products, monthVals, types: typeObjs, total: monthVals.reduce((a, v) => a + v, 0),
+      sageId, goLive, isLive, status: isLive ? 'Active & Live' : 'Not Live', currentMrr,
+      products, monthVals, types: typeObjs, total: monthVals.reduce((a, v) => a + v, 0),
     });
   }
   rows.sort((a, b) => String(a.property).localeCompare(String(b.property)));
@@ -3539,7 +3553,7 @@ function renderSaas() {
   }).join('');
   const idHead = `<th data-col="pmc">PMC${RES}</th><th data-col="property_id">Property ID${RES}</th>`
     + `<th data-col="property">Property${RES}</th><th data-col="sage_id">Sage ID${RES}</th><th data-col="golive">GoLive Date${RES}</th>`
-    + `<th data-col="products">Products${RES}</th>`;
+    + `<th data-col="status">Status${RES}</th><th data-col="products">Products${RES}</th><th class="num" data-col="mrr">MRR${RES}</th>`;
   $('#saasHead').innerHTML = `<tr><th class="rownum">#</th>${idHead}${monthHead}<th class="num" data-col="qtotal">${escapeHtml(state.saasQuarter)} Total${RES}</th></tr>`;
 
   $('#saasBody').innerHTML = rows.length ? rows.map((r, i) => {
@@ -3550,24 +3564,28 @@ function renderSaas() {
         : '';
       return `<td class="num" data-col="m${j}">${fmtMoney(v)}</td><td class="saas-type-col" data-col="t${j}">${pill}</td>`;
     }).join('');
-    return `<tr><td class="rownum">${i + 1}</td>`
+    return `<tr class="${r.isLive ? '' : 'saas-notlive'}"><td class="rownum">${i + 1}</td>`
       + `<td data-col="pmc">${escapeHtml(r.pmc || '—')}</td>`
       + `<td data-col="property_id">${escapeHtml(r.propertyId || '—')}</td>`
       + `<td data-col="property">${escapeHtml(r.property)}</td>`
       + `<td data-col="sage_id">${escapeHtml(r.sageId || '—')}</td>`
       + `<td data-col="golive">${escapeHtml(r.goLive || '—')}</td>`
+      + `<td data-col="status"><span class="saas-status ${r.isLive ? 'saas-status-live' : 'saas-status-notlive'}">${escapeHtml(r.status)}</span></td>`
       + `<td class="saas-products" data-col="products" title="${escapeAttr(r.products.join(', '))}">${escapeHtml(r.products.join(', ') || '—')}</td>`
+      + `<td class="num" data-col="mrr">${fmtMoney(r.currentMrr)}</td>`
       + `${cells}<td class="num" data-col="qtotal">${fmtMoney(r.total)}</td></tr>`;
-  }).join('') : `<tr><td class="muted" colspan="${8 + idxs.length * 2}" style="padding:14px">No ${escapeHtml(category)} properties recognized in ${escapeHtml(state.saasQuarter)}.</td></tr>`;
+  }).join('') : `<tr><td class="muted" colspan="${10 + idxs.length * 2}" style="padding:14px">No ${escapeHtml(category)} properties in ${escapeHtml(state.saasQuarter)}.</td></tr>`;
 
   if (rows.length) {
     const monthTotals = idxs.map((_, j) => rows.reduce((a, r) => a + r.monthVals[j], 0));
     const grand = rows.reduce((a, r) => a + r.total, 0);
+    const mrrTotal = rows.reduce((a, r) => a + r.currentMrr, 0);
     const tcells = monthTotals.map((v, j) => `<td class="num" data-col="m${j}">${fmtMoney(v)}</td><td class="saas-type-col" data-col="t${j}"></td>`).join('');
     $('#saasFoot').innerHTML = `<tr class="saas-total"><td class="rownum"></td>`
       + '<td data-col="pmc"></td><td data-col="property_id"></td><td data-col="property">Total</td>'
-      + '<td data-col="sage_id"></td><td data-col="golive"></td>'
-      + `<td data-col="products">${rows.length} propert${rows.length === 1 ? 'y' : 'ies'}</td>${tcells}<td class="num" data-col="qtotal">${fmtMoney(grand)}</td></tr>`;
+      + '<td data-col="sage_id"></td><td data-col="golive"></td><td data-col="status"></td>'
+      + `<td data-col="products">${rows.length} propert${rows.length === 1 ? 'y' : 'ies'}</td>`
+      + `<td class="num" data-col="mrr">${fmtMoney(mrrTotal)}</td>${tcells}<td class="num" data-col="qtotal">${fmtMoney(grand)}</td></tr>`;
   } else {
     $('#saasFoot').innerHTML = '';
   }

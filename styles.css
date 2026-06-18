@@ -771,3 +771,8 @@ tr.ss-group td {
 .saas-pill.saas-churn { background: #fdecea; color: var(--neg); }
 .saas-pill[title] { cursor: help; }
 #saasTable tfoot td { position: sticky; bottom: 0; background: #efe9dc; font-weight: 800; border-top: 2px solid var(--line-strong); }
+/* Not-yet-live (pipeline) rows are tinted so they stand out from live/active ones. */
+#saasTable tbody tr.saas-notlive td { background: #f3ece1; color: var(--ink-soft); }
+.saas-status { display: inline-block; font-size: 10px; font-weight: 700; border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.saas-status.saas-status-live { background: #dcefe2; color: var(--ok); }
+.saas-status.saas-status-notlive { background: #efe0c7; color: #8a6d2f; }
