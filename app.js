@@ -3370,12 +3370,15 @@ function parseQuarterLabel(label) {
   return m ? { q: Number(m[1]), year: Number(m[2]) } : { q: 1, year: 2000 };
 }
 // The most recent real (non-Contraction) churn for a booking's property + product.
+// Most recent churn for a booking's property + product. Contractions ARE included here: a
+// contracted property's MRR still ends (it was offset by a license-transfer booking) — it's
+// just typed as "Contraction" rather than churn, and the offset booking reactivates the MRR.
 function saasChurnFor(b) {
   const pid = String(b.property_id || '').trim().toLowerCase();
   const prod = String(b.product || '').trim().toLowerCase();
   let best = null;
   for (const c of state.rows.churn) {
-    if (String(c.classification || '') === 'Contraction' || !c.last_date_under_contract) continue;
+    if (!c.last_date_under_contract) continue;
     if (String(c.property_id || '').trim().toLowerCase() !== pid) continue;
     if (String(c.product || '').trim().toLowerCase() !== prod) continue;
     if (!best || String(c.last_date_under_contract) > String(best.last_date_under_contract)) best = c;
@@ -3405,8 +3408,10 @@ function saasQuarterOptions() {
   return [...set].sort((a, b) => { const A = parseQuarterLabel(a); const B = parseQuarterLabel(b); return (A.year - B.year) || (A.q - B.q); });
 }
 const SAAS_TYPE_CLASS = {
-  Expansion: 'saas-expansion', Upsell: 'saas-upsell',
+  'New Logo': 'saas-newlogo', Expansion: 'saas-expansion', Upsell: 'saas-upsell',
+  Reactivation: 'saas-reactivation', Contraction: 'saas-contraction',
   'Churn prorated product': 'saas-churn-pro', 'Churn Product': 'saas-churn',
+  'Churn Prorated Rooftop': 'saas-churn-pro', 'Churn Rooftop': 'saas-churn',
 };
 function applySaasZoom() {
   $('#saasTable').style.zoom = state.saasZoom;
@@ -3425,13 +3430,52 @@ function renderSaas() {
   const idxs = [0, 1, 2].map((i) => year * 12 + (q - 1) * 3 + i);
   const category = state.saasCategory;
 
-  // Property's first-ever go-live month (any category) — drives Expansion vs Upsell.
-  const firstGoLive = new Map();
+  // Precompute, across ALL active bookings: each property's bookings + first go-live month,
+  // each PMC's first go-live month (for New Logo), and a churn cache.
+  const allByProp = new Map();
+  const firstGoLive = new Map();   // property -> earliest go-live idx (any category)
+  const pmcFirstGoLive = new Map(); // pmc -> earliest go-live idx (drives New Logo)
+  const churnCache = new Map();
+  const churnOf = (b) => { if (!churnCache.has(b.id)) churnCache.set(b.id, saasChurnFor(b)); return churnCache.get(b.id); };
   for (const b of state.rows.bookings) {
     const gi = monthIdxFromDate(b.golive_date);
     if (gi == null) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
+    if (!allByProp.has(pid)) allByProp.set(pid, []);
+    allByProp.get(pid).push(b);
     if (!firstGoLive.has(pid) || gi < firstGoLive.get(pid)) firstGoLive.set(pid, gi);
+    const pmc = String(b.pmc || '').trim().toLowerCase();
+    if (pmc && (!pmcFirstGoLive.has(pmc) || gi < pmcFirstGoLive.get(pmc))) pmcFirstGoLive.set(pmc, gi);
+  }
+  // The property's total recognized MRR across ALL categories in a month — for Rooftop checks.
+  const propTotalAt = (pid, idx) => (allByProp.get(pid) || []).reduce((a, b) => a + saasBookingMonthMRR(b, churnOf(b), idx), 0);
+
+  // MRR Type for a property+category row in absolute month `idx`. Returns { type, note }.
+  function saasTypeFor(pid, pmc, catBookings, idx) {
+    // Adds first: a product going live this month.
+    const goLives = catBookings.filter((b) => monthIdxFromDate(b.golive_date) === idx);
+    if (goLives.length) {
+      const off = goLives.find((b) => b.offset_churn_id);
+      if (off) return { type: 'Reactivation', note: String(off.notes || '') }; // offset/license-transfer booking
+      if (idx === firstGoLive.get(pid)) {
+        return { type: pmcFirstGoLive.get(pmc) === idx ? 'New Logo' : 'Expansion', note: '' };
+      }
+      return { type: 'Upsell', note: '' };
+    }
+    // Churn drops: prorated (final invoice month) then full ($0) the next month.
+    const proBk = catBookings.find((b) => { const c = churnOf(b); return c && monthIdxFromMonthYear(c.final_invoice_month) === idx; });
+    if (proBk) {
+      const c = churnOf(proBk);
+      if (String(c.classification || '') === 'Contraction') return { type: 'Contraction', note: String(c.notes || '') };
+      return { type: propTotalAt(pid, idx + 1) === 0 ? 'Churn Prorated Rooftop' : 'Churn prorated product', note: '' };
+    }
+    const fullBk = catBookings.find((b) => { const c = churnOf(b); return c && monthIdxFromMonthYear(c.final_churn_month) === idx; });
+    if (fullBk) {
+      const c = churnOf(fullBk);
+      if (String(c.classification || '') === 'Contraction') return { type: 'Contraction', note: String(c.notes || '') };
+      return { type: propTotalAt(pid, idx) === 0 ? 'Churn Rooftop' : 'Churn Product', note: '' };
+    }
+    return { type: '', note: '' };
   }
 
   // Group active bookings of the selected category by property.
@@ -3439,25 +3483,17 @@ function renderSaas() {
   for (const b of state.rows.bookings) {
     if (!b.golive_date || saasCategoryOf(b) !== category) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
-    if (!byProp.has(pid)) byProp.set(pid, { property: b.property_name || b.property_id || '—', bookings: [] });
+    if (!byProp.has(pid)) byProp.set(pid, { property: b.property_name || b.property_id || '—', pmc: String(b.pmc || '').trim().toLowerCase(), bookings: [] });
     byProp.get(pid).bookings.push(b);
   }
 
   const rows = [];
   for (const [pid, info] of byProp) {
-    const churns = info.bookings.map(saasChurnFor);
-    const monthVals = idxs.map((idx) => info.bookings.reduce((a, b, i) => a + saasBookingMonthMRR(b, churns[i], idx), 0));
-    const types = idxs.map((idx) => {
-      if (info.bookings.some((b) => monthIdxFromDate(b.golive_date) === idx)) {
-        return idx === firstGoLive.get(pid) ? 'Expansion' : 'Upsell';
-      }
-      if (info.bookings.some((b, i) => churns[i] && monthIdxFromMonthYear(churns[i].final_invoice_month) === idx)) return 'Churn prorated product';
-      if (info.bookings.some((b, i) => churns[i] && monthIdxFromMonthYear(churns[i].final_churn_month) === idx)) return 'Churn Product';
-      return '';
-    });
-    if (monthVals.every((v) => !v) && types.every((t) => !t)) continue; // no activity/event this quarter
+    const monthVals = idxs.map((idx) => info.bookings.reduce((a, b) => a + saasBookingMonthMRR(b, churnOf(b), idx), 0));
+    const typeObjs = idxs.map((idx) => saasTypeFor(pid, info.pmc, info.bookings, idx));
+    if (monthVals.every((v) => !v) && typeObjs.every((t) => !t.type)) continue; // no activity/event this quarter
     const products = [...new Set(info.bookings.map((b) => String(b.product || '').trim()).filter(Boolean))];
-    rows.push({ property: info.property, products, monthVals, types, total: monthVals.reduce((a, v) => a + v, 0) });
+    rows.push({ property: info.property, products, monthVals, types: typeObjs, total: monthVals.reduce((a, v) => a + v, 0) });
   }
   rows.sort((a, b) => String(a.property).localeCompare(String(b.property)));
 
@@ -3472,7 +3508,9 @@ function renderSaas() {
   $('#saasBody').innerHTML = rows.length ? rows.map((r, i) => {
     const cells = r.monthVals.map((v, j) => {
       const t = r.types[j];
-      const pill = t ? `<span class="saas-pill ${SAAS_TYPE_CLASS[t] || ''}">${escapeHtml(t)}</span>` : '';
+      const pill = t.type
+        ? `<span class="saas-pill ${SAAS_TYPE_CLASS[t.type] || ''}"${t.note ? ` title="${escapeAttr(t.note)}"` : ''}>${escapeHtml(t.type)}</span>`
+        : '';
       return `<td class="num" data-col="m${j}">${fmtMoney(v)}</td><td class="saas-type-col" data-col="t${j}">${pill}</td>`;
     }).join('');
     return `<tr><td class="rownum">${i + 1}</td><td data-col="property">${escapeHtml(r.property)}</td>`

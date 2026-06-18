@@ -756,8 +756,12 @@ tr.ss-group td {
 #saasTable .saas-type-col { text-align: center; white-space: nowrap; }
 #saasTable td.saas-products { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saas-pill { display: inline-block; font-size: 10px; font-weight: 700; border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.saas-pill.saas-newlogo { background: var(--plum-soft); color: var(--plum); }
 .saas-pill.saas-expansion { background: #dcefe2; color: var(--ok); }
 .saas-pill.saas-upsell { background: var(--accent-soft); color: var(--accent-deep); }
+.saas-pill.saas-reactivation { background: var(--compute-bg); color: var(--compute-ink); }
+.saas-pill.saas-contraction { background: #ece4f0; color: #6a3a86; }
 .saas-pill.saas-churn-pro { background: #fff0d6; color: #8a5a00; }
 .saas-pill.saas-churn { background: #fdecea; color: var(--neg); }
+.saas-pill[title] { cursor: help; }
 #saasTable tfoot td { position: sticky; bottom: 0; background: #efe9dc; font-weight: 800; border-top: 2px solid var(--line-strong); }
