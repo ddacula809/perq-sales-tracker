@@ -313,7 +313,24 @@ async function autoTrackBookingInSalesSupport(b) {
     worst: total, accurate: total, best: total, notes: '',
   });
 }
-crud('bookings', computeBooking, autoTrackBookingInSalesSupport);
+// When a Conversion booking is created (a pilot converting to paid), stamp its Billing Notes
+// so billing can see it's a converted property and when. The conversion is what's recognized
+// in SaaS Financials (pure pilots are excluded until then).
+async function noteConversionBilling(b) {
+  if (String(b.pilot_type || '').trim() !== 'Conversion') return;
+  const existing = String(b.billing_notes || '').trim();
+  if (/converted property/i.test(existing)) return; // already noted
+  const when = String(b.date_signed || b.golive_date || '').slice(0, 10);
+  const note = `Converted property${when ? ` (converted ${when})` : ''}`;
+  await updateRow('bookings', b.id, { billing_notes: existing ? `${existing} | ${note}` : note });
+}
+// After a booking is created: auto-track it in Sales Support and (if a conversion) note it.
+// Each is best-effort so one failing never blocks the booking or the other.
+async function onBookingCreated(b) {
+  try { await autoTrackBookingInSalesSupport(b); } catch (e) { console.error('[autoTrack]', e.message); }
+  try { await noteConversionBilling(b); } catch (e) { console.error('[conversionNote]', e.message); }
+}
+crud('bookings', computeBooking, onBookingCreated);
 crud('churn', computeChurn);
 
 // ---- License Transfer offset: a booking offsets a same-PMC, same-quarter churn ----

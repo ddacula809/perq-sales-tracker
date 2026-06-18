@@ -3424,6 +3424,14 @@ function wireAssistant() {
 function saasCategoryOf(b) {
   return String(b.bpr_prod_category || '').trim() === 'Digital Advertising' ? 'Digital Advertising' : 'Multifamily';
 }
+// Pure pilots (Pilot in "Pilot or CTAM" with any pilot type except Conversion) are NOT
+// recognized in SaaS Financials — even once live — until a Conversion booking comes in for
+// the same property/product. MRR is recognized only from that conversion.
+function saasRecognized(b) {
+  const poc = String(b.pilot_or_ctam || '').trim();
+  const pt = String(b.pilot_type || '').trim();
+  return !(poc === 'Pilot' && pt !== 'Conversion');
+}
 // Churn rows carry a product (not a computed category), so map the product to a category the
 // same way bprCategory does (Digital Advertising bucket = Google Search Management + SEO).
 const SAAS_DA_PRODUCTS = new Set(['Google Search Management', 'SEO']);
@@ -3530,6 +3538,7 @@ function renderSaas() {
   const firstGoLive = new Map();   // property -> earliest go-live idx (any category)
   const pmcFirstGoLive = new Map(); // pmc -> earliest go-live idx (drives New Logo)
   for (const b of state.rows.bookings) {
+    if (!saasRecognized(b)) continue; // pure pilots aren't recognized until converted
     const gi = monthIdxFromDate(b.golive_date);
     if (gi == null) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
@@ -3576,7 +3585,7 @@ function renderSaas() {
   // Group ALL bookings of the selected category by property (live AND not-yet-live).
   const byProp = new Map();
   for (const b of state.rows.bookings) {
-    if (saasCategoryOf(b) !== category) continue;
+    if (saasCategoryOf(b) !== category || !saasRecognized(b)) continue; // skip pure pilots
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
     if (!byProp.has(pid)) {
       byProp.set(pid, {
@@ -3669,9 +3678,9 @@ function renderSaas() {
 // SaaS Dashboard sub-tab: monthly Recognized-MRR tiles + monthly Churn tiles for the quarter,
 // scoped to the selected category. Auto-filters to the current quarter via state.saasQuarter.
 function renderSaasDashboard(idxs, category, churnOf) {
-  // Recognized MRR per month: all category bookings (not-live contribute 0).
+  // Recognized MRR per month: all category bookings except pure pilots (not-live contribute 0).
   const mrrByMonth = idxs.map((idx) => state.rows.bookings.reduce(
-    (a, b) => (saasCategoryOf(b) === category ? a + saasBookingMonthMRR(b, churnOf(b), idx) : a), 0));
+    (a, b) => ((saasCategoryOf(b) === category && saasRecognized(b)) ? a + saasBookingMonthMRR(b, churnOf(b), idx) : a), 0));
   // Churn per month (Churn Tracker amounts; category by product; excludes Contraction).
   const churnByMonth = idxs.map(() => 0);
   for (const c of state.rows.churn) {
@@ -3707,7 +3716,7 @@ function renderSaasUnit(idxs, category, h) {
   const idxSet = new Set(idxs);
   const events = [];
   for (const b of state.rows.bookings) {
-    if (saasCategoryOf(b) !== category) continue;
+    if (saasCategoryOf(b) !== category || !saasRecognized(b)) continue; // skip pure pilots
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
     const pmcProperty = b.property_name || b.property_id || '—'; // combined "PMC - Property"
     const mrr = Number(b.mrr) || 0;
