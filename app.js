@@ -3504,7 +3504,15 @@ function renderSaas() {
   for (const b of state.rows.bookings) {
     if (!b.golive_date || saasCategoryOf(b) !== category) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
-    if (!byProp.has(pid)) byProp.set(pid, { property: b.property_name || b.property_id || '—', pmc: String(b.pmc || '').trim().toLowerCase(), bookings: [] });
+    if (!byProp.has(pid)) {
+      byProp.set(pid, {
+        property: b.property_only || b.property_name || b.property_id || '—',
+        pmc: String(b.pmc || '').trim().toLowerCase(),
+        pmcDisplay: String(b.pmc || '').trim(),
+        property_id: String(b.property_id || '').trim(),
+        bookings: [],
+      });
+    }
     byProp.get(pid).bookings.push(b);
   }
 
@@ -3514,7 +3522,12 @@ function renderSaas() {
     const typeObjs = idxs.map((idx) => saasTypeFor(pid, info.pmc, info.bookings, idx));
     if (monthVals.every((v) => !v) && typeObjs.every((t) => !t.type)) continue; // no activity/event this quarter
     const products = [...new Set(info.bookings.map((b) => String(b.product || '').trim()).filter(Boolean))];
-    rows.push({ property: info.property, products, monthVals, types: typeObjs, total: monthVals.reduce((a, v) => a + v, 0) });
+    const sageId = info.bookings.map((b) => String(b.sage_id || '').trim()).find(Boolean) || '';
+    const goLive = info.bookings.map((b) => b.golive_date).filter(Boolean).sort()[0] || ''; // earliest go-live
+    rows.push({
+      pmc: info.pmcDisplay, propertyId: info.property_id, property: info.property,
+      sageId, goLive, products, monthVals, types: typeObjs, total: monthVals.reduce((a, v) => a + v, 0),
+    });
   }
   rows.sort((a, b) => String(a.property).localeCompare(String(b.property)));
 
@@ -3524,7 +3537,10 @@ function renderSaas() {
     const mi = idx % 12; const y = Math.floor(idx / 12);
     return `<th class="num" data-col="m${j}">${MONTHS[mi]} ${y}${RES}</th><th class="saas-type-col" data-col="t${j}">${MONTHS[mi][0]}${String(y).slice(2)} MRR Type${RES}</th>`;
   }).join('');
-  $('#saasHead').innerHTML = `<tr><th class="rownum">#</th><th data-col="property">Property${RES}</th><th data-col="products">Products${RES}</th>${monthHead}<th class="num" data-col="qtotal">${escapeHtml(state.saasQuarter)} Total${RES}</th></tr>`;
+  const idHead = `<th data-col="pmc">PMC${RES}</th><th data-col="property_id">Property ID${RES}</th>`
+    + `<th data-col="property">Property${RES}</th><th data-col="sage_id">Sage ID${RES}</th><th data-col="golive">GoLive Date${RES}</th>`
+    + `<th data-col="products">Products${RES}</th>`;
+  $('#saasHead').innerHTML = `<tr><th class="rownum">#</th>${idHead}${monthHead}<th class="num" data-col="qtotal">${escapeHtml(state.saasQuarter)} Total${RES}</th></tr>`;
 
   $('#saasBody').innerHTML = rows.length ? rows.map((r, i) => {
     const cells = r.monthVals.map((v, j) => {
@@ -3534,16 +3550,24 @@ function renderSaas() {
         : '';
       return `<td class="num" data-col="m${j}">${fmtMoney(v)}</td><td class="saas-type-col" data-col="t${j}">${pill}</td>`;
     }).join('');
-    return `<tr><td class="rownum">${i + 1}</td><td data-col="property">${escapeHtml(r.property)}</td>`
+    return `<tr><td class="rownum">${i + 1}</td>`
+      + `<td data-col="pmc">${escapeHtml(r.pmc || '—')}</td>`
+      + `<td data-col="property_id">${escapeHtml(r.propertyId || '—')}</td>`
+      + `<td data-col="property">${escapeHtml(r.property)}</td>`
+      + `<td data-col="sage_id">${escapeHtml(r.sageId || '—')}</td>`
+      + `<td data-col="golive">${escapeHtml(r.goLive || '—')}</td>`
       + `<td class="saas-products" data-col="products" title="${escapeAttr(r.products.join(', '))}">${escapeHtml(r.products.join(', ') || '—')}</td>`
       + `${cells}<td class="num" data-col="qtotal">${fmtMoney(r.total)}</td></tr>`;
-  }).join('') : `<tr><td class="muted" colspan="${4 + idxs.length * 2}" style="padding:14px">No ${escapeHtml(category)} properties recognized in ${escapeHtml(state.saasQuarter)}.</td></tr>`;
+  }).join('') : `<tr><td class="muted" colspan="${8 + idxs.length * 2}" style="padding:14px">No ${escapeHtml(category)} properties recognized in ${escapeHtml(state.saasQuarter)}.</td></tr>`;
 
   if (rows.length) {
     const monthTotals = idxs.map((_, j) => rows.reduce((a, r) => a + r.monthVals[j], 0));
     const grand = rows.reduce((a, r) => a + r.total, 0);
     const tcells = monthTotals.map((v, j) => `<td class="num" data-col="m${j}">${fmtMoney(v)}</td><td class="saas-type-col" data-col="t${j}"></td>`).join('');
-    $('#saasFoot').innerHTML = `<tr class="saas-total"><td class="rownum"></td><td data-col="property">Total</td><td data-col="products">${rows.length} propert${rows.length === 1 ? 'y' : 'ies'}</td>${tcells}<td class="num" data-col="qtotal">${fmtMoney(grand)}</td></tr>`;
+    $('#saasFoot').innerHTML = `<tr class="saas-total"><td class="rownum"></td>`
+      + '<td data-col="pmc"></td><td data-col="property_id"></td><td data-col="property">Total</td>'
+      + '<td data-col="sage_id"></td><td data-col="golive"></td>'
+      + `<td data-col="products">${rows.length} propert${rows.length === 1 ? 'y' : 'ies'}</td>${tcells}<td class="num" data-col="qtotal">${fmtMoney(grand)}</td></tr>`;
   } else {
     $('#saasFoot').innerHTML = '';
   }
