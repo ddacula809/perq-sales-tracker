@@ -197,6 +197,13 @@ export function parseGolives(buffer) {
   const header = (aoa[headerIdx] || []).map(normHeader);
   const colOf = {};
   for (const [l, k] of cols) colOf[k] = header.indexOf(normHeader(l));
+  // The GoLive date header varies between exports ("Go Live Date" vs "GoLive Date"); accept either.
+  if (colOf.golive_date < 0) {
+    for (const alt of ['GoLive Date', 'Golive Date', 'Go-Live Date', 'GoLive']) {
+      const i = header.indexOf(normHeader(alt));
+      if (i >= 0) { colOf.golive_date = i; break; }
+    }
+  }
   const out = [];
   for (let i = headerIdx + 1; i < aoa.length; i++) {
     const row = aoa[i] || [];
