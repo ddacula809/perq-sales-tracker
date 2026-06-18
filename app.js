@@ -1243,7 +1243,8 @@ function renderAll() {
   const isLegacy = state.tab === 'legacy';
   const isSaas = state.tab === 'saas';
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
-  $('#currentTab').textContent = TAB_LABELS[state.tab] || '';
+  // SaaS Financials shows its own title in its header row, so don't duplicate it up here.
+  $('#currentTab').textContent = isSaas ? '' : (TAB_LABELS[state.tab] || '');
   // Account / role-based controls.
   $('#importBtn').style.display = canImport() ? '' : 'none';
   $('#priorBookingsBtn').hidden = !canImport();
