@@ -1621,16 +1621,18 @@ const SHARED_KEYS = [
 // Per-product fields. Offset Amount only applies (and only shows) on License Transfers.
 const PRODUCT_KEYS = ['product', 'mrr', 'one_time_fee', 'offset_amount'];
 
-// Booking Month/Year default to the dataset's period and "stick" to the last value used.
-let entryDefaults = { booking_month: 'May', booking_year: '2026' };
+// Booking Month/Year default to the current month, then "stick" to the last value used.
+let entryDefaults = { booking_month: MONTHS[new Date().getMonth()], booking_year: String(new Date().getFullYear()) };
 
 // Fields a booking can't be submitted without (marked with * and enforced on submit).
-const REQUIRED_ENTRY_KEYS = new Set(['contract_term', 'booked_term', 'date_signed']);
+const REQUIRED_ENTRY_KEYS = new Set(['sales_rep', 'contract_term', 'booked_term', 'date_signed']);
 
 function entryFieldHtml(f) {
   let control;
   if (f.type === 'select') {
-    const opts = f.options.map((o) => `<option value="${escapeAttr(o)}">${o || '—'}</option>`).join('');
+    let opts = f.options.map((o) => `<option value="${escapeAttr(o)}">${o || '—'}</option>`).join('');
+    // Sales Rep starts blank (and is required) — prepend a blank, selected option.
+    if (f.key === 'sales_rep' && !f.options.includes('')) opts = '<option value="" selected>—</option>' + opts;
     control = `<select data-key="${f.key}">${opts}</select>`;
   } else {
     const inputType = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
