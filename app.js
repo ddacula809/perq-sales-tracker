@@ -1611,7 +1611,7 @@ async function doExport() {
 // Common booking details, entered once. Each product line below becomes its own booking.
 const SHARED_KEYS = [
   'booking_month', 'booking_year',
-  'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center',
+  'centralized', 'sales_rep', 'property_id', 'pmc', 'property_only', 'property_name', 'buying_center',
   'pilot_or_ctam', 'pilot_type', 'ctam_type', 'mql',
   'contract_term', 'booked_term', 'date_signed',
 ];
@@ -1632,7 +1632,9 @@ function entryFieldHtml(f) {
   } else {
     const inputType = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
     const step = f.type === 'number' ? ' step="any"' : '';
-    control = `<input type="${inputType}"${step} data-key="${f.key}" />`;
+    // PMC - Property is auto-combined from PMC + Property Name, so it's read-only.
+    const ro = f.key === 'property_name' ? ' readonly title="Auto-combined from PMC + Property Name"' : '';
+    control = `<input type="${inputType}"${step}${ro} data-key="${f.key}" />`;
   }
   const hidden = f.key === 'offset_amount' ? ' hidden' : '';
   const req = REQUIRED_ENTRY_KEYS.has(f.key) ? ' <span class="req">*</span>' : '';
@@ -1683,6 +1685,20 @@ function updatePilotCtam(block) {
   setProductOffsets(block); // CTAM Type may have changed → refresh product Offset visibility
 }
 
+// Combine PMC + Property Name into "PMC - Property Name" (either alone if the other is blank).
+function combinePmcProperty(pmc, prop) {
+  const a = String(pmc || '').trim();
+  const b = String(prop || '').trim();
+  return (a && b) ? `${a} - ${b}` : (b || a || '');
+}
+// Recompute a block's read-only "PMC - Property" field from its PMC + Property Name.
+function recomputeCombinedName(block) {
+  const pmc = block.querySelector('[data-shared] [data-key="pmc"]');
+  const prop = block.querySelector('[data-shared] [data-key="property_only"]');
+  const combined = block.querySelector('[data-shared] [data-key="property_name"]');
+  if (combined) combined.value = combinePmcProperty(pmc && pmc.value, prop && prop.value);
+}
+
 // Auto-fill Property Name + PMC (+ Sales Rep) for THIS block from the Salesforce Recon master
 // when the entered Property ID matches a Property ID 18 Digit there. Returns true if applied.
 function autofillFromSfRecon(block) {
@@ -1693,11 +1709,12 @@ function autofillFromSfRecon(block) {
   const match = (state.rows.salesforce_recon || []).find(
     (r) => String(r.property_id_18 || '').trim().toLowerCase() === pid);
   if (!match) return false;
-  const nameCtl = block.querySelector('[data-shared] [data-key="property_name"]');
+  const onlyCtl = block.querySelector('[data-shared] [data-key="property_only"]');
   const pmcCtl = block.querySelector('[data-shared] [data-key="pmc"]');
   const repCtl = block.querySelector('[data-shared] [data-key="sales_rep"]');
-  if (nameCtl) nameCtl.value = match.property_name || '';
+  if (onlyCtl) onlyCtl.value = match.property_name || ''; // recon Property: Name = just the name
   if (pmcCtl) pmcCtl.value = match.account_name || '';
+  recomputeCombinedName(block); // build the combined "PMC - Property"
   if (repCtl && match.account_owner) {
     if (![...repCtl.options].some((o) => o.value === match.account_owner)) {
       repCtl.add(new Option(match.account_owner, match.account_owner)); // ensure it's selectable
@@ -1754,8 +1771,9 @@ function addPropertyBlock(copyFrom) {
   $('#propertyBlocks').appendChild(block);
   if (copyFrom) {
     const vals = readShared(copyFrom);
-    delete vals.property_id; delete vals.property_name; // new property gets its own identity
+    delete vals.property_id; delete vals.property_name; delete vals.property_only; // new property's own identity
     fillShared(block, vals);
+    recomputeCombinedName(block); // reflect the (kept) PMC with the now-blank property name
   } else {
     fillShared(block, entryDefaults);
   }
@@ -2068,14 +2086,17 @@ function wireEntry() {
     if (!block) return;
     if (key === 'ctam_type') setProductOffsets(block);
     if (key === 'pilot_or_ctam') updatePilotCtam(block);
+    if (key === 'pmc' || key === 'property_only') recomputeCombinedName(block); // rebuild "PMC - Property"
     if (key === 'property_id' && autofillFromSfRecon(block)) toast('Property Name & PMC filled from Salesforce Recon');
   });
-  // Property ID: auto-fill Property Name + PMC as soon as a matching ID is entered/pasted.
+  // Live-update the combined name (and recon autofill) as PMC / Property Name / Property ID are typed.
   blocks.addEventListener('input', (e) => {
-    if (e.target.dataset && e.target.dataset.key === 'property_id') {
-      const block = e.target.closest('[data-block]');
-      if (block) autofillFromSfRecon(block);
-    }
+    const key = e.target.dataset && e.target.dataset.key;
+    if (!key) return;
+    const block = e.target.closest('[data-block]');
+    if (!block) return;
+    if (key === 'pmc' || key === 'property_only') recomputeCombinedName(block);
+    if (key === 'property_id') autofillFromSfRecon(block);
   });
   blocks.addEventListener('click', (e) => {
     const block = e.target.closest('[data-block]');

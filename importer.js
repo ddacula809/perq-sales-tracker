@@ -58,6 +58,17 @@ const CHURN_UPLOAD_COLS = [
 
 const normHeader = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
+// Derive the bare "Property Name" from a combined "PMC - Property Name" value: drop the PMC
+// prefix if present, else everything before the first " - ". Returns '' when nothing's there.
+export function propertyOnlyFrom(combined, pmc) {
+  const c = String(combined == null ? '' : combined).trim();
+  if (!c) return '';
+  const p = String(pmc == null ? '' : pmc).trim();
+  if (p && c.toLowerCase().startsWith(`${p.toLowerCase()} - `)) return c.slice(p.length + 3).trim();
+  const i = c.indexOf(' - ');
+  return i >= 0 ? c.slice(i + 3).trim() : c;
+}
+
 // Parse a churn report (.xlsx) into churn row objects. Reads the first sheet and locates
 // the header row by matching the expected labels, so column position/sheet name don't matter.
 export function parseChurnUpload(buffer) {
@@ -423,6 +434,8 @@ export function parseWorkbook(buffer) {
     for (const r of result.bookings) {
       if (r.booking_month === null || r.booking_month === '') r.booking_month = sheetMonth || null;
       if (r.booking_year === null || r.booking_year === '') r.booking_year = Number.isFinite(sheetYear) ? sheetYear : null;
+      // "Property Name" (property_only) = the combined "PMC - Property" minus the PMC prefix.
+      if (!r.property_only) r.property_only = propertyOnlyFrom(r.property_name, r.pmc);
     }
   }
 

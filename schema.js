@@ -9,7 +9,8 @@ export const BOOKING_FIELDS = [
   { key: 'centralized',                     label: 'Centralized',            excel: 0,  type: 'select', options: ['Centralized', 'Decentralized'] },
   { key: 'sales_rep',                       label: 'Sales Rep',              excel: 1,  type: 'select', options: ['Kathryn', 'Doug', 'House/CSM', 'Caleb', 'Kirk', 'Scott', 'Cindy', 'Michelle'] },
   { key: 'property_id',                     label: 'Property ID',            excel: 2,  type: 'text' },
-  { key: 'property_name',                   label: 'Property Name',          excel: 3,  type: 'text' },
+  { key: 'property_name',                   label: 'PMC - Property',         excel: 3,  type: 'text' }, // combined "PMC - Property Name"
+  { key: 'property_only',                   label: 'Property Name',          excel: 42, type: 'text' }, // just the property name
   { key: 'pmc',                             label: 'PMC',                    excel: 4,  type: 'text' },
   { key: 'buying_center',                   label: 'Buying Center',          excel: 5,  type: 'text' },
   { key: 'pilot_or_ctam',                   label: 'Pilot or CTAM',          excel: 6,  type: 'select', options: ['', 'Pilot', 'CTAM'] },

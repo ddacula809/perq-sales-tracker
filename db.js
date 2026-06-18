@@ -246,6 +246,20 @@ export async function initDb() {
   await runOnce('notif_dismissed_to_resolved_v1', async () => {
     await pool.query('UPDATE notifications SET resolved = true WHERE dismissed = true');
   });
+  // Backfill the new bare "Property Name" (property_only) from the combined "PMC - Property"
+  // value (property_name) by dropping the PMC prefix.
+  await runOnce('booking_property_only_v1', async () => {
+    const { rows } = await pool.query('SELECT id, property_name, pmc FROM bookings');
+    for (const b of rows) {
+      const c = String(b.property_name || '').trim();
+      if (!c) continue;
+      const p = String(b.pmc || '').trim();
+      let only = c;
+      if (p && c.toLowerCase().startsWith(`${p.toLowerCase()} - `)) only = c.slice(p.length + 3).trim();
+      else { const i = c.indexOf(' - '); if (i >= 0) only = c.slice(i + 3).trim(); }
+      await pool.query("UPDATE bookings SET property_only=$1 WHERE id=$2 AND (property_only IS NULL OR property_only='')", [only, b.id]);
+    }
+  });
   await ensureAdmin();
 }
 
