@@ -184,13 +184,22 @@ app.post('/api/chat', requireRole('admin', 'standard', 'billing'), async (req, r
 });
 
 // ---- Generic CRUD wired to both tables (with role-based authorization) ----
-// Manual edits to these date fields raise the same "For Immediate Action" notification
-// as the GoLives / Churn uploads do, so Billing sees the change either way.
-const WATCHED_EDIT = {
-  bookings: { key: 'golive_date', label: 'GoLive Date', name: (r) => r.property_name || r.property_id || `Booking #${r.id}` },
-  churn: { key: 'last_date_under_contract', label: 'Last Date Under Contract', name: (r) => r.property || r.property_id || `Churn #${r.id}` },
+// Manual edits to these fields raise the same "For Immediate Action" notification as the
+// GoLives / Churn uploads do, so Billing sees the change either way. MRR is watched too.
+const WATCHED_NAME = {
+  bookings: (r) => r.property_name || r.property_id || `Booking #${r.id}`,
+  churn: (r) => r.property || r.property_id || `Churn #${r.id}`,
 };
-const sameDate = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
+const WATCHED_FIELDS = {
+  bookings: [{ key: 'golive_date', label: 'GoLive Date' }, { key: 'mrr', label: 'MRR', money: true }],
+  churn: [{ key: 'last_date_under_contract', label: 'Last Date Under Contract' }, { key: 'mrr', label: 'MRR', money: true }],
+};
+const sameWatched = (a, b, money) => (money
+  ? (Number(a) || 0) === (Number(b) || 0)
+  : String(a ?? '').trim() === String(b ?? '').trim());
+const fmtWatched = (v, money) => (money
+  ? (v === null || v === undefined || v === '' ? '$0' : `$${Number(v).toLocaleString('en-US')}`)
+  : (v ? v : '(blank)'));
 
 // Attach an Account Owner to each churn row, looked up from the Salesforce Recon master
 // (churn has no owner column). Match by Property ID -> Property ID 18 Digit, falling back to
@@ -252,20 +261,20 @@ function crud(table, computeFn, afterInsert) {
         if (bad.length) return res.status(403).json({ error: 'Billing users can only edit the billing columns.' });
       }
       const id = Number(req.params.id);
-      // If this edit touches a watched date field, capture the old value first so we can
-      // tell whether it actually changed (and raise a notification for Billing if so).
-      const watch = WATCHED_EDIT[table];
-      let oldVal;
-      if (watch && Object.prototype.hasOwnProperty.call(req.body || {}, watch.key)) {
-        const prev = await pool.query(`SELECT ${watch.key} AS v FROM ${table} WHERE id=$1`, [id]);
-        oldVal = prev.rows[0] ? prev.rows[0].v : undefined;
+      // Capture old values of any watched fields touched by this edit, so we can tell whether
+      // they actually changed and raise a Billing notification (GoLive/Last Date and MRR).
+      const watched = (WATCHED_FIELDS[table] || []).filter((f) => Object.prototype.hasOwnProperty.call(req.body || {}, f.key));
+      const old = {};
+      for (const f of watched) {
+        const prev = await pool.query(`SELECT ${f.key} AS v FROM ${table} WHERE id=$1`, [id]);
+        old[f.key] = prev.rows[0] ? prev.rows[0].v : undefined;
       }
       const row = await updateRow(table, id, req.body || {});
       if (!row) return res.status(404).json({ error: 'Not found' });
-      if (watch && oldVal !== undefined && !sameDate(oldVal, row[watch.key])) {
-        const from = oldVal ? oldVal : '(blank)';
-        const to = row[watch.key] ? row[watch.key] : '(blank)';
-        await createNotification(table, row.id, `${watch.label} changed for ${watch.name(row)}: ${from} → ${to}`);
+      for (const f of watched) {
+        if (old[f.key] === undefined || sameWatched(old[f.key], row[f.key], f.money)) continue;
+        await createNotification(table, row.id,
+          `${f.label} changed for ${WATCHED_NAME[table](row)}: ${fmtWatched(old[f.key], f.money)} → ${fmtWatched(row[f.key], f.money)}`);
       }
       res.json(withComputed(row, computeFn));
     } catch (e) { next(e); }
@@ -673,8 +682,9 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
     const incoming = parseGolives(req.file.buffer);
     const bookings = await listRows('bookings');
     const norm = (v) => String(v ?? '').trim().toLowerCase();
-    const numKey = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : ''; };
-    const key = (r) => `${norm(r.property_id)}|${norm(r.product)}|${numKey(r.mrr)}`;
+    const toNum = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : null; };
+    // Match on Property ID + Product (not MRR) — the GoLives sheet is the source of truth for MRR.
+    const key = (r) => `${norm(r.property_id)}|${norm(r.product)}`;
     const byKey = new Map();
     for (const b of bookings) {
       const k = key(b);
@@ -685,37 +695,53 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
     let changed = 0;
     let unchanged = 0;
     let notFound = 0;
+    let mrrUpdated = 0;
     const changeLines = [];
+    const mrrLines = [];
     for (const row of incoming) {
       if (!row.golive_date) continue;
       const matches = byKey.get(key(row));
       if (!matches || !matches.length) { notFound += 1; continue; }
       const next = String(row.golive_date).slice(0, 10);
+      const sheetMrr = toNum(row.mrr);
       for (const b of matches) {
+        const who = b.property_name || b.property_id || 'a property';
+        const patch = {};
+        // GoLive date.
         const cur = b.golive_date ? String(b.golive_date).slice(0, 10) : '';
-        if (!cur) {
-          await updateRow('bookings', b.id, { golive_date: next });
-          updated += 1;
-        } else if (cur === next) {
-          unchanged += 1;
-        } else {
-          await updateRow('bookings', b.id, { golive_date: next });
-          const who = b.property_name || b.property_id || 'a property';
+        if (!cur) { patch.golive_date = next; updated += 1; }
+        else if (cur === next) { unchanged += 1; }
+        else {
+          patch.golive_date = next;
           const msg = `GoLive date changed for ${who} (${b.product || 'product'}) from ${cur} to ${next}`;
           await createNotification('bookings', b.id, msg);
           changeLines.push(msg);
           changed += 1;
         }
+        // MRR — update to the sheet's value when provided and different; notify billing on change.
+        if (sheetMrr !== null) {
+          const curMrr = toNum(b.mrr);
+          if (curMrr !== sheetMrr) {
+            patch.mrr = sheetMrr;
+            const money = (v) => (v === null || v === undefined ? '$0' : `$${Number(v).toLocaleString('en-US')}`);
+            const msg = `MRR changed for ${who} (${b.product || 'product'}) from ${money(curMrr)} to ${money(sheetMrr)}`;
+            await createNotification('bookings', b.id, msg);
+            mrrLines.push(msg);
+            mrrUpdated += 1;
+          }
+        }
+        if (Object.keys(patch).length) await updateRow('bookings', b.id, patch);
       }
     }
-    if (changeLines.length) {
+    const allLines = [...changeLines, ...mrrLines];
+    if (allLines.length) {
       sendEmail({
         to: await notifyEmails(),
-        subject: `PERQ: ${changeLines.length} GoLive date change${changeLines.length === 1 ? '' : 's'}`,
-        html: changeEmailHtml('GoLive date changes', 'The following GoLive dates were updated from a GoLives upload:', changeLines),
+        subject: `PERQ: ${allLines.length} booking change${allLines.length === 1 ? '' : 's'} from a GoLives upload`,
+        html: changeEmailHtml('Booking changes', 'The following GoLive dates / MRR values were updated from a GoLives upload:', allLines),
       });
     }
-    res.json({ updated, changed, unchanged, notFound, total: incoming.length });
+    res.json({ updated, changed, unchanged, notFound, mrrUpdated, total: incoming.length });
   } catch (e) { next(e); }
 });
 

@@ -995,7 +995,7 @@ function wireBilling() {
       const updated = await api(`/api/${tab}/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ [key]: ctl.value }) });
       updateRowInState(tab, updated);
       // Editing a watched date here raises a Billing alert -> reload so the tile/bell reflect it.
-      if ((key === 'golive_date' || key === 'last_date_under_contract') && (isAdmin() || role() === 'billing')) {
+      if ((key === 'golive_date' || key === 'last_date_under_contract' || key === 'mrr') && (isAdmin() || role() === 'billing')) {
         state.notifications = await api('/api/notifications');
         updateBell();
       }
@@ -1341,7 +1341,7 @@ function wireGrid() {
       }
       if (state.tab === 'bookings' || state.tab === 'churn') { renderSummary(); renderBookingTotals(currentRows(state.tab)); }
       // Editing a watched date (GoLive / Last Date Under Contract) raises a Billing alert.
-      if ((key === 'golive_date' || key === 'last_date_under_contract') && (isAdmin() || role() === 'billing')) {
+      if ((key === 'golive_date' || key === 'last_date_under_contract' || key === 'mrr') && (isAdmin() || role() === 'billing')) {
         state.notifications = await api('/api/notifications');
         updateBell();
       }
@@ -1559,9 +1559,10 @@ function wireActions() {
       showResult('GoLives upload complete',
         '<ul class="result-list">'
         + `<li><strong>${data.updated}</strong> GoLive date(s) set (were blank)</li>`
-        + `<li><strong>${data.changed}</strong> changed (billing notified)</li>`
+        + `<li><strong>${data.changed}</strong> GoLive date(s) changed (billing notified)</li>`
         + `<li><strong>${data.unchanged}</strong> unchanged (same date)</li>`
-        + `<li><strong>${data.notFound}</strong> not found in Bookings (Property ID + Product + MRR)</li>`
+        + `<li><strong>${data.mrrUpdated || 0}</strong> MRR value(s) updated from the sheet (billing notified)</li>`
+        + `<li><strong>${data.notFound}</strong> not found in Bookings (matched by Property ID + Product)</li>`
         + `<li class="muted">${data.total} row(s) in the file</li>`
         + '</ul>');
     } catch (err) { toast(err.message, true); }
