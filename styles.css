@@ -752,7 +752,16 @@ tr.ss-group td {
 .ai-form .btn:disabled { opacity: .5; cursor: default; }
 
 /* ---------- SaaS Financials ---------- */
+.saas-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 14px 0; flex-shrink: 0; }
+.saas-title { font-weight: 700; font-size: 15px; color: var(--ink); }
 .saas-dashboard { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px; }
+/* Unit Economics Report buckets */
+.saas-bucket { margin-bottom: 18px; }
+.saas-bucket-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.saas-bucket-head .saas-pill { font-size: 12px; padding: 2px 9px; }
+.saas-bucket-count { color: var(--ink-soft); font-size: 12px; }
+.saas-bucket-total { margin-left: auto; font-weight: 700; font-family: 'Fira Mono', monospace; font-size: 13px; }
+.saas-bucket-table { width: 100%; }
 .saas-dashboard[hidden] { display: none; }
 .saas-dashboard .metrics-title { margin-top: 14px; }
 .saas-dashboard .metrics-title:first-child { margin-top: 0; }

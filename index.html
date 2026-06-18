@@ -200,11 +200,15 @@
   </main>
 
   <main class="sfrecon-view" id="saasView" hidden>
-    <div class="sfrecon-bar">
+    <div class="saas-header">
+      <span class="saas-title">SaaS Financials</span>
       <div class="legacy-subtabs">
         <button type="button" class="legacy-subtab active" data-saas-sub="data">SaaS MRR Data</button>
         <button type="button" class="legacy-subtab" data-saas-sub="dashboard">SaaS Dashboard</button>
+        <button type="button" class="legacy-subtab" data-saas-sub="unit">Unit Economics Report</button>
       </div>
+    </div>
+    <div class="sfrecon-bar">
       <label class="ss-period">Category
         <select id="saasCategory">
           <option value="Multifamily">Multifamily</option>
@@ -228,6 +232,7 @@
       <table id="saasTable" class="arc-grid"><thead id="saasHead"></thead><tbody id="saasBody"></tbody><tfoot id="saasFoot"></tfoot></table>
     </div>
     <div class="saas-dashboard" id="saasDashboard" hidden></div>
+    <div class="saas-dashboard" id="saasUnit" hidden></div>
   </main>
 
   <main class="entry-view" id="entryView" hidden>
