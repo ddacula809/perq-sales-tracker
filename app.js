@@ -1949,10 +1949,30 @@ async function renderConfirm() {
   $('#confirmSummary').innerHTML = html;
 }
 
+// Submit progress bar (the confirm dialog can take a while for many line items).
+function setSubmitProgress(done, total, finishing) {
+  const pct = total ? Math.round((done / total) * 100) : 100;
+  $('#submitProgressBar').style.width = `${pct}%`;
+  $('#submitProgressLabel').textContent = finishing ? 'Finishing…' : `Submitting ${done} of ${total} (${pct}%)`;
+}
+function startSubmitProgress(total) {
+  $('#submitProgress').hidden = false;
+  setSubmitProgress(0, total);
+  $('#confirmSubmit').disabled = true; $('#confirmSubmit').textContent = 'Submitting…';
+  $('#confirmCancel').disabled = true;
+}
+function endSubmitProgress() {
+  $('#submitProgress').hidden = true;
+  $('#submitProgressBar').style.width = '0%';
+  $('#confirmSubmit').disabled = false; $('#confirmSubmit').textContent = 'Confirm & submit';
+  $('#confirmCancel').disabled = false;
+}
+
 async function confirmBookings() {
   const base = state.pendingBookings || [];
   const offsets = state.pendingOffsets || [];
   if (!base.length) { $('#confirmModal').hidden = true; return; }
+  startSubmitProgress(base.length);
   try {
     let added = 0;
     let offsetCount = 0;
@@ -1967,7 +1987,9 @@ async function confirmBookings() {
         offsetCount += 1;
       }
       added += 1;
+      setSubmitProgress(added, base.length);
     }
+    setSubmitProgress(base.length, base.length, true); // reloading the data
     // Reload so the offset bookings, contracted churns, and any auto-created Sales Support
     // rows are reflected everywhere.
     state.rows.bookings = await api('/api/bookings');
@@ -1982,6 +2004,7 @@ async function confirmBookings() {
     toast(`Added ${added} line item${added === 1 ? '' : 's'}${offsetCount ? `, ${offsetCount} offset` : ''}`);
     resetEntryView();
   } catch (err) { toast(err.message, true); }
+  finally { endSubmitProgress(); }
 }
 
 // ---------- License Transfer offset review (existing bookings) ----------

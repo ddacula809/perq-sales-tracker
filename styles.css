@@ -650,6 +650,12 @@ tr.ss-group td {
 .product-line .entry-remove { padding-bottom: 9px; }
 
 .entry-add { width: 100%; justify-content: center; border-style: dashed; margin-top: 4px; }
+/* Submit progress bar in the confirm dialog. */
+.submit-progress { margin: 12px 0 4px; }
+.submit-progress[hidden] { display: none; }
+.submit-progress-track { height: 10px; background: var(--line); border-radius: 6px; overflow: hidden; }
+.submit-progress-bar { height: 100%; width: 0; background: var(--plum); transition: width .2s ease; }
+.submit-progress-label { display: block; margin-top: 6px; font-size: 12px; color: var(--ink-soft); text-align: center; }
 .entry-submit { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
 .entry-submit .btn { width: 100%; justify-content: center; font-size: 13px; padding: 11px; }
 /* Multiple property blocks: a subtle group divider + label, and the per-property controls. */
