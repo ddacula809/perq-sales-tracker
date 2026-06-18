@@ -3549,7 +3549,7 @@ function renderSaas() {
   const RES = '<span class="col-resize"></span>';
   const monthHead = idxs.map((idx, j) => {
     const mi = idx % 12; const y = Math.floor(idx / 12);
-    return `<th class="num" data-col="m${j}">${MONTHS[mi]} ${y}${RES}</th><th class="saas-type-col" data-col="t${j}">${MONTHS[mi][0]}${String(y).slice(2)} MRR Type${RES}</th>`;
+    return `<th class="num" data-col="m${j}">${MONTHS[mi]} ${y}${RES}</th><th class="saas-type-col" data-col="t${j}">${MONTHS[mi].slice(0, 3)}${String(y).slice(2)} Type${RES}</th>`;
   }).join('');
   const idHead = `<th data-col="pmc">PMC${RES}</th><th data-col="property_id">Property ID${RES}</th>`
     + `<th data-col="property">Property${RES}</th><th data-col="sage_id">Sage ID${RES}</th><th data-col="golive">GoLive Date${RES}</th>`
