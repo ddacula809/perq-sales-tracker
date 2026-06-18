@@ -2835,6 +2835,7 @@ function colWidthScope() { return state.tab === 'legacy' ? `legacy_${state.legac
 function colWidthTableSel() {
   if (state.tab === 'salessupport') return '#ssTable';
   if (state.tab === 'legacy') return '#legacyTable';
+  if (state.tab === 'saas') return '#saasTable';
   return '#grid';
 }
 function applyColWidths() {
@@ -2953,7 +2954,10 @@ function wireResize() {
     e.preventDefault();
     const churnDetail = !!th.closest('.churn-detail-card');
     const billingDetail = !churnDetail && !!th.closest('.bd-detail');
-    const zoom = (churnDetail || billingDetail) ? 1 : (state.tab === 'legacy' ? (state.legacyZoom || 1) : (state.zoom || 1));
+    const zoom = (churnDetail || billingDetail) ? 1
+      : state.tab === 'legacy' ? (state.legacyZoom || 1)
+        : state.tab === 'saas' ? (state.saasZoom || 1)
+          : (state.zoom || 1);
     active = { key: th.dataset.col, startX: e.clientX, startW: th.getBoundingClientRect().width / zoom, zoom, churnDetail, billingDetail };
     document.body.style.cursor = 'col-resize';
   });
@@ -3457,32 +3461,35 @@ function renderSaas() {
   }
   rows.sort((a, b) => String(a.property).localeCompare(String(b.property)));
 
-  const monthHead = idxs.map((idx) => {
+  // Columns carry data-col (position-based so widths persist across quarters) + resize handles.
+  const RES = '<span class="col-resize"></span>';
+  const monthHead = idxs.map((idx, j) => {
     const mi = idx % 12; const y = Math.floor(idx / 12);
-    return `<th class="num">${MONTHS[mi]} ${y}</th><th class="saas-type-col">${MONTHS[mi][0]}${String(y).slice(2)} MRR Type</th>`;
+    return `<th class="num" data-col="m${j}">${MONTHS[mi]} ${y}${RES}</th><th class="saas-type-col" data-col="t${j}">${MONTHS[mi][0]}${String(y).slice(2)} MRR Type${RES}</th>`;
   }).join('');
-  $('#saasHead').innerHTML = `<tr><th class="rownum">#</th><th>Property</th><th>Products</th>${monthHead}<th class="num">${escapeHtml(state.saasQuarter)} Total</th></tr>`;
+  $('#saasHead').innerHTML = `<tr><th class="rownum">#</th><th data-col="property">Property${RES}</th><th data-col="products">Products${RES}</th>${monthHead}<th class="num" data-col="qtotal">${escapeHtml(state.saasQuarter)} Total${RES}</th></tr>`;
 
   $('#saasBody').innerHTML = rows.length ? rows.map((r, i) => {
     const cells = r.monthVals.map((v, j) => {
       const t = r.types[j];
       const pill = t ? `<span class="saas-pill ${SAAS_TYPE_CLASS[t] || ''}">${escapeHtml(t)}</span>` : '';
-      return `<td class="num">${fmtMoney(v)}</td><td class="saas-type-col">${pill}</td>`;
+      return `<td class="num" data-col="m${j}">${fmtMoney(v)}</td><td class="saas-type-col" data-col="t${j}">${pill}</td>`;
     }).join('');
-    return `<tr><td class="rownum">${i + 1}</td><td>${escapeHtml(r.property)}</td>`
-      + `<td class="saas-products" title="${escapeAttr(r.products.join(', '))}">${escapeHtml(r.products.join(', ') || '—')}</td>`
-      + `${cells}<td class="num">${fmtMoney(r.total)}</td></tr>`;
+    return `<tr><td class="rownum">${i + 1}</td><td data-col="property">${escapeHtml(r.property)}</td>`
+      + `<td class="saas-products" data-col="products" title="${escapeAttr(r.products.join(', '))}">${escapeHtml(r.products.join(', ') || '—')}</td>`
+      + `${cells}<td class="num" data-col="qtotal">${fmtMoney(r.total)}</td></tr>`;
   }).join('') : `<tr><td class="muted" colspan="${4 + idxs.length * 2}" style="padding:14px">No ${escapeHtml(category)} properties recognized in ${escapeHtml(state.saasQuarter)}.</td></tr>`;
 
   if (rows.length) {
     const monthTotals = idxs.map((_, j) => rows.reduce((a, r) => a + r.monthVals[j], 0));
     const grand = rows.reduce((a, r) => a + r.total, 0);
-    const tcells = monthTotals.map((v) => `<td class="num">${fmtMoney(v)}</td><td class="saas-type-col"></td>`).join('');
-    $('#saasFoot').innerHTML = `<tr class="saas-total"><td class="rownum"></td><td>Total</td><td>${rows.length} propert${rows.length === 1 ? 'y' : 'ies'}</td>${tcells}<td class="num">${fmtMoney(grand)}</td></tr>`;
+    const tcells = monthTotals.map((v, j) => `<td class="num" data-col="m${j}">${fmtMoney(v)}</td><td class="saas-type-col" data-col="t${j}"></td>`).join('');
+    $('#saasFoot').innerHTML = `<tr class="saas-total"><td class="rownum"></td><td data-col="property">Total</td><td data-col="products">${rows.length} propert${rows.length === 1 ? 'y' : 'ies'}</td>${tcells}<td class="num" data-col="qtotal">${fmtMoney(grand)}</td></tr>`;
   } else {
     $('#saasFoot').innerHTML = '';
   }
   $('#saasCount').textContent = `${rows.length} ${category} propert${rows.length === 1 ? 'y' : 'ies'} · ${state.saasQuarter}`;
+  applyColWidths(); // re-apply any saved SaaS column widths to the freshly built table
 }
 function wireSaas() {
   $('#saasCategory').onchange = (e) => { state.saasCategory = e.target.value; renderSaas(); };
