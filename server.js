@@ -377,43 +377,81 @@ const appendNote = (existing, addition) => {
   if (!addition || cur.includes(addition)) return cur;
   return cur ? `${cur} | ${addition}` : addition;
 };
+const usd = (v) => (v === null || v === undefined ? '$0' : `$${Number(v).toLocaleString('en-US')}`);
+// Apply one OR MANY churns to a single License Transfer booking. The booking's total offset is
+// the sum of the amounts used. Each churn that is fully used is reclassified as a Contraction
+// (and so excluded from churn totals). A churn only partially used is SPLIT: the original line
+// becomes the used (Contraction) portion and a NEW churn line carries the remaining real churn,
+// each annotated so billing won't double-count.
 app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (req, res, next) => {
   try {
-    const { bookingId, churnId, offsetAmount } = req.body || {};
-    const booking = (await pool.query('SELECT * FROM bookings WHERE id=$1', [Number(bookingId)])).rows[0];
-    const churn = (await pool.query('SELECT * FROM churn WHERE id=$1', [Number(churnId)])).rows[0];
-    if (!booking || !churn) return res.status(404).json({ error: 'Booking or churn not found.' });
-    if (norm(booking.pmc) !== norm(churn.pmc_buying_center)) {
-      return res.status(400).json({ error: 'The booking and churn are under different PMCs.' });
-    }
-    if (String(churn.classification || '') === 'Contraction') {
-      return res.status(400).json({ error: 'That churn has already been used to offset a booking.' });
-    }
-    // A churn's quarter is when its full drop is recognized (Final Churn Month). Allow the
-    // booking to be offset by a churn in the same quarter or a future one (never a past one).
-    const cQ = quarterFromMonthYear(computeChurn(churn).final_churn_month);
-    const bQ = quarterFromMonthName(booking.booking_month, booking.booking_year);
-    if (!cQ || !bQ) return res.status(400).json({ error: 'Could not determine the quarter of the booking or churn.' });
-    if (((cQ.year - bQ.year) * 4 + (cQ.q - bQ.q)) < 0) {
-      return res.status(400).json({ error: 'That churn is in a quarter before the booking.' });
-    }
-    const amt = Number(String(offsetAmount ?? '').replace(/[$,]/g, ''));
-    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'Enter a valid offset amount.' });
+    const body = req.body || {};
+    // Accept the new list shape, or the legacy single-churn shape.
+    let offsets = Array.isArray(body.offsets) ? body.offsets
+      : (body.churnId ? [{ churnId: body.churnId, amount: body.offsetAmount }] : []);
+    offsets = offsets
+      .map((o) => ({ churnId: Number(o.churnId), amount: Number(String(o.amount ?? '').replace(/[$,]/g, '')) }))
+      .filter((o) => o.churnId && Number.isFinite(o.amount) && o.amount > 0);
+    if (!offsets.length) return res.status(400).json({ error: 'Select at least one churn to offset, with a valid amount.' });
 
-    const churnProp = churn.property || churn.pmc_buying_center || 'churned property';
+    const booking = (await pool.query('SELECT * FROM bookings WHERE id=$1', [Number(body.bookingId)])).rows[0];
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    const bQ = quarterFromMonthName(booking.booking_month, booking.booking_year);
+    if (!bQ) return res.status(400).json({ error: 'Could not determine the quarter of the booking.' });
     const bookingProp = booking.property_name || booking.property_id || 'booking';
-    const bNote = appendNote(booking.notes, `Offset by ${churnProp} (License Transfer)`);
+    const bookingPeriod = `${booking.booking_month || ''} ${booking.booking_year || ''}`.trim();
+
+    // Validate EVERY churn before mutating anything (PMC, quarter, not already used).
+    const work = [];
+    for (const o of offsets) {
+      const churn = (await pool.query('SELECT * FROM churn WHERE id=$1', [o.churnId])).rows[0];
+      if (!churn) return res.status(404).json({ error: 'A selected churn was not found.' });
+      if (norm(booking.pmc) !== norm(churn.pmc_buying_center)) {
+        return res.status(400).json({ error: 'A selected churn is under a different PMC than the booking.' });
+      }
+      if (String(churn.classification || '') === 'Contraction') {
+        return res.status(400).json({ error: 'A selected churn has already been used to offset a booking.' });
+      }
+      const cQ = quarterFromMonthYear(computeChurn(churn).final_churn_month);
+      if (!cQ) return res.status(400).json({ error: 'Could not determine the quarter of a selected churn.' });
+      if (((cQ.year - bQ.year) * 4 + (cQ.q - bQ.q)) < 0) {
+        return res.status(400).json({ error: 'A selected churn is in a quarter before the booking.' });
+      }
+      work.push({ churn, amount: o.amount });
+    }
+
+    const labels = [];
+    let total = 0;
+    for (const { churn, amount } of work) {
+      const sign = (Number(churn.mrr) || 0) < 0 ? -1 : 1;
+      const drop = Math.abs(Number(churn.mrr) || 0);
+      const used = Math.min(amount, drop);
+      total += used;
+      const churnProp = churn.property || churn.pmc_buying_center || 'churned property';
+      labels.push(`${churnProp} (${usd(used)})`);
+      if (used >= drop - 0.005) {
+        // Fully used — the whole churn was a transfer, not a loss.
+        const cNote = appendNote(churn.notes, `Used to offset ${bookingProp} (${bookingPeriod}) — License Transfer`);
+        await updateRow('churn', churn.id, { classification: 'Contraction', notes: cNote });
+      } else {
+        // Partially used — split into the Contraction (used) portion + remaining real churn.
+        const remaining = drop - used;
+        const cNote = appendNote(churn.notes,
+          `${usd(used)} used to offset ${bookingProp} (${bookingPeriod}); ${usd(remaining)} net remaining churn (split out to a new line) — License Transfer`);
+        await updateRow('churn', churn.id, { mrr: sign * used, classification: 'Contraction', notes: cNote });
+        const rNote = `Net remaining churn after License Transfer offset — ${usd(used)} used to offset ${bookingProp} (${bookingPeriod}), ${usd(remaining)} remaining`;
+        await insertRow('churn', { ...churn, mrr: sign * remaining, classification: String(churn.classification || '') || 'Churn', notes: rNote });
+      }
+    }
+
+    const bNote = appendNote(booking.notes, `Offset by ${labels.join(' + ')} (License Transfer)`);
     await pool.query(
       `UPDATE bookings SET pilot_or_ctam='CTAM', ctam_type='License Transfer',
          offset_amount=$1, offset_churn_id=$2, notes=$3, updated_at=now() WHERE id=$4`,
-      [amt, churn.id, bNote, booking.id]);
-    const cNote = appendNote(churn.notes,
-      `Used to offset ${bookingProp} (${`${booking.booking_month || ''} ${booking.booking_year || ''}`.trim()})`);
-    await updateRow('churn', churn.id, { classification: 'Contraction', notes: cNote });
+      [total, work[0].churn.id, bNote, booking.id]);
 
     const b2 = (await pool.query('SELECT * FROM bookings WHERE id=$1', [booking.id])).rows[0];
-    const c2 = (await pool.query('SELECT * FROM churn WHERE id=$1', [churn.id])).rows[0];
-    res.json({ booking: withComputed(b2, computeBooking), churn: withComputed(c2, computeChurn) });
+    res.json({ booking: withComputed(b2, computeBooking), offsetsApplied: work.length, totalOffset: total });
   } catch (e) { next(e); }
 });
 

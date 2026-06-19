@@ -565,8 +565,15 @@ tr.ss-group td {
 /* License Transfer offset (confirm dialog + review) */
 .offset-box { margin-top: 14px; border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; background: var(--accent-soft); }
 .offset-title { font-weight: 700; font-size: 12.5px; color: var(--accent-deep); margin-bottom: 8px; }
-.offset-line { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
-.offset-prod { min-width: 130px; font-weight: 600; font-size: 12.5px; }
+.offset-line { margin: 10px 0; padding-top: 8px; border-top: 1px dashed var(--accent); }
+.offset-line:first-of-type { border-top: none; padding-top: 0; }
+.offset-prod { font-weight: 600; font-size: 12.5px; margin-bottom: 6px; }
+.offset-row { display: flex; align-items: center; gap: 10px; margin: 5px 0; flex-wrap: wrap; }
+.offset-del { border: none; background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 13px; line-height: 1; padding: 4px 6px; border-radius: 6px; }
+.offset-del:hover { background: rgba(0,0,0,.06); color: var(--ink); }
+.offset-add { font-size: 11.5px; padding: 4px 10px; margin-top: 2px; }
+.offset-status { font-size: 11.5px; color: var(--ink-soft); margin: 4px 0 2px; }
+.offset-over { color: #b3261e; font-weight: 600; }
 .offset-sel { font: inherit; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink); max-width: 320px; }
 .offset-amt { font: inherit; font-family: 'Fira Mono', monospace; width: 110px; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; }
 .offset-amt-l { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }

@@ -56,7 +56,7 @@ const state = {
   aiHistory: [],      // "Ask Claude" conversation [{role, content}]
   aiBusy: false,      // a chat request is in flight
   pendingBookings: [], // new-booking payloads awaiting confirmation
-  pendingOffsets: [],  // per-line License Transfer offset selections (null or {churnId, amount})
+  pendingOffsets: [],  // per-line License Transfer offsets: array of {churnId, amount} per line
   notifications: [],   // billing notifications (e.g. GoLive changes)
 };
 
@@ -1877,7 +1877,7 @@ async function submitEntries() {
   try {
     await api('/api/bookings/preview', { method: 'POST', body: JSON.stringify({ rows: payloads }) });
     state.pendingBookings = payloads;
-    state.pendingOffsets = payloads.map(() => null);
+    state.pendingOffsets = payloads.map(() => []); // each line: array of {churnId, amount}
     $('#confirmModal').hidden = false;
     await renderConfirm();
   } catch (err) { toast(err.message, true); }
@@ -1907,15 +1907,43 @@ function offsetEligibleChurns(pmc, bq) {
 }
 const churnDropAmt = (c) => Math.abs(Number(c && c.mrr) || 0); // monthly MRR that dropped
 
+// ---- Confirm-dialog offset helpers (a line can use several churns to cover its MRR) ----
+function pendingLineEligible(i) {
+  const p = state.pendingBookings[i];
+  const q = monthYearQuarter(`${p.booking_month || ''} ${p.booking_year || ''}`);
+  return offsetEligibleChurns(p.pmc, q);
+}
+// Churn ids already chosen on OTHER lines (a churn can offset only one booking line).
+function pendingUsedElsewhere(i) {
+  const set = new Set();
+  (state.pendingOffsets || []).forEach((arr, j) => {
+    if (j !== i && Array.isArray(arr)) arr.forEach((o) => set.add(String(o.churnId)));
+  });
+  return set;
+}
+const churnDropById = (id) => churnDropAmt(state.rows.churn.find((x) => String(x.id) === String(id)));
+// Suggested amount for a churn on line i, row r = min(MRR still uncovered by other rows, drop).
+function defaultOffsetAmount(i, r, churnId) {
+  const mrr = parseMoney(state.pendingBookings[i].mrr) || 0;
+  const sels = state.pendingOffsets[i] || [];
+  const otherTotal = sels.reduce((a, o, rr) => a + (rr === r ? 0 : (Number(o.amount) || 0)), 0);
+  const remaining = Math.max(0, mrr - otherTotal);
+  const drop = churnDropById(churnId);
+  return Math.min(remaining || drop, drop);
+}
+
 // Renders the confirm dialog. Re-runs whenever an offset selection changes so the
 // computed Company Total / Commissionable reflect the License Transfer offset.
 async function renderConfirm() {
   const base = state.pendingBookings || [];
   const offsets = state.pendingOffsets || [];
-  // Effective payloads: apply each chosen offset as a License Transfer.
-  const eff = base.map((p, i) => offsets[i]
-    ? { ...p, pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: offsets[i].amount }
-    : p);
+  const lineOffs = (i) => (Array.isArray(offsets[i]) ? offsets[i] : []);
+  const lineOffTotal = (i) => lineOffs(i).reduce((a, o) => a + (Number(o.amount) || 0), 0);
+  // Effective payloads: a line with any offsets becomes a License Transfer whose offset = the
+  // sum of the amounts used across all its churns.
+  const eff = base.map((p, i) => (lineOffs(i).length
+    ? { ...p, pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: lineOffTotal(i) }
+    : p));
   let computed;
   try { ({ rows: computed } = await api('/api/bookings/preview', { method: 'POST', body: JSON.stringify({ rows: eff }) })); }
   catch (err) { toast(err.message, true); return; }
@@ -1940,7 +1968,7 @@ async function renderConfirm() {
       rowsHtml += `<tr class="confirm-prop"><td colspan="5">${bits.join(' · ')}</td></tr>`;
       lastProp = name;
     }
-    rowsHtml += `<tr><td>${escapeHtml(r.product || '—')}${offsets[i] ? ' <span class="lt-badge">License Transfer</span>' : ''}</td>`
+    rowsHtml += `<tr><td>${escapeHtml(r.product || '—')}${lineOffs(i).length ? ' <span class="lt-badge">License Transfer</span>' : ''}</td>`
       + `<td class="num">${m(r.mrr)}</td><td class="num">${m(r.company_total_booking)}</td>`
       + `<td class="num">${m(r.commissionable_bookings)}</td><td class="num">${m(r.one_time_fee)}</td></tr>`;
   });
@@ -1953,28 +1981,46 @@ async function renderConfirm() {
     + `<th class="num">${m(sum('one_time_fee'))}</th></tr></tfoot></table>`;
 
   // Offsets: per line, eligible churns by that line's own PMC + quarter (same or future).
-  // A churn can only offset one line, so options exclude churns chosen on other lines.
+  // A line may use MANY churns to cover its MRR; a churn can only offset one line, so options
+  // exclude churns already chosen on this or another line.
+  const churnOptionLabel = (e) => `${escapeHtml(e.churn.property || e.churn.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(e.churn)))}/mo · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}`;
   const offLines = base.map((p, i) => {
     const q = monthYearQuarter(`${p.booking_month || ''} ${p.booking_year || ''}`);
     const list = offsetEligibleChurns(p.pmc, q);
     if (!list.length) return '';
-    const usedByOthers = new Set(offsets.map((o, j) => (o && j !== i) ? String(o.churnId) : null).filter(Boolean));
-    const opts = list.filter((e) => !usedByOthers.has(String(e.churn.id)));
-    const sel = offsets[i] ? String(offsets[i].churnId) : '';
-    const optionHtml = ['<option value="">No offset</option>'].concat(opts.map((e) => {
-      const c = e.churn;
-      return `<option value="${c.id}"${sel === String(c.id) ? ' selected' : ''}>${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}</option>`;
-    })).join('');
-    const amtHtml = offsets[i]
-      ? `<label class="offset-amt-l">Offset <input type="text" class="offset-amt" data-offset-amt="${i}" value="${escapeAttr(m(offsets[i].amount))}" /></label>` : '';
+    const mrr = parseMoney(p.mrr) || 0;
+    const sels = lineOffs(i);
+    // Churn ids used on OTHER lines (a churn can offset only one line).
+    const usedByOthers = new Set();
+    offsets.forEach((arr, j) => { if (j !== i && Array.isArray(arr)) arr.forEach((o) => usedByOthers.add(String(o.churnId))); });
+
+    const rowsH = sels.map((o, r) => {
+      const usedThisLine = new Set(sels.filter((_, rr) => rr !== r).map((x) => String(x.churnId)));
+      const opts = list.filter((e) => !usedByOthers.has(String(e.churn.id)) && !usedThisLine.has(String(e.churn.id)));
+      const optionHtml = opts.map((e) =>
+        `<option value="${e.churn.id}"${String(o.churnId) === String(e.churn.id) ? ' selected' : ''}>${churnOptionLabel(e)}</option>`).join('');
+      return `<div class="offset-row">`
+        + `<select class="offset-sel" data-off-sel="${i}:${r}">${optionHtml}</select>`
+        + `<label class="offset-amt-l">Offset <input type="text" class="offset-amt" data-off-amt="${i}:${r}" value="${escapeAttr(m(o.amount))}" /></label>`
+        + `<button type="button" class="offset-del" data-off-del="${i}:${r}" title="Remove this churn">✕</button></div>`;
+    }).join('');
+
+    const total = lineOffTotal(i);
+    const remaining = mrr - total;
+    const usedAll = new Set([...usedByOthers, ...sels.map((o) => String(o.churnId))]);
+    const canAdd = list.some((e) => !usedAll.has(String(e.churn.id)));
+    const addH = canAdd
+      ? `<button type="button" class="btn ghost offset-add" data-off-add="${i}">+ ${sels.length ? 'Add another churn' : 'Add churn'} to offset</button>` : '';
+    const statusH = sels.length
+      ? `<div class="offset-status">Offsetting <strong>${m(total)}</strong> of ${m(mrr)} MRR · ${remaining > 0.005 ? `${m(remaining)} not yet covered` : (remaining < -0.005 ? `<span class="offset-over">over by ${m(-remaining)}</span>` : 'fully covered')}</div>`
+      : '';
     const label = `${escapeHtml(propName(p))} · ${escapeHtml(p.product || `Line ${i + 1}`)}`;
-    return `<div class="offset-line"><span class="offset-prod">${label}</span>`
-      + `<select class="offset-sel" data-offset-line="${i}">${optionHtml}</select>${amtHtml}</div>`;
+    return `<div class="offset-line"><div class="offset-prod">${label}</div>${rowsH}${statusH}${addH}</div>`;
   }).filter(Boolean).join('');
   if (offLines) {
     html += '<div class="offset-box"><div class="offset-title">License Transfer offsets available</div>'
       + offLines
-      + '<p class="offset-note">Selecting a churn tags that line as a License Transfer (offset applied) and reclassifies the churn as a Contraction. Future-quarter churns are flagged.</p></div>';
+      + '<p class="offset-note">Add one or more churns to cover this line’s MRR. A fully-used churn becomes a Contraction; a partly-used churn is split, with the remainder kept as a separate churn line. Future-quarter churns are flagged.</p></div>';
   }
   $('#confirmSummary').innerHTML = html;
 }
@@ -2007,13 +2053,15 @@ async function confirmBookings() {
     let added = 0;
     let offsetCount = 0;
     for (let i = 0; i < base.length; i++) {
-      const off = offsets[i];
-      const payload = off
-        ? { ...base[i], pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: off.amount }
+      const offs = (Array.isArray(offsets[i]) ? offsets[i] : [])
+        .filter((o) => o.churnId && (Number(o.amount) || 0) > 0);
+      const total = offs.reduce((a, o) => a + (Number(o.amount) || 0), 0);
+      const payload = offs.length
+        ? { ...base[i], pilot_or_ctam: 'CTAM', ctam_type: 'License Transfer', offset_amount: total }
         : base[i];
       const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
-      if (off) {
-        await api('/api/bookings/apply-offset', { method: 'POST', body: JSON.stringify({ bookingId: row.id, churnId: off.churnId, offsetAmount: off.amount }) });
+      if (offs.length) {
+        await api('/api/bookings/apply-offset', { method: 'POST', body: JSON.stringify({ bookingId: row.id, offsets: offs }) });
         offsetCount += 1;
       }
       added += 1;
@@ -2131,25 +2179,47 @@ function wireEntry() {
   $('#confirmClose').onclick = () => { $('#confirmModal').hidden = true; };
   $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confirmModal') $('#confirmModal').hidden = true; });
   // Offset controls inside the confirm dialog (re-renders to show updated computed values).
+  const parseIR = (s) => String(s || '').split(':').map(Number); // "i:r" -> [i, r]
   $('#confirmSummary').addEventListener('change', (e) => {
-    const selEl = e.target.closest('[data-offset-line]');
+    const selEl = e.target.closest('[data-off-sel]');
     if (selEl) {
-      const i = Number(selEl.dataset.offsetLine);
-      const churnId = selEl.value;
-      if (!churnId) { state.pendingOffsets[i] = null; }
-      else {
-        const c = state.rows.churn.find((x) => String(x.id) === String(churnId));
-        const lineMrr = parseMoney(state.pendingBookings[i].mrr) || 0;
-        const churnMrr = Number(c && c.mrr) || 0;
-        state.pendingOffsets[i] = { churnId: Number(churnId), amount: Math.min(lineMrr || churnMrr, churnMrr || lineMrr) };
+      const [i, r] = parseIR(selEl.dataset.offSel);
+      const sels = state.pendingOffsets[i];
+      if (sels && sels[r]) {
+        sels[r].churnId = Number(selEl.value);
+        sels[r].amount = defaultOffsetAmount(i, r, sels[r].churnId);
+        renderConfirm();
       }
-      renderConfirm();
       return;
     }
-    const amtEl = e.target.closest('[data-offset-amt]');
+    const amtEl = e.target.closest('[data-off-amt]');
     if (amtEl) {
-      const i = Number(amtEl.dataset.offsetAmt);
-      if (state.pendingOffsets[i]) { state.pendingOffsets[i].amount = parseMoney(amtEl.value); renderConfirm(); }
+      const [i, r] = parseIR(amtEl.dataset.offAmt);
+      const sels = state.pendingOffsets[i];
+      if (sels && sels[r]) { sels[r].amount = parseMoney(amtEl.value); renderConfirm(); }
+    }
+  });
+  // Add / remove churns on an offset line.
+  $('#confirmSummary').addEventListener('click', (e) => {
+    const addEl = e.target.closest('[data-off-add]');
+    if (addEl) {
+      const i = Number(addEl.dataset.offAdd);
+      const sels = state.pendingOffsets[i] || (state.pendingOffsets[i] = []);
+      const usedElse = pendingUsedElsewhere(i);
+      const usedThis = new Set(sels.map((o) => String(o.churnId)));
+      const next = pendingLineEligible(i).find((en) =>
+        !usedElse.has(String(en.churn.id)) && !usedThis.has(String(en.churn.id)));
+      if (next) {
+        const r = sels.length;
+        sels.push({ churnId: next.churn.id, amount: defaultOffsetAmount(i, r, next.churn.id) });
+        renderConfirm();
+      }
+      return;
+    }
+    const delEl = e.target.closest('[data-off-del]');
+    if (delEl) {
+      const [i, r] = parseIR(delEl.dataset.offDel);
+      if (Array.isArray(state.pendingOffsets[i])) { state.pendingOffsets[i].splice(r, 1); renderConfirm(); }
     }
   });
   // All property blocks share one delegated set of handlers (blocks are added/removed dynamically).
