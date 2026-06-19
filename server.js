@@ -9,6 +9,7 @@ import {
   listPeriods, getOpenPeriod, closeAllOpenPeriods, latestPeriod, createPeriod, getRowPeriod,
   getPeriod, closePeriod, reconcileOwnerNames,
   listNotifications, createNotification, dismissNotification, resolveNotification,
+  listProducts, loadCatalog,
 } from './db.js';
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings } from './importer.js';
@@ -16,7 +17,7 @@ import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
   BOOKING_BILLING_KEYS, CHURN_BILLING_KEYS, USER_ROLES, SALES_SUPPORT_FIELDS,
-  SALESFORCE_RECON_FIELDS, LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS,
+  SALESFORCE_RECON_FIELDS, LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS, BPR_CATEGORIES,
 } from './schema.js';
 import { verifyPassword, signToken, verifyToken } from './auth.js';
 import { sendEmail, changeEmailHtml } from './mailer.js';
@@ -109,8 +110,15 @@ app.get('/api/schema', async (_req, res, next) => {
   try {
     const recon = await listRows('salesforce_recon');
     const owners = [...new Set(recon.map((r) => String(r.account_owner ?? '').trim()).filter(Boolean))];
-    const bookingFields = BOOKING_FIELDS.map((f) =>
-      f.key === 'sales_rep' ? { ...f, options: ownerOptions(f.options, owners) } : f);
+    // Product dropdown options come from the admin-managed products table (source of truth).
+    const products = await listProducts();
+    const productNames = products.map((p) => String(p.name || '').trim()).filter(Boolean);
+    const productCategories = Object.fromEntries(products.map((p) => [p.name, p.bpr_category]));
+    const bookingFields = BOOKING_FIELDS.map((f) => {
+      if (f.key === 'sales_rep') return { ...f, options: ownerOptions(f.options, owners) };
+      if (f.key === 'product' && productNames.length) return { ...f, options: productNames };
+      return f;
+    });
     const ssFields = SALES_SUPPORT_FIELDS.map((f) =>
       f.key === 'account_owner' ? { ...f, options: ownerOptions(f.options, owners) } : f);
     res.json({
@@ -120,9 +128,49 @@ app.get('/api/schema', async (_req, res, next) => {
       salesforce_recon: { editable: SALESFORCE_RECON_FIELDS },
       legacy_golives: { editable: LEGACY_GOLIVE_FIELDS },
       legacy_churn: { editable: LEGACY_CHURN_FIELDS },
+      productCategories,
       assistantEnabled: assistantEnabled(),
     });
   } catch (e) { next(e); }
+});
+
+// ---- Products (admin-managed list that drives the Product dropdowns) ----
+// Read: any authenticated user (the dropdowns need it). Create/edit/delete: admin only.
+app.get('/api/products', async (_req, res, next) => {
+  try { res.json(await listProducts()); } catch (e) { next(e); }
+});
+app.post('/api/products', requireRole('admin'), async (req, res, next) => {
+  try {
+    const name = String((req.body && req.body.name) || '').trim();
+    if (!name) return res.status(400).json({ error: 'Product name is required.' });
+    let cat = String((req.body && req.body.bpr_category) || '').trim();
+    if (!BPR_CATEGORIES.includes(cat)) cat = 'Software';
+    const existing = await listProducts();
+    if (existing.some((p) => String(p.name || '').trim().toLowerCase() === name.toLowerCase())) {
+      return res.status(400).json({ error: 'A product with that name already exists.' });
+    }
+    const sort = (existing.reduce((m, p) => Math.max(m, Number(p.sort_order) || 0), 0)) + 10;
+    const row = await insertRow('products', { name, bpr_category: cat, sort_order: sort });
+    await loadCatalog();
+    res.status(201).json(row);
+  } catch (e) { next(e); }
+});
+app.patch('/api/products/:id', requireRole('admin'), async (req, res, next) => {
+  try {
+    const patch = {};
+    if (req.body && req.body.bpr_category !== undefined) {
+      const cat = String(req.body.bpr_category || '').trim();
+      patch.bpr_category = BPR_CATEGORIES.includes(cat) ? cat : 'Software';
+    }
+    if (req.body && req.body.sort_order !== undefined) patch.sort_order = req.body.sort_order;
+    const row = await updateRow('products', Number(req.params.id), patch);
+    await loadCatalog();
+    res.json(row);
+  } catch (e) { next(e); }
+});
+app.delete('/api/products/:id', requireRole('admin'), async (req, res, next) => {
+  try { await deleteRow('products', Number(req.params.id)); await loadCatalog(); res.status(204).end(); }
+  catch (e) { next(e); }
 });
 
 // ---- "Ask Claude" assistant (read-only Q&A over the app data) ----

@@ -64,6 +64,7 @@
         <button class="btn ghost user-btn" id="userBtn"><span class="user-chip" id="userChip"></span> ▾</button>
         <div class="more-menu" id="userMenu" hidden>
           <button type="button" class="more-item" id="usersBtn" hidden>Users</button>
+          <button type="button" class="more-item" id="productsBtn" hidden>Products</button>
           <button type="button" class="more-item" id="changePwBtn">Change password</button>
           <button type="button" class="more-item" id="logoutBtn">Log out</button>
         </div>
@@ -362,6 +363,26 @@
       <input type="password" id="pwConfirm" placeholder="Confirm new password" autocomplete="new-password" />
       <button class="btn solid" id="pwSubmit">Update password</button>
       <p class="err" id="pwErr"></p>
+    </div>
+  </div>
+
+  <div class="modal" id="productsModal" hidden>
+    <div class="modal-card users-card">
+      <div class="entry-head">
+        <h2>Products</h2>
+        <button type="button" class="entry-close" id="productsClose" title="Close">✕</button>
+      </div>
+      <p class="recon-note">This list is the source of the Product dropdown across the app. Each product's BPR Category decides how it rolls up (Software, Digital Advertising, etc.). Removing a product only hides it from the dropdown — existing bookings keep their product.</p>
+      <div class="users-list" id="productsList"></div>
+      <form id="addProductForm" class="add-user" autocomplete="off">
+        <h3>Add product</h3>
+        <div class="add-user-row">
+          <input type="text" id="newProductName" placeholder="Product name" autocomplete="off" />
+          <select id="newProductCat"></select>
+          <button type="submit" class="btn solid">Add</button>
+        </div>
+        <p class="err" id="addProductErr"></p>
+      </form>
     </div>
   </div>
 

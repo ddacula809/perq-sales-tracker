@@ -16,7 +16,7 @@ export const BOOKING_FIELDS = [
   { key: 'pilot_or_ctam',                   label: 'Pilot or CTAM',          excel: 6,  type: 'select', options: ['', 'Pilot', 'CTAM'] },
   { key: 'pilot_type',                      label: 'Pilot Type',             excel: 7,  type: 'select', options: ['', 'New - Paid', 'New - Free', 'Conversion', 'Pilot Expansion', 'Second Signature'] },
   { key: 'ctam_type',                       label: 'CTAM Type',              excel: 8,  type: 'select', options: ['', 'Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
-  { key: 'product',                         label: 'Product',                excel: 10, type: 'select', options: ['AI Lead Capture Agent', 'Call to Text', 'Pulse Data Hub', 'AI Leasing Agent', 'Performance Reporting Agent', 'Property Website', 'Corporate Website', 'Google Search Management', 'AI Google Bookings Agent', 'AI Google Posts and Products', 'SEO'] },
+  { key: 'product',                         label: 'Product',                excel: 10, type: 'select', options: ['AI Lead Capture Agent', 'Call to Text', 'Pulse Data Hub', 'AI Leasing Agent', 'Performance Reporting Agent', 'Property Website', 'Corporate Website', 'Google Search Management', 'AI Google Bookings Agent', 'AI Google Posts and Products', 'SEO', 'Google Performance Max'] },
   { key: 'mql',                             label: 'MQL',                    excel: 12, type: 'select', options: ['', 'YES', 'NO'] },
   { key: 'rerate_paid_months',              label: 'Re-rate Paid Months',    excel: 13, type: 'number' },
   { key: 'rerate_old_mrr',                  label: 'Re-rate Old MRR',        excel: 14, type: 'number' },
@@ -172,6 +172,16 @@ export const USER_ROLES = ['admin', 'standard', 'sales_admin', 'sales', 'billing
 
 // BPR product categories (see compute.js bprCategory).
 export const BPR_CATEGORIES = ['Software', 'Pulse', 'Website', 'Digital Advertising', 'Tools for Google'];
+
+// Products (the editable, admin-managed product list). This drives the Product dropdowns.
+// The `products` table is seeded from the Booking "product" options on first boot, then becomes
+// the source of truth — the admin "Products" section adds/edits/removes entries here. Each
+// product carries its BPR Category so new products categorize correctly (compute.js bprCategory).
+export const PRODUCT_FIELDS = [
+  { key: 'name',         label: 'Product Name',  type: 'text' },
+  { key: 'bpr_category', label: 'BPR Category',  type: 'select', options: BPR_CATEGORIES },
+  { key: 'sort_order',   label: 'Sort Order',    type: 'number' },
+];
 
 // Sales Support (Q2 2026 forecast). Editable fields stored in the sales_support table.
 // The monthly "Actual" columns and "Q2 Actual" are computed on the client from Bookings.

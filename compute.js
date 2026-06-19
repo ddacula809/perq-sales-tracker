@@ -1,6 +1,7 @@
 // compute.js
 // Pure functions that reproduce the Excel formula columns from the original workbook.
 // Verified against cached Excel values for both the "May 2026" and "Churn Tracker" tabs.
+import { categoryFor } from './catalog.js';
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
@@ -24,10 +25,14 @@ function monthYear(d) {
 export function bprCategory(product) {
   const p = (product || '').trim();
   if (!p) return '';
+  // Admin-managed products (the `products` table) take precedence so new products categorize
+  // by their chosen category; the built-in mapping below is the fallback for anything not listed.
+  const dynamic = categoryFor(p);
+  if (dynamic) return dynamic;
   if (['AI Lead Capture Agent', 'AI Leasing Agent', 'Performance Reporting Agent', 'Call to Text'].includes(p)) return 'Software';
   if (p === 'Pulse Data Hub') return 'Pulse';
   if (['Property Website', 'Corporate Website'].includes(p)) return 'Website';
-  if (['Google Search Management', 'SEO'].includes(p)) return 'Digital Advertising';
+  if (['Google Search Management', 'SEO', 'Google Performance Max'].includes(p)) return 'Digital Advertising';
   if (['AI Google Bookings Agent', 'AI Google Posts and Products'].includes(p)) return 'Tools for Google';
   return 'Unknown';
 }

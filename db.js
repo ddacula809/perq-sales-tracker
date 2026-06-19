@@ -3,9 +3,11 @@
 import pg from 'pg';
 import {
   BOOKING_FIELDS, CHURN_FIELDS, SALES_SUPPORT_FIELDS, SALESFORCE_RECON_FIELDS,
-  LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS,
+  LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS, PRODUCT_FIELDS,
 } from './schema.js';
 import { hashPassword } from './auth.js';
+import { bprCategory } from './compute.js';
+import { setCatalog } from './catalog.js';
 
 const { Pool, types } = pg;
 
@@ -223,6 +225,17 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  // Admin-managed product list (drives the Product dropdowns). Name is unique (case-insensitive).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      ${columnsDef(PRODUCT_FIELDS)},
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS products_name_lower_idx ON products (lower(name))');
+  await ensureColumns('products', PRODUCT_FIELDS);
   await ensureColumns('bookings', BOOKING_FIELDS);
   await ensureColumns('churn', CHURN_FIELDS);
   await ensureColumns('sales_support', SALES_SUPPORT_FIELDS);
@@ -260,7 +273,39 @@ export async function initDb() {
       await pool.query("UPDATE bookings SET property_only=$1 WHERE id=$2 AND (property_only IS NULL OR property_only='')", [only, b.id]);
     }
   });
+  // Seed the products table once from the Booking "product" options (category from bprCategory).
+  await runOnce('seed_products_v1', seedProducts);
   await ensureAdmin();
+  await loadCatalog(); // populate the in-memory Product -> BPR Category map for compute.js
+}
+
+// Seed `products` from the schema's Booking product options, deriving each BPR Category from the
+// built-in bprCategory mapping. Only runs when the table is empty (a one-time bootstrap).
+async function seedProducts() {
+  const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM products');
+  if (rows[0].n > 0) return;
+  const opts = (BOOKING_FIELDS.find((f) => f.key === 'product') || {}).options || [];
+  for (let i = 0; i < opts.length; i++) {
+    const name = String(opts[i] || '').trim();
+    if (!name) continue;
+    const cat = bprCategory(name);
+    await pool.query(
+      'INSERT INTO products (name, bpr_category, sort_order) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+      [name, cat && cat !== 'Unknown' ? cat : 'Software', (i + 1) * 10]);
+  }
+}
+
+// Read products ordered for display (sort_order, then name).
+export async function listProducts() {
+  const { rows } = await pool.query(
+    "SELECT * FROM products ORDER BY COALESCE(sort_order, 999999) ASC, lower(name) ASC");
+  return rows;
+}
+
+// Refresh the in-memory Product -> BPR Category map from the DB. Call after any product change.
+export async function loadCatalog() {
+  const rows = await listProducts();
+  setCatalog(rows.map((r) => [r.name, r.bpr_category]));
 }
 
 // Seed the first sales period (Q2 2026) and tag existing sales_support rows to it.
@@ -394,6 +439,7 @@ const TABLES = {
   salesforce_recon: SALESFORCE_RECON_FIELDS,
   legacy_golives: LEGACY_GOLIVE_FIELDS,
   legacy_churn: LEGACY_CHURN_FIELDS,
+  products: PRODUCT_FIELDS,
 };
 
 // Normalize an incoming value for a given field type before writing.

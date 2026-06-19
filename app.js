@@ -1254,6 +1254,7 @@ function renderAll() {
   $('#golivesBtn').hidden = !canAddDelete();
   $('#offsetReviewBtn').hidden = !canAddDelete();
   $('#usersBtn').hidden = !isAdmin();
+  $('#productsBtn').hidden = !isAdmin();
   $('#notifWrap').hidden = !canBilling;
   updateBell();
   // "Ask Claude" assistant: shown only when configured (API key set) and for full-data roles.
@@ -3350,6 +3351,81 @@ async function renderUsersList() {
   } catch (e) { $('#usersList').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
 }
 
+// ---------- Products (admin-managed product list) ----------
+function bprCategoryOptions() {
+  const f = (state.schema.sales_support && state.schema.sales_support.editable || [])
+    .find((x) => x.key === 'product_category');
+  return (f && f.options) || ['Software', 'Pulse', 'Website', 'Digital Advertising', 'Tools for Google'];
+}
+function catOptionsHtml(selected) {
+  return bprCategoryOptions().map((c) =>
+    `<option value="${escapeAttr(c)}"${c === selected ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
+}
+async function openProducts() {
+  $('#productsModal').hidden = false;
+  $('#newProductCat').innerHTML = catOptionsHtml('Software');
+  await renderProductsList();
+}
+async function renderProductsList() {
+  try {
+    const products = await api('/api/products');
+    if (!products.length) { $('#productsList').innerHTML = '<p class="muted" style="padding:10px">No products yet — add one below.</p>'; return; }
+    $('#productsList').innerHTML = products.map((p) => `<div class="user-row">
+        <span class="user-name">${escapeHtml(p.name)}</span>
+        <select data-prodcat-for="${p.id}">${catOptionsHtml(p.bpr_category)}</select>
+        <button type="button" class="view-btn danger" data-del-product="${p.id}">Remove</button>
+      </div>`).join('');
+  } catch (e) { $('#productsList').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+}
+// After any product change, refresh the schema so Product dropdowns everywhere pick up the change.
+async function refreshAfterProductChange() {
+  state.schema = await api('/api/schema');
+  renderAll();
+}
+function wireProducts() {
+  $('#productsBtn').onclick = () => { $('#userMenu').hidden = true; openProducts(); };
+  $('#productsClose').onclick = () => { $('#productsModal').hidden = true; };
+  $('#productsModal').addEventListener('click', (e) => { if (e.target.id === 'productsModal') $('#productsModal').hidden = true; });
+
+  $('#addProductForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('#newProductName').value.trim();
+    const bpr_category = $('#newProductCat').value;
+    if (!name) { $('#addProductErr').textContent = 'Enter a product name.'; return; }
+    try {
+      await api('/api/products', { method: 'POST', body: JSON.stringify({ name, bpr_category }) });
+      $('#newProductName').value = ''; $('#addProductErr').textContent = '';
+      toast('Product added');
+      await renderProductsList();
+      await refreshAfterProductChange();
+    } catch (err) { $('#addProductErr').textContent = err.message; }
+  });
+
+  // Change a product's BPR Category.
+  $('#productsList').addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-prodcat-for]');
+    if (!sel) return;
+    try {
+      await api(`/api/products/${sel.dataset.prodcatFor}`, { method: 'PATCH', body: JSON.stringify({ bpr_category: sel.value }) });
+      toast('Category updated');
+      await refreshAfterProductChange();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  // Remove a product (only hides it from the dropdown; existing bookings keep their product).
+  $('#productsList').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-del-product]');
+    if (!del) return;
+    if (!confirm('Remove this product from the list? Existing bookings keep their product; it just won’t appear in the dropdown.')) return;
+    try {
+      await api(`/api/products/${del.dataset.delProduct}`, { method: 'DELETE' });
+      toast('Product removed');
+      await renderProductsList();
+      await refreshAfterProductChange();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 function wireUsers() {
   $('#usersBtn').onclick = () => { $('#userMenu').hidden = true; openUsers(); };
   $('#usersClose').onclick = () => { $('#usersModal').hidden = true; };
@@ -3541,10 +3617,15 @@ function saasRecognized(b) {
   return !(poc === 'Pilot' && pt !== 'Conversion');
 }
 // Churn rows carry a product (not a computed category), so map the product to a category the
-// same way bprCategory does (Digital Advertising bucket = Google Search Management + SEO).
-const SAAS_DA_PRODUCTS = new Set(['Google Search Management', 'SEO']);
+// same way bprCategory does. The admin Products list (state.schema.productCategories) is the
+// source; fall back to the built-in Digital Advertising set for anything not listed.
+const SAAS_DA_PRODUCTS = new Set(['Google Search Management', 'SEO', 'Google Performance Max']);
 function saasProductCategory(product) {
-  return SAAS_DA_PRODUCTS.has(String(product || '').trim()) ? 'Digital Advertising' : 'Multifamily';
+  const p = String(product || '').trim();
+  const map = (state.schema && state.schema.productCategories) || {};
+  const cat = map[p];
+  if (cat) return cat === 'Digital Advertising' ? 'Digital Advertising' : 'Multifamily';
+  return SAAS_DA_PRODUCTS.has(p) ? 'Digital Advertising' : 'Multifamily';
 }
 // Absolute month index = year*12 + (month-1). From a 'YYYY-MM-DD' date or a 'Month Year' string.
 function monthIdxFromDate(d) {
@@ -3891,7 +3972,7 @@ function wireSaas() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireAssistant(); wireSaas();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireAssistant(); wireSaas();
   applyZoom();
   $('#returnAdminBtn').onclick = returnToAdmin;
   if (state.token) {
