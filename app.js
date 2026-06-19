@@ -411,7 +411,8 @@ function monthYearQuarter(my) {
 function onFilterChange() {
   if (state.tab === 'dashboard') { renderSummary(); return; }
   state.page[state.tab] = 1;
-  // Defer so the filter dropdown repaints its new value immediately, then the grid rebuilds.
+  renderSummary(); // rebuild the filter tiles so the connected (cascading) dropdowns update
+  // Defer so the filter dropdowns repaint immediately, then the grid rebuilds.
   requestAnimationFrame(renderBody);
 }
 
@@ -422,7 +423,15 @@ function renderSummary() {
   const f = state.filters[tab];
   if (!f) { el.className = 'summary hidden'; el.innerHTML = ''; return; }
 
-  const distinct = (k) => [...new Set(rows.map((r) => r[k]).filter((v) => v !== null && v !== '' && v !== undefined))];
+  // Connected (cascading) filters: a filter's options reflect the rows that match all the OTHER
+  // active filters, so picking Sales Rep narrows the PMC / Property / Month options to matching
+  // rows. A filter never constrains its own options (so you can always change your own selection).
+  const rowsExcept = (exceptKey) => {
+    const sub = {};
+    for (const k in f) if (k !== exceptKey) sub[k] = f[k];
+    return rows.filter((r) => rowMatchesFilters(r, sub));
+  };
+  const distinctIn = (src, k) => [...new Set(src.map((r) => r[k]).filter((v) => v !== null && v !== '' && v !== undefined))];
   const sel = (id, label, vals, cur, disabled) =>
     `<div class="filter"><label>${label}</label><select id="${id}"${disabled ? ' disabled' : ''}>` +
     vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('') +
@@ -450,8 +459,10 @@ function renderSummary() {
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
     if (col.key === 'added_recent') return ['All', ...Object.keys(ADDED_WINDOWS)];
+    // Options reflect rows matching every OTHER active filter (cascading).
+    const src = rowsExcept(col.key);
     if (col.key === 'booking_my') {
-      const combos = [...new Set(rows
+      const combos = [...new Set(src
         .map((r) => (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '')
         .filter(Boolean))];
       return ['All', ...sortMonthYear(combos)];
@@ -459,7 +470,7 @@ function renderSummary() {
     if (col.key === 'churn_quarter' || col.key === 'booking_quarter') {
       const set = new Set();
       let hasBlank = false;
-      for (const r of rows) {
+      for (const r of src) {
         const my = col.key === 'churn_quarter'
           ? (r.final_churn_month || '')
           : ((r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '');
@@ -473,9 +484,9 @@ function renderSummary() {
       return ['All', ...(hasBlank ? ['(blank)'] : []), ...sorted];
     }
     // If the column has any empty values, offer "(blank)" as the first selectable option.
-    const hasBlank = rows.some((r) => { const v = r[col.key]; return v === null || v === undefined || String(v).trim() === ''; });
+    const hasBlank = src.some((r) => { const v = r[col.key]; return v === null || v === undefined || String(v).trim() === ''; });
     const blank = hasBlank ? ['(blank)'] : [];
-    const d = distinct(col.key);
+    const d = distinctIn(src, col.key);
     if (col.key === 'booking_month') { const present = new Set(d); return ['All', ...blank, ...monthOrder.filter((m) => present.has(m))]; }
     if (MONTH_YEAR_COLS.has(col.key)) return ['All', ...blank, ...sortMonthYear(d)];
     // Keep the raw values (so they still match r[key]); just order numerically for number cols.
@@ -505,7 +516,7 @@ function renderSummary() {
     const tiles = active.map((key) => {
       const col = colByKey.get(key);
       const lbl = escapeHtml(adjustable ? col.label : `Filter by ${col.label}`);
-      const vals = valuesFor(col);
+      let vals = valuesFor(col);
       if (key === 'sales_rep' && lockRep) {
         const me = salesOwner();
         const v = vals.includes(me) ? vals : ['All', me, ...vals.filter((x) => x !== 'All')];
@@ -513,6 +524,8 @@ function renderSummary() {
           + `<select id="${key}" disabled>${v.map((o) => `<option${String(o) === String(me) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
       }
       const cur = f[key] || 'All';
+      // Keep the current selection selectable even if the other filters would exclude it.
+      if (cur !== 'All' && !vals.map(String).includes(String(cur))) vals = ['All', cur, ...vals.filter((o) => o !== 'All')];
       const opts = vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('');
       const x = adjustable ? `<button type="button" class="filter-x" data-remove-filter="${key}" title="Remove filter">✕</button>` : '';
       return `<div class="filter" data-filter="${key}">${x}<label>${lbl}</label><select id="${key}">${opts}</select></div>`;
