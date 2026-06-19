@@ -244,7 +244,7 @@ function applyTotalsZoom() {
 }
 // Which money columns the bottom totals row sums, per grid. Totals reflect the filtered set.
 const TOTALS_FIELDS = {
-  bookings: [['MRR', 'mrr'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings']],
+  bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings']],
   churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
 };
 function renderBookingTotals(rows) {
