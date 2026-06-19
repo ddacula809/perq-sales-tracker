@@ -305,6 +305,13 @@ thead th .col-resize {
   cursor: col-resize; user-select: none;
 }
 thead th .col-resize:hover { background: var(--accent); opacity: .45; }
+/* Click-to-sort arrow in each data-column header (▲ asc, ▼ desc, ↕ unsorted) */
+thead th .col-sort {
+  display: inline-block; margin-left: 5px; cursor: pointer; user-select: none;
+  font-size: 9px; line-height: 1; opacity: .4; vertical-align: middle;
+}
+thead th .col-sort:hover { opacity: .85; }
+thead th .col-sort.sorted { opacity: 1; color: var(--accent); }
 thead th.rownum, tbody td.rownum {
   position: sticky; left: 0; z-index: 2; min-width: 46px; text-align: right;
   background: #efe9dc; color: var(--ink-soft); font-family: 'Fira Mono', monospace;

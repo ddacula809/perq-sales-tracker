@@ -19,6 +19,8 @@ const state = {
   // dashboard totals, and vice versa.
   // Generic per-tab filters keyed by column key: { <columnKey>: <selectedValue> }. Empty = none.
   filters: { dashboard: {}, bookings: {}, churn: {} },
+  // Click-to-sort per grid tab. dir: 1 = ascending (low→high), -1 = descending, 0 = unsorted.
+  sort: { bookings: { key: null, dir: 0 }, churn: { key: null, dir: 0 } },
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
@@ -186,11 +188,15 @@ function fieldsForTab() {
 function renderHead() {
   if (state.tab !== 'bookings' && state.tab !== 'churn') { $('#thead').innerHTML = ''; return; }
   const { cols, computedKeys } = fieldsForTab();
+  const s = state.sort[state.tab] || {};
   $('#thead').innerHTML =
     `<tr><th class="rownum">#</th>` +
     cols.map((f) => {
       const cls = computedKeys.has(f.key) ? 'computed' : (isBilling(f.key) ? 'billing' : '');
-      return `<th class="${cls}" data-col="${f.key}" title="${f.label}">${f.label}<span class="col-resize"></span></th>`;
+      const active = s.key === f.key && s.dir;
+      const arrow = active ? (s.dir === 1 ? '▲' : '▼') : '↕';
+      const sort = `<span class="col-sort${active ? ' sorted' : ''}" data-sort="${f.key}" title="Sort ${escapeHtml(f.label)}">${arrow}</span>`;
+      return `<th class="${cls}" data-col="${f.key}" title="${f.label}">${f.label}${sort}<span class="col-resize"></span></th>`;
     }).join('') +
     `<th class="del"></th></tr>`;
 }
@@ -225,12 +231,45 @@ function quickFilterPass(r, tab) {
   if (!qf || !qf.col || !qf.text) return true;
   return String(r[qf.col] ?? '').toLowerCase().includes(String(qf.text).toLowerCase());
 }
+// Month-Year computed columns ("June 2026") sort chronologically, not alphabetically.
+const MONTH_YEAR_SORT_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
+const monthYearSortKey = (v) => {
+  const [m, y] = String(v).split(' ');
+  const mi = MONTHS.indexOf(m);
+  return (mi < 0 || !y) ? null : Number(y) * 12 + mi;
+};
+// Sort the filtered rows by the active click-to-sort column. Blanks always sort last (both
+// directions). Numbers compare numerically, dates/month-year chronologically, text naturally.
+function sortRows(rows, tab) {
+  const s = state.sort && state.sort[tab];
+  if (!s || !s.key || !s.dir) return rows;
+  const sch = state.schema && state.schema[tab];
+  if (!sch) return rows;
+  const def = [...sch.editable, ...sch.computed].find((f) => f.key === s.key);
+  const type = def ? def.type : 'text';
+  const key = s.key;
+  const isBlank = (r) => { const v = r[key]; return v === null || v === undefined || String(v).trim() === ''; };
+  const base = (a, b) => {
+    const av = a[key], bv = b[key];
+    if (type === 'number') return (Number(String(av).replace(/[$,]/g, '')) || 0) - (Number(String(bv).replace(/[$,]/g, '')) || 0);
+    if (MONTH_YEAR_SORT_COLS.has(key)) return (monthYearSortKey(av) ?? 0) - (monthYearSortKey(bv) ?? 0);
+    if (type === 'date') return String(av).localeCompare(String(bv)); // YYYY-MM-DD is chronological as text
+    return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+  };
+  return rows.slice().sort((a, b) => {
+    const aB = isBlank(a); const bB = isBlank(b);
+    if (aB && bB) return 0;
+    if (aB) return 1; // blanks last
+    if (bB) return -1;
+    return s.dir * base(a, b);
+  });
+}
 function currentRows(tab) {
   const rows = state.rows[tab] || [];
   let out = rows;
   if (tab === 'bookings') out = rows.filter((r) => bookingMatch(r, state.filters.bookings));
   else if (tab === 'churn') out = rows.filter((r) => churnMatch(r, state.filters.churn));
-  if (tab === 'bookings' || tab === 'churn') out = out.filter((r) => quickFilterPass(r, tab));
+  if (tab === 'bookings' || tab === 'churn') out = sortRows(out.filter((r) => quickFilterPass(r, tab)), tab);
   return out;
 }
 
@@ -3210,6 +3249,24 @@ function wireColumns() {
   // Click outside closes the menu.
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.col-menu-wrap')) $('#colMenu').hidden = true;
+  });
+  // Click a header's sort arrow to sort the grid: unsorted -> ascending -> descending -> unsorted.
+  $('#thead').addEventListener('click', (e) => {
+    const btn = e.target.closest('.col-sort');
+    if (!btn) return;
+    const tab = state.tab;
+    if (tab !== 'bookings' && tab !== 'churn') return;
+    const key = btn.dataset.sort;
+    const cur = state.sort[tab] || { key: null, dir: 0 };
+    let dir;
+    if (cur.key !== key) dir = 1;          // new column -> ascending (lowest to greatest)
+    else if (cur.dir === 1) dir = -1;      // ascending -> descending (greatest to lowest)
+    else if (cur.dir === -1) dir = 0;      // descending -> back to original order
+    else dir = 1;
+    state.sort[tab] = { key: dir === 0 ? null : key, dir };
+    state.page[tab] = 1; // jump back to the first page of the newly sorted set
+    renderHead();
+    renderBody();
   });
 }
 
