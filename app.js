@@ -1655,7 +1655,9 @@ function propertyBlockHtml() {
     + '<div class="entry-card-form"><div class="entry-card-head"><span class="entry-card-title">Booking details</span>'
     + '<button type="button" class="entry-remove property-remove" title="Remove this property">✕</button></div>'
     + `<div class="entry-form shared-fields" data-shared>${shared}</div></div>`
-    + '<div class="entry-card-form"><div class="entry-card-head"><span class="entry-card-title">Products</span></div>'
+    + '<div class="entry-card-form"><div class="entry-card-head"><span class="entry-card-title">Products</span>'
+    + '<label class="dup-from-label">Duplicate from <select class="dup-from" data-dupfrom>'
+    + '<option value="">— another property —</option></select></label></div>'
     + `<div class="product-lines" data-products>${productLineHtml()}</div>`
     + '<button type="button" class="btn ghost entry-add add-product">+ Add another product</button></div>'
     + '</div>';
@@ -1782,14 +1784,42 @@ function renumberProperties() {
   const blocks = [...$('#propertyBlocks').querySelectorAll('[data-block]')];
   const show = blocks.length > 1;
   blocks.forEach((b) => { const x = b.querySelector('.property-remove'); if (x) x.style.visibility = show ? '' : 'hidden'; });
+  refreshDupFroms();
+}
+
+// A readable label for a property block in the "Duplicate from" dropdown.
+function blockLabel(block, idx) {
+  const name = String(block.querySelector('[data-shared] [data-key="property_only"]')?.value || '').trim()
+    || String(block.querySelector('[data-shared] [data-key="property_id"]')?.value || '').trim();
+  return name ? `Property ${idx + 1} — ${name}` : `Property ${idx + 1}`;
+}
+// Rebuild every block's "Duplicate from" dropdown to list the OTHER property blocks (by stable
+// id), preserving any current selection. Called whenever blocks or property names change.
+function refreshDupFroms() {
+  const blocks = [...$('#propertyBlocks').querySelectorAll('[data-block]')];
+  blocks.forEach((block) => {
+    const sel = block.querySelector('[data-dupfrom]');
+    if (!sel) return;
+    const label = sel.closest('.dup-from-label');
+    if (label) label.hidden = blocks.length <= 1; // nothing to copy from when alone
+    const cur = sel.value;
+    let opts = '<option value="">— another property —</option>';
+    blocks.forEach((other, j) => {
+      if (other !== block) opts += `<option value="${other.dataset.blockId}">${escapeHtml(blockLabel(other, j))}</option>`;
+    });
+    sel.innerHTML = opts;
+    sel.value = [...sel.options].some((o) => o.value === cur) ? cur : '';
+  });
 }
 
 // Add a property block. With `copyFrom`, carry over its Booking details EXCEPT the property
 // identity (Property ID + Name), which the user fills in fresh; otherwise seed from defaults.
+let blockSeq = 0;
 function addPropertyBlock(copyFrom) {
   const tmp = document.createElement('div');
   tmp.innerHTML = propertyBlockHtml();
   const block = tmp.firstElementChild;
+  block.dataset.blockId = String(++blockSeq); // stable id for "Duplicate from" references
   $('#propertyBlocks').appendChild(block);
   if (copyFrom) {
     const vals = readShared(copyFrom);
@@ -2092,9 +2122,7 @@ function wireEntry() {
   $('#addPropertyBtn').onclick = () => {
     const blocks = [...$('#propertyBlocks').querySelectorAll('[data-block]')];
     const last = blocks[blocks.length - 1] || null;
-    const block = addPropertyBlock(last);
-    // Optionally mirror the previous property's products + MRR into the new block.
-    if (last && $('#mirrorProducts').checked) mirrorProducts(last, block);
+    addPropertyBlock(last); // carries the Booking details; products are copied via "Duplicate from"
   };
   $('#submitEntriesBtn').onclick = submitEntries;
   // Confirm dialog: Confirm creates the rows; Cancel returns to the entry form unchanged.
@@ -2128,13 +2156,22 @@ function wireEntry() {
   const blocks = $('#propertyBlocks');
   // Booking-details changes (scoped to the block they happened in).
   blocks.addEventListener('change', (e) => {
-    const key = e.target.dataset && e.target.dataset.key;
-    if (!key) return;
     const block = e.target.closest('[data-block]');
     if (!block) return;
+    // "Duplicate from": copy the chosen property's products + MRR into this block.
+    if (e.target.matches('[data-dupfrom]')) {
+      const src = e.target.value
+        && $('#propertyBlocks').querySelector(`[data-block][data-block-id="${e.target.value}"]`);
+      if (src) { mirrorProducts(src, block); toast('Products copied'); }
+      e.target.value = ''; // reset to placeholder so it can be used again
+      return;
+    }
+    const key = e.target.dataset && e.target.dataset.key;
+    if (!key) return;
     if (key === 'ctam_type') setProductOffsets(block);
     if (key === 'pilot_or_ctam') updatePilotCtam(block);
     if (key === 'pmc' || key === 'property_only') recomputeCombinedName(block); // rebuild "PMC - Property"
+    if (key === 'property_only' || key === 'property_id') refreshDupFroms(); // keep dropdown labels fresh
     if (key === 'property_id' && autofillFromSfRecon(block)) toast('Property Name & PMC filled from Salesforce Recon');
   });
   // Live-update the combined name (and recon autofill) as PMC / Property Name / Property ID are typed.
@@ -2144,6 +2181,7 @@ function wireEntry() {
     const block = e.target.closest('[data-block]');
     if (!block) return;
     if (key === 'pmc' || key === 'property_only') recomputeCombinedName(block);
+    if (key === 'property_only' || key === 'property_id') refreshDupFroms(); // keep dropdown labels fresh
     if (key === 'property_id') autofillFromSfRecon(block);
   });
   blocks.addEventListener('click', (e) => {

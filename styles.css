@@ -669,8 +669,10 @@ tr.ss-group td {
   flex: 1; min-width: 220px; justify-content: center; border-style: dashed; border-color: var(--plum);
   color: var(--plum); font-weight: 600;
 }
-.mirror-products { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; cursor: pointer; }
-.mirror-products input { margin: 0; }
+/* "Duplicate from" dropdown in each property's Products header. */
+.dup-from-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.dup-from-label[hidden] { display: none; }
+.dup-from { font-size: 12px; padding: 3px 6px; max-width: 220px; }
 /* Property subheader row inside the confirm summary table. */
 .confirm-table tr.confirm-prop td {
   background: var(--paper); font-weight: 700; color: var(--ink); font-size: 12px;
