@@ -2364,25 +2364,23 @@ const ssLabels = () => Object.fromEntries(ssColumns());
 
 // Sum of Company Total Booking for matching PMC + product category + month + year.
 // For the "Pilot / New Logo" section, only count bookings tagged Pilot in "Pilot or CTAM".
-// A Sales Support row stays grouped by its BPR category, but a row can be scoped to a single
-// "line" within it. SEO splits out of Digital Advertising: an SEO-line row matches only SEO
-// bookings, and the main (blank-line) row matches everything else in that category.
-const SS_SPLIT_PRODUCTS = new Set(['SEO']);
-function ssLineOf(b) {
-  const p = String(b.product || '').trim();
-  return SS_SPLIT_PRODUCTS.has(p) ? p : '';
+// SEO is selectable as its own "Product" in Sales Support, but its rows still GROUP under
+// Digital Advertising (ssMainCategory). For matching actuals, a booking's Sales Support product
+// is 'SEO' when the product is SEO, else its BPR category — so an SEO row pulls only SEO bookings
+// and the Digital Advertising row pulls the rest.
+function ssCategoryOf(b) {
+  return String(b.product || '').trim() === 'SEO' ? 'SEO' : String(b.bpr_prod_category || '').trim();
 }
+const ssMainCategory = (cat) => (String(cat || '').trim() === 'SEO' ? 'Digital Advertising' : String(cat || '').trim());
 function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
-  const line = String(row.product_line || '').trim();
   if (!pmc || !cat || !monthName) return 0;
   const pilotOnly = String(row.section || '').trim() === 'Pilot / New Logo';
   let sum = 0;
   for (const b of state.rows.bookings) {
     if (String(b.pmc || '').trim().toLowerCase() === pmc
-      && (b.bpr_prod_category || '') === cat
-      && ssLineOf(b) === line
+      && ssCategoryOf(b) === cat
       && b.booking_month === monthName
       && reconNum(b.booking_year) === year
       && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot')) {
@@ -2400,13 +2398,11 @@ function ssActualBreakdown(row, key) {
   const months = new Set((monthsForKey[key] || []).filter(Boolean));
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
-  const line = String(row.product_line || '').trim();
   if (!pmc || !cat || !months.size) return [];
   const pilotOnly = String(row.section || '').trim() === 'Pilot / New Logo';
   return state.rows.bookings.filter((b) =>
     String(b.pmc || '').trim().toLowerCase() === pmc
-    && (b.bpr_prod_category || '') === cat
-    && ssLineOf(b) === line
+    && ssCategoryOf(b) === cat
     && months.has(b.booking_month)
     && reconNum(b.booking_year) === year
     && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot'));
@@ -2488,19 +2484,6 @@ function ssCell(row, key) {
   const f = ssFieldDef(key);
   const val = row[key] ?? '';
   const numCls = f.type === 'number' ? ' num' : '';
-  // "Product" cell: the category, plus (under Digital Advertising) a small line selector so SEO
-  // can be split into its own row while staying in the Digital Advertising group.
-  if (key === 'product_category') {
-    const line = String(row.product_line || '').trim();
-    if (!ssEditable()) return `<td data-col="${key}">${escapeHtml(line ? `${val} — ${line}` : String(val))}</td>`;
-    const opts = f.options.map((o) => `<option value="${escapeAttr(o)}"${o === val ? ' selected' : ''}>${o || '—'}</option>`).join('');
-    const showLine = String(val).trim() === 'Digital Advertising' || line;
-    const lineSel = showLine
-      ? `<select class="ss-line" data-ss-key="product_line" title="Line item within the category">`
-        + `<option value="">— main</option><option value="SEO"${line === 'SEO' ? ' selected' : ''}>SEO</option></select>`
-      : '';
-    return `<td data-col="${key}"><select data-ss-key="${key}">${opts}</select>${lineSel}</td>`;
-  }
   if (!ssEditable()) { // read-only (archived quarter or no edit permission)
     const text = SS_MONEY.has(key) ? fmtMoney(row[key]) : (f.type === 'number' ? fmtNum(row[key]) : (row[key] ?? ''));
     return `<td class="${numCls.trim()}" data-col="${key}">${escapeHtml(text)}</td>`;
@@ -2616,10 +2599,10 @@ function renderSalesSupport() {
     .filter((r) => ff.product === 'All' || (r.product_category || '') === ff.product)
     .filter((r) => ff.section === 'All' || (r.section || '') === ff.section)
     .sort((a, b) =>
-      catIdx(a.product_category) - catIdx(b.product_category)
+      catIdx(ssMainCategory(a.product_category)) - catIdx(ssMainCategory(b.product_category))
       || secIdx(a.section) - secIdx(b.section)
-      || String(a.pmc || '').localeCompare(String(b.pmc || ''))
-      || String(a.product_line || '').localeCompare(String(b.product_line || '')));
+      || String(a.product_category || '').localeCompare(String(b.product_category || ''))
+      || String(a.pmc || '').localeCompare(String(b.pmc || '')));
 
   const colCount = cols.length + (editCol ? 1 : 0);
   let html = '';
@@ -2629,7 +2612,7 @@ function renderSalesSupport() {
   let n = 0;   // running row number across the whole filtered set
   const flushSubtotal = () => { if (group !== null && groupRows.length) html += ssSubtotalRowHtml(cols, groupRows, editCol); };
   for (const row of rows) {
-    const g = `${row.product_category || '—'}  ·  ${row.section || '—'}`;
+    const g = `${ssMainCategory(row.product_category) || '—'}  ·  ${row.section || '—'}`;
     if (g !== group) {
       flushSubtotal();        // close out the previous section with its subtotal
       group = g; alt = 0; groupRows = [];
@@ -2680,9 +2663,6 @@ function ssFormFieldHtml(f) {
     const opts = ssPmcList().map((p) => `<option value="${escapeAttr(p)}"></option>`).join('');
     control = `<input type="text" list="ssPmcDatalist" data-ss-key="pmc" placeholder="Type to search PMCs…" autocomplete="off" />`
       + `<datalist id="ssPmcDatalist">${opts}</datalist>`;
-  } else if (f.key === 'product_line') {
-    // Optional line within a category — SEO splits out of Digital Advertising.
-    control = `<select data-ss-key="product_line"><option value="">— main line</option><option value="SEO">SEO (under Digital Advertising)</option></select>`;
   } else if (f.type === 'select') {
     const opts = f.options.map((o) => `<option value="${escapeAttr(o)}">${o || '—'}</option>`).join('');
     control = `<select data-ss-key="${f.key}">${opts}</select>`;

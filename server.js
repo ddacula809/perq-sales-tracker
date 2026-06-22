@@ -349,23 +349,20 @@ async function autoTrackBookingInSalesSupport(b) {
   const period = `Q${info.q} ${info.year}`;
   if (!(await getPeriod(period))) return; // no forecast quarter for this booking — skip
   const pmc = String(b.pmc || '').trim();
-  const category = String(b.bpr_prod_category || '').trim();
+  // SEO is tracked as its own "Product" line (it still groups under Digital Advertising in the
+  // sheet); every other product uses its BPR category.
+  const category = String(b.product || '').trim() === 'SEO' ? 'SEO' : String(b.bpr_prod_category || '').trim();
   if (!pmc || !category) return;
   const section = String(b.pilot_or_ctam || '').trim() === 'Pilot' ? 'Pilot / New Logo' : 'CTAM';
-  // SEO gets its own line item WITHIN the Digital Advertising category (everything else shares
-  // the category's main line). So a PMC can have a Digital Advertising row + a separate SEO row.
-  const line = String(b.product || '').trim() === 'SEO' ? 'SEO' : '';
   const norm = (v) => String(v ?? '').trim().toLowerCase();
   const existing = await listRows('sales_support');
   const already = existing.some((r) => r.period === period
-    && norm(r.pmc) === norm(pmc) && norm(r.product_category) === norm(category)
-    && norm(r.section) === norm(section) && norm(r.product_line) === norm(line));
+    && norm(r.pmc) === norm(pmc) && norm(r.product_category) === norm(category) && norm(r.section) === norm(section));
   if (already) return;
   const total = Number(b.company_total_booking) || 0;
   await insertRow('sales_support', {
     period,
     product_category: category,
-    product_line: line,
     section,
     pmc,
     booking_type: section === 'Pilot / New Logo' ? 'Pilot' : (b.ctam_type || ''),

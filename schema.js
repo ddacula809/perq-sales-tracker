@@ -186,11 +186,12 @@ export const PRODUCT_FIELDS = [
 // Sales Support (Q2 2026 forecast). Editable fields stored in the sales_support table.
 // The monthly "Actual" columns and "Q2 Actual" are computed on the client from Bookings.
 export const SALES_SUPPORT_SECTIONS = ['Pilot / New Logo', 'CTAM'];
+// Sales Support "Product" options = the BPR categories, plus SEO as its own selectable line.
+// SEO rows still GROUP under Digital Advertising (see ssMainCategory in app.js); the BPR category
+// itself is unchanged everywhere else.
+export const SALES_SUPPORT_CATEGORIES = ['Software', 'Pulse', 'Website', 'Digital Advertising', 'SEO', 'Tools for Google'];
 export const SALES_SUPPORT_FIELDS = [
-  { key: 'product_category', label: 'Product',        type: 'select', options: BPR_CATEGORIES },
-  // Optional line item WITHIN a category (e.g. 'SEO' splits out of Digital Advertising so a PMC
-  // can have a separate SEO row and a Digital Advertising row, both under the same category group).
-  { key: 'product_line',     label: 'Line',           type: 'text' },
+  { key: 'product_category', label: 'Product',        type: 'select', options: SALES_SUPPORT_CATEGORIES },
   { key: 'section',          label: 'Section',        type: 'select', options: SALES_SUPPORT_SECTIONS },
   { key: 'pmc',              label: 'PMC',            type: 'text' },
   { key: 'booking_type',     label: 'Booking Type',   type: 'select', options: ['', 'Pilot', 'Conversion', 'Straight to Pay', 'Expansion', 'Upsell', 'License Transfer', 'Renewal Rate Increase', 'Downgrade', 'Re-rate'] },
