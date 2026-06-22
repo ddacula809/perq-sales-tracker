@@ -3091,7 +3091,7 @@ function wireView() {
 // Freeze key column(s) per grid: on Bookings it's Property Name; on Churn it's PMC Buying
 // Center + Property (a contiguous pinned block). The columns before them scroll away normally,
 // and once pinned they stick to the left (after the sticky row-number) while the rest scrolls.
-const BOOKING_FREEZE = ['property_name'];
+const BOOKING_FREEZE = ['property_name', 'product', 'mrr'];
 const CHURN_FREEZE = ['pmc_buying_center', 'property'];
 const GRID_FREEZE = { bookings: BOOKING_FREEZE, churn: CHURN_FREEZE };
 function applyGridFreeze() {
