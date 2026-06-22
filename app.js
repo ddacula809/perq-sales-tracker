@@ -2550,8 +2550,11 @@ function ssFilterOptionsHtml(values, current) {
 }
 function populateSsFilters() {
   const owners = (ssFieldDef('account_owner')?.options || []).filter(Boolean);
-  const products = (ssFieldDef('product_category')?.options || []).filter(Boolean);
+  // The Product filter groups SEO under Digital Advertising, so it's not its own filter option.
+  const products = (ssFieldDef('product_category')?.options || []).filter((c) => c && c !== 'SEO');
   const sections = (ssFieldDef('section')?.options || []).filter(Boolean);
+  // If a now-removed option (e.g. SEO) was selected, fall back to All.
+  if (state.ssFilters.product !== 'All' && !products.includes(state.ssFilters.product)) state.ssFilters.product = 'All';
   $('#ssFilterOwner').innerHTML = ssFilterOptionsHtml(owners, state.ssFilters.owner);
   $('#ssFilterProduct').innerHTML = ssFilterOptionsHtml(products, state.ssFilters.product);
   $('#ssFilterSection').innerHTML = ssFilterOptionsHtml(sections, state.ssFilters.section);
@@ -2596,7 +2599,7 @@ function renderSalesSupport() {
   const rows = state.rows.sales_support
     .filter((r) => r.period === state.salesPeriod)
     .filter((r) => ff.owner === 'All' || (r.account_owner || '') === ff.owner)
-    .filter((r) => ff.product === 'All' || (r.product_category || '') === ff.product)
+    .filter((r) => ff.product === 'All' || ssMainCategory(r.product_category) === ff.product)
     .filter((r) => ff.section === 'All' || (r.section || '') === ff.section)
     .sort((a, b) =>
       catIdx(ssMainCategory(a.product_category)) - catIdx(ssMainCategory(b.product_category))
