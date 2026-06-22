@@ -182,6 +182,13 @@ function fieldsForTab() {
   if (billing) {
     cols = [...cols.filter((c) => !billing.has(c.key)), ...cols.filter((c) => billing.has(c.key))];
   }
+  // Bookings: a synthetic, read-only "Status" column (Active / Churned / Never went live),
+  // derived by cross-referencing the Churn Tracker. Sits right after the property name.
+  if (state.tab === 'bookings') {
+    const idx = cols.findIndex((c) => c.key === 'property_name');
+    const statusCol = { key: 'churn_status', label: 'Status', type: 'text', synthetic: true };
+    if (idx >= 0) cols.splice(idx + 1, 0, statusCol); else cols.push(statusCol);
+  }
   return { cols, computedKeys, computed: s.computed };
 }
 
@@ -201,11 +208,52 @@ function renderHead() {
     `<th class="del"></th></tr>`;
 }
 
+// A booking's status vs the Churn Tracker: 'churned' (a matching churn exists), 'never-live'
+// (matches a churn but the booking never got a GoLive date), or 'active' (no matching churn).
+// Match = same Property ID + Product + MRR (excluding Contraction/offset churns). The churn-key
+// set is cached by the churn array reference so it's built once per data load, not per row.
+let _churnKeySrc = null;
+let _churnKeySet = new Set();
+function churnKeySet() {
+  if (_churnKeySrc === state.rows.churn) return _churnKeySet;
+  const set = new Set();
+  for (const c of state.rows.churn || []) {
+    if (String(c.classification || '') === 'Contraction') continue; // offsets aren't churn
+    const pid = String(c.property_id || '').trim().toLowerCase();
+    const prod = String(c.product || '').trim().toLowerCase();
+    if (!pid || !prod) continue;
+    set.add(`${pid}|${prod}|${Math.round((Number(c.mrr) || 0) * 100)}`);
+  }
+  _churnKeySrc = state.rows.churn;
+  _churnKeySet = set;
+  return set;
+}
+function bookingChurnStatus(b) {
+  const pid = String(b.property_id || '').trim().toLowerCase();
+  const prod = String(b.product || '').trim().toLowerCase();
+  if (!pid || !prod) return 'active';
+  const key = `${pid}|${prod}|${Math.round((Number(b.mrr) || 0) * 100)}`;
+  if (!churnKeySet().has(key)) return 'active';
+  return b.golive_date ? 'churned' : 'never-live';
+}
+const CHURN_STATUS_LABEL = { churned: 'Churned', 'never-live': 'Never went live', active: 'Active' };
+function churnStatusCell(row) {
+  const s = bookingChurnStatus(row);
+  return `<td class="ro booking-status status-${s}" data-col="churn_status">${CHURN_STATUS_LABEL[s]}</td>`;
+}
+// The <tr> class that tints churned (red) / never-live (blue) rows in the Bookings grid.
+function rowStatusClass(row) {
+  if (state.tab !== 'bookings') return '';
+  const s = bookingChurnStatus(row);
+  return (s === 'churned' || s === 'never-live') ? ` class="row-${s}"` : '';
+}
+
 function rowInnerHtml(row, i, fields) {
   const { cols, computedKeys } = fields || fieldsForTab();
   let html = `<td class="rownum">${i + 1}</td>`;
   for (const f of cols) {
-    if (computedKeys.has(f.key)) html += computedCell(f, row);
+    if (f.key === 'churn_status') html += churnStatusCell(row);
+    else if (computedKeys.has(f.key)) html += computedCell(f, row);
     else if (canEditField(f)) html += editCell(f, row);
     else html += readonlyCell(f, row);
   }
@@ -248,6 +296,10 @@ function sortRows(rows, tab) {
   const def = [...sch.editable, ...sch.computed].find((f) => f.key === s.key);
   const type = def ? def.type : 'text';
   const key = s.key;
+  // The synthetic "Status" column isn't a stored field — derive its value for sorting.
+  if (key === 'churn_status') {
+    return rows.slice().sort((a, b) => s.dir * bookingChurnStatus(a).localeCompare(bookingChurnStatus(b)));
+  }
   const isBlank = (r) => { const v = r[key]; return v === null || v === undefined || String(v).trim() === ''; };
   const base = (a, b) => {
     const av = a[key], bv = b[key];
@@ -328,7 +380,7 @@ function renderBody() {
   // Build the whole page as one HTML string (one parse + one layout) — far faster than
   // creating/appending each row, which forced a reflow per row on the wide grid.
   const fields = fieldsForTab();
-  tbody.innerHTML = slice.map((row, i) => `<tr data-id="${row.id}">${rowInnerHtml(row, start + i, fields)}</tr>`).join('');
+  tbody.innerHTML = slice.map((row, i) => `<tr data-id="${row.id}"${rowStatusClass(row)}>${rowInnerHtml(row, start + i, fields)}</tr>`).join('');
   renderPager(rows.length, page, totalPages, start, slice.length);
 }
 

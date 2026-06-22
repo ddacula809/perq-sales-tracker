@@ -345,6 +345,14 @@ tbody td.billing { background: var(--billing-bg) !important; }
 tbody td.ro { padding: 7px 9px; color: var(--ink); white-space: nowrap; }
 tbody td.ro.num { text-align: right; font-family: 'Fira Mono', monospace; }
 tbody td.offset-na { text-align: right; }
+/* Bookings "Status" column + row highlighting vs the Churn Tracker.
+   !important + later source order so the tint wins over zebra, computed and billing cells. */
+tbody tr.row-churned td { background: #fbe1e1 !important; }
+tbody tr.row-never-live td { background: #e3ebfb !important; }
+.booking-status { font-weight: 600; white-space: nowrap; }
+.booking-status.status-churned { color: #b3261e; }
+.booking-status.status-never-live { color: #1f4fb0; }
+.booking-status.status-active { color: var(--ink-soft); font-weight: 500; }
 tbody td.offset-na .na { display: inline-block; padding: 7px 10px; color: var(--ink-soft); opacity: .5; }
 tbody td.del {
   position: sticky; right: 0; background: var(--panel); border-left: 1px solid var(--line-strong);
