@@ -465,6 +465,12 @@ function rowMatchesFilters(r, f) {
       if (!Number.isFinite(t) || t < Date.now() - days * 86400000) return false;
       continue;
     }
+    if (key === 'golive_date') { // GoLive filter = has a date ("Go Live") vs no date ("Not Live")
+      const hasDate = String(r.golive_date ?? '').trim() !== '';
+      if (v === 'Go Live' && !hasDate) return false;
+      if (v === 'Not Live' && hasDate) return false;
+      continue;
+    }
     if (v === '(blank)') { if (String(r[key] ?? '').trim() !== '') return false; continue; }
     if (String(r[key] ?? '') !== String(v)) return false;
   }
@@ -550,6 +556,8 @@ function renderSummary() {
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
     if (col.key === 'added_recent') return ['All', ...Object.keys(ADDED_WINDOWS)];
+    // GoLive filter is a has-date / no-date toggle, not a list of dates.
+    if (col.key === 'golive_date') return ['All', 'Go Live', 'Not Live'];
     // Options reflect rows matching every OTHER active filter (cascading).
     const src = rowsExcept(col.key);
     if (col.key === 'booking_my') {
