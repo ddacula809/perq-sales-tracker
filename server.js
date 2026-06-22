@@ -129,6 +129,7 @@ app.get('/api/schema', async (_req, res, next) => {
       legacy_golives: { editable: LEGACY_GOLIVE_FIELDS },
       legacy_churn: { editable: LEGACY_CHURN_FIELDS },
       productCategories,
+      bprCategories: BPR_CATEGORIES,
       assistantEnabled: assistantEnabled(),
     });
   } catch (e) { next(e); }
@@ -348,7 +349,8 @@ async function autoTrackBookingInSalesSupport(b) {
   const period = `Q${info.q} ${info.year}`;
   if (!(await getPeriod(period))) return; // no forecast quarter for this booking — skip
   const pmc = String(b.pmc || '').trim();
-  const category = String(b.bpr_prod_category || '').trim();
+  // Sales Support splits SEO out of the Digital Advertising category into its own line.
+  const category = String(b.product || '').trim() === 'SEO' ? 'SEO' : String(b.bpr_prod_category || '').trim();
   if (!pmc || !category) return;
   const section = String(b.pilot_or_ctam || '').trim() === 'Pilot' ? 'Pilot / New Logo' : 'CTAM';
   const norm = (v) => String(v ?? '').trim().toLowerCase();

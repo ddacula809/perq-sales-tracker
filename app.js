@@ -2364,6 +2364,12 @@ const ssLabels = () => Object.fromEntries(ssColumns());
 
 // Sum of Company Total Booking for matching PMC + product category + month + year.
 // For the "Pilot / New Logo" section, only count bookings tagged Pilot in "Pilot or CTAM".
+// Sales Support splits SEO out of the Digital Advertising BPR category into its own line, so a
+// PMC can have a separate "SEO" row and "Digital Advertising" row. (The BPR category itself is
+// unchanged everywhere else — this split only applies to Sales Support grouping.)
+function ssCategoryOf(b) {
+  return String(b.product || '').trim() === 'SEO' ? 'SEO' : String(b.bpr_prod_category || '').trim();
+}
 function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
@@ -2372,7 +2378,7 @@ function ssActual(row, monthName, year) {
   let sum = 0;
   for (const b of state.rows.bookings) {
     if (String(b.pmc || '').trim().toLowerCase() === pmc
-      && (b.bpr_prod_category || '') === cat
+      && ssCategoryOf(b) === cat
       && b.booking_month === monthName
       && reconNum(b.booking_year) === year
       && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot')) {
@@ -2394,7 +2400,7 @@ function ssActualBreakdown(row, key) {
   const pilotOnly = String(row.section || '').trim() === 'Pilot / New Logo';
   return state.rows.bookings.filter((b) =>
     String(b.pmc || '').trim().toLowerCase() === pmc
-    && (b.bpr_prod_category || '') === cat
+    && ssCategoryOf(b) === cat
     && months.has(b.booking_month)
     && reconNum(b.booking_year) === year
     && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot'));
@@ -3423,9 +3429,8 @@ async function renderUsersList() {
 
 // ---------- Products (admin-managed product list) ----------
 function bprCategoryOptions() {
-  const f = (state.schema.sales_support && state.schema.sales_support.editable || [])
-    .find((x) => x.key === 'product_category');
-  return (f && f.options) || ['Software', 'Pulse', 'Website', 'Digital Advertising', 'Tools for Google'];
+  return (state.schema && state.schema.bprCategories)
+    || ['Software', 'Pulse', 'Website', 'Digital Advertising', 'Tools for Google'];
 }
 function catOptionsHtml(selected) {
   return bprCategoryOptions().map((c) =>
