@@ -2466,6 +2466,30 @@ function ssReconcileViewed() {
     list,
   };
 }
+// Why a booking isn't represented by any Sales Support row.
+function ssUntrackedReason(b) {
+  if (!String(b.pmc || '').trim()) return 'Missing PMC';
+  if (!ssCategoryOf(b)) return 'Missing Product';
+  return 'No matching row yet — click Sync from Bookings';
+}
+function ssReconcileReportHtml(rec) {
+  const p = viewedPeriodObj();
+  const body = rec.list
+    .slice()
+    .sort((a, b) => (Number(b.company_total_booking) || 0) - (Number(a.company_total_booking) || 0))
+    .map((b) => `<tr>
+      <td title="${escapeAttr(b.property_id || '')}">${escapeHtml(b.pmc || '—')}</td>
+      <td>${escapeHtml(b.property_only || b.property_name || b.property_id || '—')}</td>
+      <td>${escapeHtml(b.product || '—')}</td>
+      <td>${escapeHtml(b.booking_month || '—')}</td>
+      <td class="num">${fmtMoney(b.company_total_booking)}</td>
+      <td>${escapeHtml(ssUntrackedReason(b))}</td>
+    </tr>`).join('');
+  return `<p>${p ? escapeHtml(p.period) : ''}: <strong>${fmtMoney(rec.gap)}</strong> across ${rec.list.length} booking${rec.list.length === 1 ? '' : 's'} isn’t pulled into Sales Support.</p>`
+    + '<table class="recon-table"><thead><tr><th>PMC</th><th>Property</th><th>Product</th><th>Month</th><th class="num">Company Total</th><th>Reason</th></tr></thead>'
+    + `<tbody>${body}</tbody></table>`
+    + '<p class="muted" style="margin-top:8px">Fix the flagged field (PMC / Product) on each booking in the Bookings section, then run Sync from Bookings again. Note: bookings with a $0 Company Total (e.g. New-Free / New-Paid pilots) are already tracked but add $0, so they won’t appear here.</p>';
+}
 function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
@@ -2815,15 +2839,9 @@ function wireSalesSupport() {
       state.rows.sales_support = await api('/api/sales_support');
       renderSalesSupport(); ssApplyFreeze();
       const rec = ssReconcileViewed();
-      let msg = created ? `Added ${created} row${created === 1 ? '' : 's'} from Bookings` : 'No new rows needed';
-      if (rec.gap) {
-        msg += ` · ${fmtMoney(rec.gap)} across ${rec.list.length} booking${rec.list.length === 1 ? '' : 's'} still untracked — missing a PMC or Product`;
-        console.warn('[Sales Support] untracked bookings this quarter:',
-          rec.list.map((b) => ({ id: b.id, pmc: b.pmc, property: b.property_only || b.property_name, product: b.product, month: b.booking_month, companyTotal: b.company_total_booking })));
-      } else {
-        msg += ' · fully reconciled with Bookings';
-      }
-      toast(msg);
+      toast(created ? `Added ${created} row${created === 1 ? '' : 's'} from Bookings` : 'No new rows needed');
+      // If anything still isn't pulled in, show exactly which bookings and why.
+      if (rec.gap) showResult('Bookings not pulled into Sales Support', ssReconcileReportHtml(rec));
     } catch (err) { toast(err.message, true); }
   };
   $('#ssCloseQuarter').onclick = async () => {
