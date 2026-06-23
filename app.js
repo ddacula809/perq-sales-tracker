@@ -2434,7 +2434,8 @@ function ssColumns() {
 const ssLabels = () => Object.fromEntries(ssColumns());
 
 // Sum of Company Total Booking for matching PMC + product category + month + year.
-// For the "Pilot / New Logo" section, only count bookings tagged Pilot in "Pilot or CTAM".
+// The two sections are mutually exclusive so a booking is counted once: a "Pilot / New Logo" row
+// counts only Pilot bookings, and a "CTAM" row counts only non-Pilot (CTAM) bookings.
 // SEO is selectable as its own "Product" in Sales Support, but its rows still GROUP under
 // Digital Advertising (ssMainCategory). For matching actuals, a booking's Sales Support product
 // is 'SEO' when the product is SEO, else its BPR category — so an SEO row pulls only SEO bookings
@@ -2443,18 +2444,19 @@ function ssCategoryOf(b) {
   return String(b.product || '').trim() === 'SEO' ? 'SEO' : String(b.bpr_prod_category || '').trim();
 }
 const ssMainCategory = (cat) => (String(cat || '').trim() === 'SEO' ? 'Digital Advertising' : String(cat || '').trim());
+const ssIsPilot = (b) => String(b.pilot_or_ctam || '').trim() === 'Pilot';
+const ssSectionMatch = (row, b) => (String(row.section || '').trim() === 'Pilot / New Logo' ? ssIsPilot(b) : !ssIsPilot(b));
 function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
   if (!pmc || !cat || !monthName) return 0;
-  const pilotOnly = String(row.section || '').trim() === 'Pilot / New Logo';
   let sum = 0;
   for (const b of state.rows.bookings) {
     if (String(b.pmc || '').trim().toLowerCase() === pmc
       && ssCategoryOf(b) === cat
       && b.booking_month === monthName
       && reconNum(b.booking_year) === year
-      && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot')) {
+      && ssSectionMatch(row, b)) {
       sum += Number(b.company_total_booking) || 0;
     }
   }
@@ -2470,13 +2472,12 @@ function ssActualBreakdown(row, key) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
   if (!pmc || !cat || !months.size) return [];
-  const pilotOnly = String(row.section || '').trim() === 'Pilot / New Logo';
   return state.rows.bookings.filter((b) =>
     String(b.pmc || '').trim().toLowerCase() === pmc
     && ssCategoryOf(b) === cat
     && months.has(b.booking_month)
     && reconNum(b.booking_year) === year
-    && (!pilotOnly || String(b.pilot_or_ctam || '').trim() === 'Pilot'));
+    && ssSectionMatch(row, b));
 }
 
 // Hover-tooltip HTML for an Actual cell: the properties booked + their amounts + the total.
