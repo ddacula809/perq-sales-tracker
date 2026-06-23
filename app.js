@@ -334,9 +334,13 @@ function applyTotalsZoom() {
   if (lvl) lvl.textContent = Math.round(state.totalsZoom * 100) + '%';
 }
 // Which money columns the bottom totals row sums, per grid. Totals reflect the filtered set.
-// A key can be a single field or an array of fields summed together (e.g. Commissionable + OTF).
+// The One-Time Fee that counts toward "Commissionable + OTF": excluded (0) for Conversions
+// (Pilot Type = Conversion), since the implementation fee was already billed during the pilot.
+const otfForCommissionable = (r) => (String(r.pilot_type || '').trim() === 'Conversion' ? 0 : (Number(r.one_time_fee) || 0));
+const commissionablePlusOtf = (r) => (Number(r.commissionable_bookings) || 0) + otfForCommissionable(r);
+// A key can be a single field, an array of fields summed together, or a per-row function.
 const TOTALS_FIELDS = {
-  bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings'], ['Commissionable + OTF', ['commissionable_bookings', 'one_time_fee']]],
+  bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings'], ['Commissionable + OTF', commissionablePlusOtf]],
   churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
 };
 function renderBookingTotals(rows) {
@@ -344,6 +348,7 @@ function renderBookingTotals(rows) {
   const fields = TOTALS_FIELDS[state.tab];
   if (!fields) { el.hidden = true; return; }
   const sum = (k) => {
+    if (typeof k === 'function') return rows.reduce((a, r) => a + (Number(k(r)) || 0), 0);
     const keys = Array.isArray(k) ? k : [k];
     return rows.reduce((a, r) => a + keys.reduce((s, kk) => s + (Number(r[kk]) || 0), 0), 0);
   };
@@ -650,11 +655,13 @@ function renderSummary() {
     const totalBooking = sum('company_total_booking');
     const totalOTF = sum('one_time_fee');
     const totalComm = sum('commissionable_bookings');
+    // Commissionable + OTF excludes the One-Time Fee on Conversions (already billed in pilot).
+    const commPlusOtf = filtered.reduce((a, r) => a + commissionablePlusOtf(r), 0);
     metricsHtml = '<div class="metrics-row">' +
       metric('Total Company Booking', totalBooking, true) +
       metric('Total One-Time Fees', totalOTF) +
       metric('Total Commissionable', totalComm) +
-      metric('Commissionable + OTF', totalComm + totalOTF) +
+      metric('Commissionable + OTF', commPlusOtf) +
       '</div>';
 
     // Company Total Booking per BPR product category, with its own (separate) quarter filter.
