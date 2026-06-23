@@ -699,6 +699,49 @@ app.delete('/api/sales_support/:id', requireRole('admin', 'standard', 'sales_adm
   } catch (e) { next(e); }
 });
 
+// Backfill Sales Support rows from existing bookings: for every booking in an OPEN quarter,
+// ensure a row exists for its PMC + Product (SEO split out) + Section. Mirrors auto-track but
+// runs across all bookings (e.g. after a bulk import, which doesn't auto-track). Never creates
+// duplicates and never touches archived quarters. Returns how many rows were created.
+app.post('/api/sales_support/sync', requireRole('admin', 'sales_admin'), async (_req, res, next) => {
+  try {
+    const periods = await listPeriods();
+    const openPeriods = new Set(periods.filter((p) => p.status === 'open').map((p) => p.period));
+    const norm = (v) => String(v ?? '').trim().toLowerCase();
+    const keyOf = (period, pmc, cat, section) => `${period}||${norm(pmc)}||${norm(cat)}||${norm(section)}`;
+    const have = new Set((await listRows('sales_support'))
+      .map((r) => keyOf(r.period, r.pmc, r.product_category, r.section)));
+    let created = 0;
+    for (const raw of await listRows('bookings')) {
+      const b = withComputed(raw, computeBooking);
+      const month = String(b.booking_month || '').trim();
+      const year = b.booking_year;
+      if (!month || year === null || year === undefined || year === '') continue;
+      const info = quarterFromMonthName(month, year);
+      if (!info) continue;
+      const period = `Q${info.q} ${info.year}`;
+      if (!openPeriods.has(period)) continue; // only open quarters are editable
+      const pmc = String(b.pmc || '').trim();
+      const category = String(b.product || '').trim() === 'SEO' ? 'SEO' : String(b.bpr_prod_category || '').trim();
+      if (!pmc || !category) continue;
+      const section = String(b.pilot_or_ctam || '').trim() === 'Pilot' ? 'Pilot / New Logo' : 'CTAM';
+      const k = keyOf(period, pmc, category, section);
+      if (have.has(k)) continue;
+      have.add(k); // avoid creating duplicates within this run
+      const total = Number(b.company_total_booking) || 0;
+      await insertRow('sales_support', {
+        period, product_category: category, section, pmc,
+        booking_type: section === 'Pilot / New Logo' ? 'Pilot' : (b.ctam_type || ''),
+        account_owner: b.sales_rep || '',
+        q2_target: total, apr_target: 0, may_target: 0, jun_target: 0,
+        worst: total, accurate: total, best: total, notes: '',
+      });
+      created += 1;
+    }
+    res.json({ created });
+  } catch (e) { next(e); }
+});
+
 // ---- User management (admin only) ----
 app.get('/api/users', requireRole('admin'), async (_req, res, next) => {
   try { res.json(await listUsers()); } catch (e) { next(e); }

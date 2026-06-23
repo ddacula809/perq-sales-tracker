@@ -2644,6 +2644,7 @@ function renderSalesSupport() {
   pill.textContent = viewed ? (viewed.status === 'open' ? 'Open' : 'Archived') : '';
   pill.style.display = viewed ? '' : 'none';
   $('#ssAddRow').style.display = ssEditable() ? '' : 'none';
+  $('#ssSyncBookings').hidden = !canManageQuarters();
   $('#ssCloseQuarter').hidden = !(canManageQuarters() && viewed && viewed.status === 'open');
   // Open New Quarter only applies on the most recent quarter (it creates the next one).
   // If a later quarter already exists, disable it so you can't open ahead from an older quarter.
@@ -2787,6 +2788,15 @@ function wireSalesSupport() {
   $('#ssFilterOwner').onchange = (e) => { state.ssFilters.owner = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssFilterProduct').onchange = (e) => { state.ssFilters.product = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssFilterSection').onchange = (e) => { state.ssFilters.section = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
+  $('#ssSyncBookings').onclick = async () => {
+    if (!confirm('Create a Sales Support row for every booking (PMC + Product + Section) in the open quarter(s) that doesn’t have one yet?\n\nThis never removes or duplicates rows.')) return;
+    try {
+      const { created } = await api('/api/sales_support/sync', { method: 'POST' });
+      state.rows.sales_support = await api('/api/sales_support');
+      renderSalesSupport(); ssApplyFreeze();
+      toast(created ? `Added ${created} row${created === 1 ? '' : 's'} from Bookings` : 'Already in sync — no rows to add');
+    } catch (err) { toast(err.message, true); }
+  };
   $('#ssCloseQuarter').onclick = async () => {
     const period = state.salesPeriod;
     if (!period) return;
