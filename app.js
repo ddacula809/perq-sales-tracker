@@ -2446,6 +2446,26 @@ function ssCategoryOf(b) {
 const ssMainCategory = (cat) => (String(cat || '').trim() === 'SEO' ? 'Digital Advertising' : String(cat || '').trim());
 const ssIsPilot = (b) => String(b.pilot_or_ctam || '').trim() === 'Pilot';
 const ssSectionMatch = (row, b) => (String(row.section || '').trim() === 'Pilot / New Logo' ? ssIsPilot(b) : !ssIsPilot(b));
+// Reconcile the viewed quarter: bookings whose Company Total isn't captured by any Sales Support
+// row (e.g. the booking is missing a PMC or Product, so no row can represent it). Returns the
+// quarter's total bookings, the un-tracked total, and the list of those bookings.
+function ssReconcileViewed() {
+  const p = viewedPeriodObj();
+  if (!p) return { bookingsTotal: 0, gap: 0, list: [] };
+  const months = new Set(QUARTER_MONTHS[p.quarter]);
+  const rows = state.rows.sales_support.filter((r) => r.period === p.period);
+  const matched = (b) => rows.some((r) =>
+    String(r.pmc || '').trim().toLowerCase() === String(b.pmc || '').trim().toLowerCase()
+    && String(r.product_category || '').trim() === ssCategoryOf(b)
+    && ssSectionMatch(r, b));
+  const booked = state.rows.bookings.filter((b) => months.has(b.booking_month) && reconNum(b.booking_year) === p.year);
+  const list = booked.filter((b) => (Number(b.company_total_booking) || 0) !== 0 && !matched(b));
+  return {
+    bookingsTotal: booked.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0),
+    gap: list.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0),
+    list,
+  };
+}
 function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
   const cat = String(row.product_category || '').trim();
@@ -2794,7 +2814,16 @@ function wireSalesSupport() {
       const { created } = await api('/api/sales_support/sync', { method: 'POST' });
       state.rows.sales_support = await api('/api/sales_support');
       renderSalesSupport(); ssApplyFreeze();
-      toast(created ? `Added ${created} row${created === 1 ? '' : 's'} from Bookings` : 'Already in sync — no rows to add');
+      const rec = ssReconcileViewed();
+      let msg = created ? `Added ${created} row${created === 1 ? '' : 's'} from Bookings` : 'No new rows needed';
+      if (rec.gap) {
+        msg += ` · ${fmtMoney(rec.gap)} across ${rec.list.length} booking${rec.list.length === 1 ? '' : 's'} still untracked — missing a PMC or Product`;
+        console.warn('[Sales Support] untracked bookings this quarter:',
+          rec.list.map((b) => ({ id: b.id, pmc: b.pmc, property: b.property_only || b.property_name, product: b.product, month: b.booking_month, companyTotal: b.company_total_booking })));
+      } else {
+        msg += ' · fully reconciled with Bookings';
+      }
+      toast(msg);
     } catch (err) { toast(err.message, true); }
   };
   $('#ssCloseQuarter').onclick = async () => {
