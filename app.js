@@ -334,15 +334,19 @@ function applyTotalsZoom() {
   if (lvl) lvl.textContent = Math.round(state.totalsZoom * 100) + '%';
 }
 // Which money columns the bottom totals row sums, per grid. Totals reflect the filtered set.
+// A key can be a single field or an array of fields summed together (e.g. Commissionable + OTF).
 const TOTALS_FIELDS = {
-  bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings']],
+  bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings'], ['Commissionable + OTF', ['commissionable_bookings', 'one_time_fee']]],
   churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
 };
 function renderBookingTotals(rows) {
   const el = $('#bookingTotals');
   const fields = TOTALS_FIELDS[state.tab];
   if (!fields) { el.hidden = true; return; }
-  const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  const sum = (k) => {
+    const keys = Array.isArray(k) ? k : [k];
+    return rows.reduce((a, r) => a + keys.reduce((s, kk) => s + (Number(r[kk]) || 0), 0), 0);
+  };
   const cell = (label, k) => `<span class="gt-cell"><span class="gt-k">${label}</span><span class="gt-v">${fmtMoney(sum(k))}</span></span>`;
   el.innerHTML = `<div class="gt-content">`
     + `<span class="gt-count">${fmtNum(rows.length)} row${rows.length === 1 ? '' : 's'}</span>`
