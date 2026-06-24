@@ -211,8 +211,37 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .summary {
   display: flex; flex-direction: column; gap: 12px; padding: 14px 22px;
   border-bottom: 1px solid var(--line); background: var(--paper);
+  position: relative; z-index: 30; /* so filter dropdowns overlay the grid below */
 }
 .summary.hidden { display: none; }
+/* Multi-select filter dropdowns (checkbox lists) */
+.ms { position: relative; display: inline-block; }
+.ms-btn {
+  font: inherit; display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-width: 150px; max-width: 240px; padding: 5px 8px; border: 1px solid var(--line-strong);
+  border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer;
+}
+.ms-btn:disabled { background: var(--paper); color: var(--ink-soft); cursor: default; }
+.ms-btn .ms-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-caret { color: var(--ink-soft); font-size: 10px; flex-shrink: 0; }
+.ms-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 50;
+  min-width: 220px; max-width: 320px; background: #fff; border: 1px solid var(--line-strong);
+  border-radius: 8px; box-shadow: var(--shadow); padding: 6px;
+}
+.ms-menu[hidden] { display: none; }
+.ms-tools { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.ms-search { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 6px; }
+.ms-clear { font: inherit; font-size: 11px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.ms-clear:hover { color: var(--accent); }
+.ms-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.ms-menu .ms-opt {
+  display: flex; align-items: center; gap: 7px; margin: 0; padding: 4px 6px; border-radius: 5px;
+  font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--ink); white-space: nowrap; cursor: pointer;
+}
+.ms-menu .ms-opt:hover { background: var(--paper); }
+.ms-menu .ms-opt input { margin: 0; flex-shrink: 0; }
+.ms-empty { padding: 6px; color: var(--ink-soft); font-size: 12px; }
 .filters-row, .metrics-row { display: flex; flex-wrap: wrap; gap: 10px; }
 /* Thin drag handle at the top of the grid: drag up to shrink the filter bar, down to grow. */
 .filters-resize {

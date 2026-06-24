@@ -441,52 +441,128 @@ function escapeAttr(v) { return String(v).replace(/"/g, '&quot;'); }
 // ---------- Filters + summary metrics ----------
 // "Recently added" windows (days) for the synthetic added_recent filter, by option label.
 const ADDED_WINDOWS = { 'Today': 1, 'Last 7 days': 7, 'Last 30 days': 30, 'Last 90 days': 90 };
-// Generic: a row passes if, for every active column filter, its value matches. f is keyed
-// by column key, e.g. { sales_rep: 'Kirk Flatter', booking_month: 'April' }.
+// A filter value can be a single value (string) or, for multi-select filters, an array of
+// values. Normalize to the list of *active* selections ([] means "no filter" / All).
+function selectedValues(v) {
+  if (Array.isArray(v)) return v.filter((x) => x != null && x !== 'All' && x !== '');
+  return (v == null || v === 'All' || v === '') ? [] : [v];
+}
+// The value a row presents to a given filter (handles synthetic columns). For value-list
+// filters, an empty value is represented as the "(blank)" option.
+function rowFilterValue(r, key) {
+  if (key === 'booking_my') {
+    return (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
+  }
+  if (key === 'churn_quarter') { const i = monthYearQuarter(r.final_churn_month || ''); return i ? i.label : '(blank)'; }
+  if (key === 'booking_quarter') {
+    const my = (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
+    const i = monthYearQuarter(my); return i ? i.label : '(blank)';
+  }
+  if (key === 'golive_date') return String(r.golive_date ?? '').trim() !== '' ? 'Go Live' : 'Not Live';
+  const raw = r[key];
+  return (raw === null || raw === undefined || String(raw).trim() === '') ? '(blank)' : String(raw);
+}
+// A row passes if, for every active filter, the row matches AT LEAST ONE selected value
+// (multi-select = OR within a column, AND across columns).
 function rowMatchesFilters(r, f) {
   for (const key in f) {
-    const v = f[key];
-    if (v == null || v === 'All' || v === '') continue;
-    if (key === 'booking_my') { // synthetic combined "Booking Month Year"
-      const my = (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
-      if (my !== String(v)) return false;
-      continue;
-    }
-    if (key === 'churn_quarter') { // synthetic quarter from Final Churn Month
-      const info = monthYearQuarter(r.final_churn_month || '');
-      const q = info ? info.label : '';
-      if (v === '(blank)') { if (q !== '') return false; continue; }
-      if (q !== String(v)) return false;
-      continue;
-    }
-    if (key === 'booking_quarter') { // synthetic quarter from Booking Month + Year
-      const my = (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
-      const info = monthYearQuarter(my);
-      const q = info ? info.label : '';
-      if (v === '(blank)') { if (q !== '') return false; continue; }
-      if (q !== String(v)) return false;
-      continue;
-    }
-    if (key === 'added_recent') { // synthetic "recently added" window on created_at
-      const days = ADDED_WINDOWS[v];
+    const sel = selectedValues(f[key]);
+    if (!sel.length) continue;
+    if (key === 'added_recent') { // "recently added" — use the widest selected window
+      const days = Math.max(...sel.map((v) => ADDED_WINDOWS[v] || 0));
       if (!days) continue;
       const t = Date.parse(r.created_at || '');
       if (!Number.isFinite(t) || t < Date.now() - days * 86400000) return false;
       continue;
     }
-    if (key === 'golive_date') { // GoLive filter = has a date ("Go Live") vs no date ("Not Live")
-      const hasDate = String(r.golive_date ?? '').trim() !== '';
-      if (v === 'Go Live' && !hasDate) return false;
-      if (v === 'Not Live' && hasDate) return false;
-      continue;
-    }
-    if (v === '(blank)') { if (String(r[key] ?? '').trim() !== '') return false; continue; }
-    if (String(r[key] ?? '') !== String(v)) return false;
+    if (!sel.includes(rowFilterValue(r, key))) return false;
   }
   return true;
 }
 const bookingMatch = rowMatchesFilters;
 const churnMatch = rowMatchesFilters;
+
+// ---------- Multi-select filter dropdowns (checkbox lists) ----------
+// Build one filter tile as a checkbox dropdown. `options` are the (cascaded) values to choose
+// from; `selected` is the currently-chosen list. Selecting nothing = "All" (no filter).
+function filterTileHtml(key, lbl, options, selected, removable) {
+  const opts = options.slice();
+  for (const s of selected) if (!opts.includes(s)) opts.unshift(s); // keep chosen values selectable
+  const summary = selected.length === 0 ? 'All' : (selected.length === 1 ? selected[0] : `${selected.length} selected`);
+  const search = opts.length > 8 ? '<input type="text" class="ms-search" placeholder="Search…" />' : '';
+  const list = opts.map((o) =>
+    `<label class="ms-opt"><input type="checkbox" value="${escapeAttr(o)}"${selected.includes(o) ? ' checked' : ''}/><span>${escapeHtml(o)}</span></label>`).join('')
+    || '<div class="ms-empty">No values</div>';
+  const x = removable ? `<button type="button" class="filter-x" data-remove-filter="${key}" title="Remove filter">✕</button>` : '';
+  return `<div class="filter" data-filter="${key}">${x}<label>${lbl}</label>`
+    + `<div class="ms" data-ms="${key}">`
+    + `<button type="button" class="ms-btn" data-ms-btn="${key}"><span class="ms-label">${escapeHtml(summary)}</span><span class="ms-caret">▾</span></button>`
+    + `<div class="ms-menu" hidden><div class="ms-tools">${search}<button type="button" class="ms-clear" data-ms-clear="${key}">Clear</button></div>`
+    + `<div class="ms-list">${list}</div></div></div></div>`;
+}
+function setFilterValues(key, arr) {
+  const f = state.filters[state.tab] || (state.filters[state.tab] = {});
+  f[key] = (arr && arr.length) ? arr.slice() : 'All';
+}
+function closeAllMsMenus() {
+  let closed = false;
+  document.querySelectorAll('#summary .ms-menu:not([hidden])').forEach((m) => { m.hidden = true; closed = true; });
+  return closed;
+}
+function updateMsSummary(key) {
+  const ms = document.querySelector(`#summary [data-ms="${key}"]`);
+  if (!ms) return;
+  const sel = selectedValues((state.filters[state.tab] || {})[key]);
+  const label = ms.querySelector('.ms-label');
+  if (label) label.textContent = sel.length === 0 ? 'All' : (sel.length === 1 ? sel[0] : `${sel.length} selected`);
+}
+// Delegated handlers for all filter checkbox dropdowns (attached once; #summary persists).
+function wireFilterMenus() {
+  const summary = $('#summary');
+  if (!summary) return;
+  summary.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-ms-btn]');
+    if (btn && !btn.disabled) {
+      const menu = btn.parentElement.querySelector('.ms-menu');
+      const willOpen = menu.hidden;
+      closeAllMsMenus();
+      if (willOpen) { menu.hidden = false; const s = menu.querySelector('.ms-search'); if (s) setTimeout(() => s.focus(), 0); }
+      e.stopPropagation();
+      return;
+    }
+    const clear = e.target.closest('[data-ms-clear]');
+    if (clear) {
+      const key = clear.dataset.msClear;
+      clear.closest('.ms-menu').querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = false; });
+      setFilterValues(key, []);
+      updateMsSummary(key);
+      if (state.tab !== 'dashboard') renderBody();
+      e.stopPropagation();
+    }
+  });
+  summary.addEventListener('change', (e) => {
+    const cb = e.target.closest('.ms-opt input[type=checkbox]');
+    if (!cb) return;
+    const ms = cb.closest('[data-ms]');
+    const key = ms.dataset.ms;
+    setFilterValues(key, [...ms.querySelectorAll('.ms-opt input[type=checkbox]:checked')].map((c) => c.value));
+    updateMsSummary(key);
+    if (state.tab !== 'dashboard') renderBody();
+  });
+  summary.addEventListener('input', (e) => {
+    const s = e.target.closest('.ms-search');
+    if (!s) return;
+    const q = s.value.trim().toLowerCase();
+    s.closest('.ms-menu').querySelectorAll('.ms-opt').forEach((opt) => {
+      opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+  // Clicking outside an open menu closes it and refreshes the cascading options / metrics.
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.ms')) return;
+    if (closeAllMsMenus()) renderSummary();
+  });
+}
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -624,19 +700,13 @@ function renderSummary() {
     const tiles = active.map((key) => {
       const col = colByKey.get(key);
       const lbl = escapeHtml(adjustable ? col.label : `Filter by ${col.label}`);
-      let vals = valuesFor(col);
-      if (key === 'sales_rep' && lockRep) {
+      if (key === 'sales_rep' && lockRep) { // a tagged Sales user is locked to their own name
         const me = salesOwner();
-        const v = vals.includes(me) ? vals : ['All', me, ...vals.filter((x) => x !== 'All')];
         return `<div class="filter" data-filter="${key}"><label>${lbl}</label>`
-          + `<select id="${key}" disabled>${v.map((o) => `<option${String(o) === String(me) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
+          + `<div class="ms"><button type="button" class="ms-btn" disabled><span class="ms-label">${escapeHtml(me)}</span></button></div></div>`;
       }
-      const cur = f[key] || 'All';
-      // Keep the current selection selectable even if the other filters would exclude it.
-      if (cur !== 'All' && !vals.map(String).includes(String(cur))) vals = ['All', cur, ...vals.filter((o) => o !== 'All')];
-      const opts = vals.map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${o}</option>`).join('');
-      const x = adjustable ? `<button type="button" class="filter-x" data-remove-filter="${key}" title="Remove filter">✕</button>` : '';
-      return `<div class="filter" data-filter="${key}">${x}<label>${lbl}</label><select id="${key}">${opts}</select></div>`;
+      const options = valuesFor(col).filter((v) => v !== 'All');
+      return filterTileHtml(key, lbl, options, selectedValues(f[key]), adjustable);
     }).join('');
     let addTile = '';
     if (adjustable) {
@@ -758,10 +828,7 @@ function renderSummary() {
   el.innerHTML = filtersHtml + metricsHtml;
 
   if (!state.filtersHidden) {
-    active.forEach((id) => {
-      const ctl = $('#' + id);
-      if (ctl && !ctl.disabled) ctl.onchange = (e) => { f[id] = e.target.value; onFilterChange(); };
-    });
+    // Filter value dropdowns are checkbox multi-selects, wired once via wireFilterMenus().
     const addSel = $('#addFilterSelect');
     if (addSel) addSel.onchange = (e) => {
       const id = e.target.value;
@@ -4182,7 +4249,7 @@ function wireSaas() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireAssistant(); wireSaas();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
   applyZoom();
   $('#returnAdminBtn').onclick = returnToAdmin;
   if (state.token) {
