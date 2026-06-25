@@ -23,6 +23,7 @@ const state = {
   sort: { bookings: { key: null, dir: 0 }, churn: { key: null, dir: 0 } },
   closedMonths: {}, // { "May 2026": "2026-06-25" } — closed accounting months + official close date
   closedMonthsList: [], // raw rows for the admin Close Month panel
+  offsetPmc: 'All', // License Transfer offsets review: filter by PMC
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
@@ -2354,11 +2355,17 @@ function offsetCandidates() {
 }
 function renderOffsetReview() {
   const m = fmtMoney;
-  const cands = offsetCandidates();
-  if (!cands.length) {
+  const all = offsetCandidates();
+  if (!all.length) {
     $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC, this or a future quarter) available to offset.</p>';
     return;
   }
+  // Filter by PMC (options = PMCs that actually have offsettable bookings).
+  const pmcs = [...new Set(all.map((c) => String(c.booking.pmc || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  if (state.offsetPmc !== 'All' && !pmcs.includes(state.offsetPmc)) state.offsetPmc = 'All';
+  const cands = state.offsetPmc === 'All' ? all : all.filter((c) => String(c.booking.pmc || '').trim() === state.offsetPmc);
+  const filterHtml = '<div class="offset-filter"><label>Filter by PMC '
+    + `<select data-offset-pmc>${['All', ...pmcs].map((p) => `<option${p === state.offsetPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label></div>`;
   const rows = cands.map(({ booking: b, eligible }) => {
     const hasSame = eligible.some((e) => !e.isFuture);
     const opts = eligible.map((e) => {
@@ -2381,7 +2388,7 @@ function renderOffsetReview() {
       <td><button type="button" class="btn solid offset-apply" data-apply-offset>Apply</button></td>
     </tr>`;
   }).join('');
-  $('#offsetBody').innerHTML = '<table class="recon-table offset-table">'
+  $('#offsetBody').innerHTML = filterHtml + '<table class="recon-table offset-table">'
     + '<colgroup><col class="c-prop"><col class="c-prod"><col class="c-mrr"><col class="c-churn"><col class="c-offset"><col class="c-apply"></colgroup>'
     + '<thead><tr>'
     + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th class="num">Offset</th><th></th>'
@@ -2393,6 +2400,8 @@ function wireOffsetReview() {
   $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
   // Changing the churn re-suggests the offset = min(booking MRR, churned MRR).
   $('#offsetBody').addEventListener('change', (e) => {
+    const pmcSel = e.target.closest('[data-offset-pmc]');
+    if (pmcSel) { state.offsetPmc = pmcSel.value; renderOffsetReview(); return; }
     const sel = e.target.closest('[data-churn-sel]');
     if (!sel) return;
     const tr = sel.closest('[data-booking]');
