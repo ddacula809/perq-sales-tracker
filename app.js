@@ -24,6 +24,7 @@ const state = {
   closedMonths: {}, // { "May 2026": "2026-06-25" } — closed accounting months + official close date
   closedMonthsList: [], // raw rows for the admin Close Month panel
   offsetPmc: 'All', // License Transfer offsets review: filter by PMC
+  offsetSel: {}, // License Transfer offsets review: pending churn selections { bookingId: {churnId, amount} }
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
@@ -2366,26 +2367,43 @@ function renderOffsetReview() {
   const cands = state.offsetPmc === 'All' ? all : all.filter((c) => String(c.booking.pmc || '').trim() === state.offsetPmc);
   const filterHtml = '<div class="offset-filter"><label>Filter by PMC '
     + `<select data-offset-pmc>${['All', ...pmcs].map((p) => `<option${p === state.offsetPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label></div>`;
+  // Pending (un-applied) selections consume churn drop, so a churn chosen for one booking is
+  // removed from the others once fully used, or shows only its remaining drop if partially used.
+  const sel = state.offsetSel || (state.offsetSel = {});
+  const consumedByOthers = (churnId, exceptBookingId) => {
+    let s = 0;
+    for (const bid of Object.keys(sel)) {
+      if (bid === String(exceptBookingId)) continue;
+      const v = sel[bid];
+      if (v && String(v.churnId) === String(churnId)) s += Number(v.amount) || 0;
+    }
+    return s;
+  };
   const rows = cands.map(({ booking: b, eligible }) => {
     const hasSame = eligible.some((e) => !e.isFuture);
-    const opts = eligible.map((e) => {
-      const c = e.churn;
-      return `<option value="${c.id}" data-mrr="${Number(c.mrr) || 0}">${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — dropped ${escapeHtml(m(churnDropAmt(c)))}/mo · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}</option>`;
-    }).join('');
-    const period = `${b.booking_month || ''} ${b.booking_year || ''}`.trim();
+    const cur = sel[b.id] || { churnId: '', amount: 0 };
     const lineMrr = parseMoney(b.mrr) || 0;
-    const firstMrr = Number(eligible[0].churn.mrr) || 0;
-    const def = Math.min(lineMrr || firstMrr, firstMrr || lineMrr);
+    const optList = ['<option value="">— choose a churn —</option>'];
+    for (const e of eligible) {
+      const c = e.churn;
+      const remaining = churnDropAmt(c) - consumedByOthers(c.id, b.id);
+      const isCur = String(cur.churnId) === String(c.id);
+      if (remaining <= 0.005 && !isCur) continue; // fully used by another booking
+      optList.push(`<option value="${c.id}" data-remaining="${remaining}"${isCur ? ' selected' : ''}>`
+        + `${escapeHtml(c.property || c.pmc_buying_center || 'churn')} — ${escapeHtml(m(remaining))}/mo available · ${escapeHtml(e.quarter.label)}${e.isFuture ? ' (future)' : ''}</option>`);
+    }
+    const period = `${b.booking_month || ''} ${b.booking_year || ''}`.trim();
     const futureNote = hasSame ? ''
       : '<div class="offset-future-note">⚠ No churn this quarter for this PMC — the option(s) are future-quarter churns.</div>';
     const propFull = b.property_name || b.property_id || '—';
+    const picked = !!cur.churnId;
     return `<tr data-booking="${b.id}">
       <td class="offset-prop" title="${escapeAttr(propFull)}"><div class="offset-prop-name">${escapeHtml(propFull)}</div><div class="muted-sm">${escapeHtml(b.pmc || '')} · ${escapeHtml(period)}</div>${futureNote}</td>
       <td class="offset-prod" title="${escapeAttr(b.product || '')}">${escapeHtml(b.product || '—')}</td>
       <td class="num">${m(b.mrr)}</td>
-      <td><select class="offset-sel" data-churn-sel>${opts}</select></td>
-      <td class="num"><input type="text" class="offset-amt" data-amt value="${escapeAttr(m(def))}" /></td>
-      <td><button type="button" class="btn solid offset-apply" data-apply-offset>Apply</button></td>
+      <td><select class="offset-sel" data-churn-sel>${optList.join('')}</select></td>
+      <td class="num"><input type="text" class="offset-amt" data-amt value="${picked ? escapeAttr(m(Number(cur.amount) || 0)) : ''}"${picked ? '' : ' disabled'} /></td>
+      <td><button type="button" class="btn solid offset-apply" data-apply-offset${picked ? '' : ' disabled'}>Apply</button></td>
     </tr>`;
   }).join('');
   $('#offsetBody').innerHTML = filterHtml + '<table class="recon-table offset-table">'
@@ -2394,34 +2412,55 @@ function renderOffsetReview() {
     + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th class="num">Offset</th><th></th>'
     + `</tr></thead><tbody>${rows}</tbody></table>`;
 }
+// Drop pending offset selections that are no longer valid (booking already offset, or the chosen
+// churn is no longer eligible — e.g. it became a Contraction or was split after an Apply).
+function pruneOffsetSel() {
+  const sel = state.offsetSel || {};
+  const byBooking = new Map(offsetCandidates().map((c) => [String(c.booking.id), c]));
+  for (const bid of Object.keys(sel)) {
+    const cand = byBooking.get(bid);
+    if (!cand || !cand.eligible.some((e) => String(e.churn.id) === String(sel[bid].churnId))) delete sel[bid];
+  }
+}
 function wireOffsetReview() {
-  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; $('#offsetModal').hidden = false; renderOffsetReview(); };
+  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; state.offsetSel = {}; $('#offsetModal').hidden = false; renderOffsetReview(); };
   $('#offsetClose').onclick = () => { $('#offsetModal').hidden = true; };
   $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
-  // Changing the churn re-suggests the offset = min(booking MRR, churned MRR).
   $('#offsetBody').addEventListener('change', (e) => {
     const pmcSel = e.target.closest('[data-offset-pmc]');
     if (pmcSel) { state.offsetPmc = pmcSel.value; renderOffsetReview(); return; }
-    const sel = e.target.closest('[data-churn-sel]');
-    if (!sel) return;
-    const tr = sel.closest('[data-booking]');
-    const b = state.rows.bookings.find((x) => String(x.id) === tr.dataset.booking);
-    const churnMrr = Number(sel.selectedOptions[0] && sel.selectedOptions[0].dataset.mrr) || 0;
-    const lineMrr = parseMoney(b && b.mrr) || 0;
-    const amtInput = tr.querySelector('[data-amt]');
-    if (amtInput) amtInput.value = fmtMoney(Math.min(lineMrr || churnMrr, churnMrr || lineMrr));
+    const sel = state.offsetSel || (state.offsetSel = {});
+    const churnSel = e.target.closest('[data-churn-sel]');
+    if (churnSel) {
+      const bid = churnSel.closest('[data-booking]').dataset.booking;
+      const churnId = churnSel.value;
+      if (!churnId) { delete sel[bid]; renderOffsetReview(); return; }
+      const remaining = Number(churnSel.selectedOptions[0] && churnSel.selectedOptions[0].dataset.remaining) || 0;
+      const b = state.rows.bookings.find((x) => String(x.id) === bid);
+      const lineMrr = parseMoney(b && b.mrr) || 0;
+      sel[bid] = { churnId: Number(churnId), amount: Math.min(lineMrr || remaining, remaining) };
+      renderOffsetReview();
+      return;
+    }
+    const amtEl = e.target.closest('[data-amt]');
+    if (amtEl) {
+      const bid = amtEl.closest('[data-booking]').dataset.booking;
+      if (sel[bid]) { sel[bid].amount = parseMoney(amtEl.value); renderOffsetReview(); }
+    }
   });
   $('#offsetBody').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-apply-offset]');
-    if (!btn) return;
-    const tr = btn.closest('[data-booking]');
-    const bookingId = Number(tr.dataset.booking);
-    const churnId = Number(tr.querySelector('[data-churn-sel]').value);
-    const offsetAmount = parseMoney(tr.querySelector('[data-amt]').value);
+    if (!btn || btn.disabled) return;
+    const bid = btn.closest('[data-booking]').dataset.booking;
+    const sel = state.offsetSel || {};
+    const cur = sel[bid];
+    if (!cur || !cur.churnId) { toast('Choose a churn to offset with.', true); return; }
     try {
-      await api('/api/bookings/apply-offset', { method: 'POST', body: JSON.stringify({ bookingId, churnId, offsetAmount }) });
+      await api('/api/bookings/apply-offset', { method: 'POST', body: JSON.stringify({ bookingId: Number(bid), churnId: cur.churnId, offsetAmount: cur.amount }) });
+      delete sel[bid];
       state.rows.bookings = await api('/api/bookings');
       state.rows.churn = await api('/api/churn');
+      pruneOffsetSel(); // clear selections invalidated by the split/contraction
       renderOffsetReview();
       renderAll();
       toast('Offset applied');
