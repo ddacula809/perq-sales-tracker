@@ -523,6 +523,14 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
       const last = new Date(Number(y), mi + 1, 0).getDate();
       return `${y}-${String(mi + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
     };
+    // Last day of the month BEFORE the label (so a row's Final Churn lands IN the label's month).
+    const lastDayBeforeMonth = (label) => {
+      const [mn, y] = String(label).split(' ');
+      const mi = MONTH_NAMES.indexOf(mn);
+      if (mi < 0 || !y) return null;
+      const d = new Date(Number(y), mi, 0); // day 0 of month mi = last day of the previous month
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
     const lockedProrated = (churn) => {
       const cc = computeChurn(churn);
       const pm = String(cc.prorated_churn_month || '').trim();      // "May 2026" or "-"
@@ -544,20 +552,45 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
       labels.push(`${churnProp} (${usd(used)})`);
       const locked = lockedProrated(churn);
       if (locked) {
-        // The original churn is left untouched (its closed-month prorated stays frozen). Bring the
-        // prorated drop over to the open month as a Contraction + issue a Churn Credit cancelling it.
-        // last_date = end of the closed month so each recognizes as a clean full amount next month.
-        const broughtLast = lastDayOfMonthLabel(locked.month) || churn.last_date_under_contract;
-        await insertRow('churn', {
-          ...churn, mrr: sign * locked.amount, last_date_under_contract: broughtLast,
-          classification: 'Contraction', date_added: todayStr(),
-          notes: `Prorated churn brought over from ${locked.month} (closed) to offset ${bookingProp} (${bookingPeriod}) — License Transfer`,
-        });
-        await insertRow('churn', {
-          ...churn, mrr: sign * locked.amount, last_date_under_contract: broughtLast,
-          classification: 'Churn Credit', date_added: todayStr(),
-          notes: `Churn Credit for prorated churn brought over from ${locked.month} (offset of ${bookingProp}, ${bookingPeriod})`,
-        });
+        // Closed-month churn. The prorated piece is locked in the closed month; the final/rooftop
+        // piece is in the next (open) month. The offset consumes the prorated FIRST, then the
+        // rooftop. We never change the closed month — instead we bring the prorated over to the
+        // open month + issue a Churn Credit that cancels it; the leftover prorated stays as Churn
+        // Net; the rooftop is contracted only to the extent the offset reaches it.
+        const cc = computeChurn(churn);
+        const Pa = locked.amount;                                       // prorated drop (closed)
+        const Pm = locked.month;
+        const Fa = Math.abs(Number(cc.final_churn_amount) || 0);        // rooftop drop (open)
+        const Fm = String(cc.final_churn_month || '').trim();
+        const proratedUsed = Math.min(used, Pa);
+        const proratedNet = Pa - proratedUsed;
+        const broughtLast = lastDayOfMonthLabel(Pm) || churn.last_date_under_contract; // -> recognizes the open month
+        const openBase = { ...churn, last_date_under_contract: broughtLast, date_added: todayStr() };
+        // Credit the full prorated brought over (cancels the locked closed-month drop).
+        await insertRow('churn', { ...openBase, mrr: sign * Pa, classification: 'Churn Credit',
+          notes: `Churn Credit for prorated churn brought over from ${Pm} (offset of ${bookingProp}, ${bookingPeriod})` });
+        // Brought-over prorated: the used part Contracted; any remainder kept as Churn Net.
+        if (proratedUsed > 0.005) await insertRow('churn', { ...openBase, mrr: sign * proratedUsed, classification: 'Contraction',
+          notes: `Prorated churn brought over from ${Pm} (closed), used to offset ${bookingProp} (${bookingPeriod}) — License Transfer` });
+        if (proratedNet > 0.005) await insertRow('churn', { ...openBase, mrr: sign * proratedNet, classification: String(churn.classification || '') || 'Churn',
+          notes: `Churn Net — prorated churn brought over from ${Pm}; ${usd(proratedNet)} not offset` });
+        // Rooftop (final churn, open month): only touched if the offset reaches past the prorated.
+        if (used > Pa + 0.005 && Fa > 0) {
+          const rooftopRemain = Fa - Math.min(used - Pa, Fa);
+          // Contract the original (its open rooftop), then restore the closed prorated so the
+          // closed month stays frozen, and restore any rooftop remainder that wasn't offset.
+          await updateRow('churn', churn.id, {
+            classification: 'Contraction',
+            notes: appendNote(churn.notes, `Offset by ${bookingProp} (${bookingPeriod}); prorated carried over + rooftop contracted (License Transfer)`),
+          });
+          await insertRow('churn', {
+            ...churn, mrr: sign * Pa, last_date_under_contract: lastDayBeforeMonth(Pm),
+            classification: String(churn.classification || '') || 'Churn', date_added: churn.date_added,
+            notes: `Prorated churn retained in ${Pm} (closed) — its original was carried over to offset ${bookingProp}`,
+          });
+          if (rooftopRemain > 0.005) await insertRow('churn', { ...openBase, mrr: sign * rooftopRemain, classification: String(churn.classification || '') || 'Churn',
+            notes: `Churn Rooftop remaining in ${Fm}; ${usd(rooftopRemain)} not offset` });
+        }
       } else if (used >= drop - 0.005) {
         // Fully used — the whole churn was a transfer, not a loss.
         const cNote = appendNote(churn.notes, `Used to offset ${bookingProp} (${bookingPeriod}) — License Transfer`);
