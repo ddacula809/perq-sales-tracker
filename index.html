@@ -65,6 +65,7 @@
         <div class="more-menu" id="userMenu" hidden>
           <button type="button" class="more-item" id="usersBtn" hidden>Users</button>
           <button type="button" class="more-item" id="productsBtn" hidden>Products</button>
+          <button type="button" class="more-item" id="closeMonthBtn" hidden>Close Month</button>
           <button type="button" class="more-item" id="changePwBtn">Change password</button>
           <button type="button" class="more-item" id="logoutBtn">Log out</button>
         </div>
@@ -383,6 +384,28 @@
           <button type="submit" class="btn solid">Add</button>
         </div>
         <p class="err" id="addProductErr"></p>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal" id="closeMonthModal" hidden>
+    <div class="modal-card users-card">
+      <div class="entry-head">
+        <h2>Close Month</h2>
+        <button type="button" class="entry-close" id="closeMonthClose" title="Close">✕</button>
+      </div>
+      <p class="recon-note">Closing a month locks its churn numbers with an official close date. A churn added AFTER the close date whose Last Date Under Contract falls in that closed month no longer counts in it — its drop carries over to the next open month (flagged “carried from …”), alongside that month’s actual drops. Reopen a month to undo.</p>
+      <div class="users-list" id="closeMonthList"></div>
+      <form id="closeMonthForm" class="add-user" autocomplete="off">
+        <h3>Close a month</h3>
+        <div class="add-user-row">
+          <select id="closeMonthMonth"></select>
+          <input type="number" id="closeMonthYear" placeholder="Year" style="width:90px" />
+          <label class="export-label" style="margin:0">Official close date</label>
+          <input type="date" id="closeMonthDate" />
+          <button type="submit" class="btn solid">Close Month</button>
+        </div>
+        <p class="err" id="closeMonthErr"></p>
       </form>
     </div>
   </div>

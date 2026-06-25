@@ -21,6 +21,8 @@ const state = {
   filters: { dashboard: {}, bookings: {}, churn: {} },
   // Click-to-sort per grid tab. dir: 1 = ascending (low→high), -1 = descending, 0 = unsorted.
   sort: { bookings: { key: null, dir: 0 }, churn: { key: null, dir: 0 } },
+  closedMonths: {}, // { "May 2026": "2026-06-25" } — closed accounting months + official close date
+  closedMonthsList: [], // raw rows for the admin Close Month panel
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
@@ -577,6 +579,39 @@ function sortMonthYear(arr) {
     return (Number(ya) - Number(yb)) || (MONTHS.indexOf(ma) - MONTHS.indexOf(mb));
   });
 }
+// "May 2026" -> "June 2026" (rolls the year over December).
+function nextMonthLabel(label) {
+  const [m, y] = String(label || '').split(' ');
+  const i = MONTHS.indexOf(m);
+  if (i < 0 || !y) return label;
+  return i === 11 ? `${MONTHS[0]} ${Number(y) + 1}` : `${MONTHS[i + 1]} ${y}`;
+}
+// ---- Closed months (month-end lock + churn carry-over) ----
+async function loadClosedMonths() {
+  try {
+    const rows = await api('/api/closed-months');
+    state.closedMonthsList = rows;
+    state.closedMonths = Object.fromEntries(rows.map((r) => [r.month, String(r.close_date).slice(0, 10)]));
+  } catch { state.closedMonthsList = []; state.closedMonths = {}; }
+}
+// The month a churn amount is actually recognized in: if its natural month is closed and the
+// churn was ADDED after that month's official close date, it carries to the next open month
+// (repeating through consecutive closed months). Returns the effective month + the month it was
+// carried from (null if not carried).
+function effectiveChurnMonth(monthLabel, dateAdded) {
+  let m = String(monthLabel || '').trim();
+  const added = dateAdded ? String(dateAdded).slice(0, 10) : '';
+  let carriedFrom = null;
+  let guard = 0;
+  while (m && added) {
+    const closeDate = state.closedMonths[m];
+    if (!closeDate || added <= closeDate) break; // open, or added on/before the close -> belongs here
+    if (!carriedFrom) carriedFrom = m;
+    m = nextMonthLabel(m);
+    if (++guard > 48) break;
+  }
+  return { month: m, carriedFrom };
+}
 // Today's calendar quarter as a label, e.g. "Q2 2026".
 function currentQuarterLabel() {
   const d = new Date();
@@ -767,19 +802,21 @@ function renderSummary() {
     if (state.churnOwner !== 'All' && !churnOwners.includes(state.churnOwner)) state.churnOwner = 'All';
     const churnOwnerMatch = (r) => state.churnOwner === 'All' || String(r.account_owner || '').trim() === state.churnOwner;
 
-    // Churn by month: prorated churn + final churn amounts landing in each month.
+    // Churn by month: prorated churn + final churn amounts landing in each month. A late-added
+    // churn whose month is closed carries over to the next open month (effectiveChurnMonth).
     const churnByMonth = {};
-    const addChurn = (month, amt) => {
-      const m = String(month || '').trim();
+    const addChurn = (month, amt, dateAdded) => {
+      const m0 = String(month || '').trim();
       const a = Number(amt);
-      if (!m || m === '-' || !Number.isFinite(a)) return;
+      if (!m0 || m0 === '-' || !Number.isFinite(a)) return;
+      const m = effectiveChurnMonth(m0, dateAdded).month;
       churnByMonth[m] = (churnByMonth[m] || 0) + a;
     };
     for (const r of state.rows.churn) {
       if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
       if (!churnOwnerMatch(r)) continue;
-      addChurn(r.prorated_churn_month, r.prorated_churn_amount);
-      addChurn(r.final_churn_month, r.final_churn_amount);
+      addChurn(r.prorated_churn_month, r.prorated_churn_amount, r.date_added);
+      addChurn(r.final_churn_month, r.final_churn_amount, r.date_added);
     }
     // Quarter options derived from the months present; reset selection if it no longer exists.
     const quarterMap = new Map();
@@ -894,13 +931,16 @@ function renderChurnDetail(quarterLabel) {
       if (state.churnOwner !== 'All' && String(r.account_owner || '').trim() !== state.churnOwner) continue;
       const e = { prop: r.property || r.property_id || '—', pmc: r.pmc_buying_center || '', last: r.last_date_under_contract || '', note: r.notes || '' };
       // A churn event can land a prorated remainder one month and the full amount the next.
-      if (String(r.prorated_churn_month || '').trim() === monthLabel) {
+      // Each is shifted to the next open month if its natural month is closed (carry-over).
+      const pm = effectiveChurnMonth(r.prorated_churn_month, r.date_added);
+      if (pm.month === monthLabel) {
         const a = Number(r.prorated_churn_amount);
-        if (Number.isFinite(a) && a !== 0) out.push({ ...e, amt: a });
+        if (Number.isFinite(a) && a !== 0) out.push({ ...e, amt: a, carriedFrom: pm.carriedFrom });
       }
-      if (String(r.final_churn_month || '').trim() === monthLabel) {
+      const fm = effectiveChurnMonth(r.final_churn_month, r.date_added);
+      if (fm.month === monthLabel) {
         const a = Number(r.final_churn_amount);
-        if (Number.isFinite(a)) out.push({ ...e, amt: a });
+        if (Number.isFinite(a)) out.push({ ...e, amt: a, carriedFrom: fm.carriedFrom });
       }
     }
     // Sort by PMC A–Z (then Property) for a predictable, easy-to-scan order.
@@ -917,7 +957,7 @@ function renderChurnDetail(quarterLabel) {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td data-col="pmc" title="${escapeAttr(x.pmc || '')}">${escapeHtml(x.pmc || '—')}</td><td data-col="prop" title="${escapeAttr(x.prop || '')}">${escapeHtml(x.prop)}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      ? list.map((x) => `<tr><td data-col="pmc" title="${escapeAttr(x.pmc || '')}">${escapeHtml(x.pmc || '—')}</td><td data-col="prop" title="${escapeAttr(x.prop || '')}">${escapeHtml(x.prop)}${x.carriedFrom ? ` <span class="carry-badge" title="Carried over because ${escapeAttr(x.carriedFrom)} was closed before this churn was added">carried from ${escapeHtml(x.carriedFrom)}</span>` : ''}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
       : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
@@ -1379,6 +1419,7 @@ async function loadAll() {
   state.rows.churn = await api('/api/churn');
   state.rows.sales_support = await api('/api/sales_support');
   state.salesPeriods = await api('/api/sales_periods');
+  await loadClosedMonths();
   // Default to the latest open quarter (periods are listed oldest→newest); else the latest period.
   const openPeriods = state.salesPeriods.filter((p) => p.status === 'open');
   state.salesPeriod = openPeriods.length ? openPeriods[openPeriods.length - 1].period
@@ -1448,6 +1489,7 @@ function renderAll() {
   $('#offsetReviewBtn').hidden = !canAddDelete();
   $('#usersBtn').hidden = !isAdmin();
   $('#productsBtn').hidden = !isAdmin();
+  $('#closeMonthBtn').hidden = !isAdmin();
   $('#notifWrap').hidden = !canBilling;
   updateBell();
   // "Ask Claude" assistant: shown only when configured (API key set) and for full-data roles.
@@ -3707,6 +3749,63 @@ function wireProducts() {
   });
 }
 
+// ---------- Close Month (admin month-end lock) ----------
+async function openCloseMonth() {
+  $('#closeMonthModal').hidden = false;
+  $('#closeMonthMonth').innerHTML = MONTHS.map((m) => `<option value="${m}">${m}</option>`).join('');
+  const now = new Date();
+  $('#closeMonthMonth').value = MONTHS[now.getMonth()];
+  if (!$('#closeMonthYear').value) $('#closeMonthYear').value = String(now.getFullYear());
+  if (!$('#closeMonthDate').value) $('#closeMonthDate').value = now.toISOString().slice(0, 10);
+  renderCloseMonthList();
+}
+function renderCloseMonthList() {
+  const rows = state.closedMonthsList || [];
+  if (!rows.length) { $('#closeMonthList').innerHTML = '<p class="muted" style="padding:10px">No months are closed yet.</p>'; return; }
+  $('#closeMonthList').innerHTML = sortMonthYear(rows.map((r) => r.month)).reverse().map((month) => {
+    const r = rows.find((x) => x.month === month);
+    const cd = r ? String(r.close_date).slice(0, 10) : '';
+    return `<div class="user-row">
+        <span class="user-name">${escapeHtml(month)}</span>
+        <span class="muted">closed ${escapeHtml(cd)}${r && r.closed_by ? ` · by ${escapeHtml(r.closed_by)}` : ''}</span>
+        <button type="button" class="view-btn danger" data-reopen-month="${escapeAttr(month)}">Reopen</button>
+      </div>`;
+  }).join('');
+}
+async function refreshAfterClosedMonthChange() {
+  await loadClosedMonths();
+  renderCloseMonthList();
+  renderSummary(); // churn carry-over depends on closed months
+}
+function wireCloseMonth() {
+  $('#closeMonthBtn').onclick = () => { $('#userMenu').hidden = true; openCloseMonth(); };
+  $('#closeMonthClose').onclick = () => { $('#closeMonthModal').hidden = true; };
+  $('#closeMonthModal').addEventListener('click', (e) => { if (e.target.id === 'closeMonthModal') $('#closeMonthModal').hidden = true; });
+  $('#closeMonthForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const month = `${$('#closeMonthMonth').value} ${String($('#closeMonthYear').value).trim()}`.trim();
+    const close_date = $('#closeMonthDate').value;
+    if (!$('#closeMonthYear').value || !close_date) { $('#closeMonthErr').textContent = 'Pick a month, year, and official close date.'; return; }
+    try {
+      await api('/api/closed-months', { method: 'POST', body: JSON.stringify({ month, close_date }) });
+      $('#closeMonthErr').textContent = '';
+      toast(`Closed ${month}`);
+      await refreshAfterClosedMonthChange();
+    } catch (err) { $('#closeMonthErr').textContent = err.message; }
+  });
+  $('#closeMonthList').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-reopen-month]');
+    if (!btn) return;
+    const month = btn.dataset.reopenMonth;
+    if (!confirm(`Reopen ${month}? Carried-over churn will return to ${month}.`)) return;
+    try {
+      await api(`/api/closed-months/${encodeURIComponent(month)}`, { method: 'DELETE' });
+      toast(`Reopened ${month}`);
+      await refreshAfterClosedMonthChange();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 function wireUsers() {
   $('#usersBtn').onclick = () => { $('#userMenu').hidden = true; openUsers(); };
   $('#usersClose').onclick = () => { $('#usersModal').hidden = true; };
@@ -4253,7 +4352,7 @@ function wireSaas() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireCloseMonth(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
   applyZoom();
   $('#returnAdminBtn').onclick = returnToAdmin;
   if (state.token) {

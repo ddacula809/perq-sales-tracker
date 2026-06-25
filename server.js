@@ -10,6 +10,7 @@ import {
   getPeriod, closePeriod, reconcileOwnerNames,
   listNotifications, createNotification, dismissNotification, resolveNotification,
   listProducts, loadCatalog,
+  listClosedMonths, closeMonth, reopenMonth,
 } from './db.js';
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings } from './importer.js';
@@ -172,6 +173,23 @@ app.patch('/api/products/:id', requireRole('admin'), async (req, res, next) => {
 app.delete('/api/products/:id', requireRole('admin'), async (req, res, next) => {
   try { await deleteRow('products', Number(req.params.id)); await loadCatalog(); res.status(204).end(); }
   catch (e) { next(e); }
+});
+
+// ---- Closed months (month-end lock; drives churn carry-over). Close/reopen is admin-only. ----
+app.get('/api/closed-months', async (_req, res, next) => {
+  try { res.json(await listClosedMonths()); } catch (e) { next(e); }
+});
+app.post('/api/closed-months', requireRole('admin'), async (req, res, next) => {
+  try {
+    const month = String((req.body && req.body.month) || '').trim();
+    const close_date = String((req.body && req.body.close_date) || '').slice(0, 10);
+    if (!month) return res.status(400).json({ error: 'Month is required.' });
+    if (!close_date || Number.isNaN(Date.parse(close_date))) return res.status(400).json({ error: 'A valid official close date is required.' });
+    res.status(201).json(await closeMonth(month, close_date, req.user && req.user.username));
+  } catch (e) { next(e); }
+});
+app.delete('/api/closed-months/:month', requireRole('admin'), async (req, res, next) => {
+  try { await reopenMonth(req.params.month); res.status(204).end(); } catch (e) { next(e); }
 });
 
 // ---- "Ask Claude" assistant (read-only Q&A over the app data) ----

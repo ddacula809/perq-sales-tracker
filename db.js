@@ -225,6 +225,16 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  // Closed accounting months. A month (e.g. "May 2026") is locked with an official close date;
+  // late-added churn that would land in a closed month carries over to the next open month.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS closed_months (
+      month TEXT PRIMARY KEY,
+      close_date DATE NOT NULL,
+      closed_by TEXT,
+      closed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
   // Admin-managed product list (drives the Product dropdowns). Name is unique (case-insensitive).
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -319,6 +329,23 @@ async function initSalesPeriods() {
     await pool.query(`INSERT INTO sales_periods (period, quarter, year, status) VALUES ('Q2 2026', 2, 2026, 'open')`);
   }
   await pool.query(`UPDATE sales_support SET period = 'Q2 2026' WHERE period IS NULL`);
+}
+
+// ---- Closed months (month-end lock) ----
+export async function listClosedMonths() {
+  const { rows } = await pool.query('SELECT month, close_date, closed_by, closed_at FROM closed_months ORDER BY closed_at DESC');
+  return rows;
+}
+export async function closeMonth(month, closeDate, by) {
+  const { rows } = await pool.query(
+    `INSERT INTO closed_months (month, close_date, closed_by) VALUES ($1, $2, $3)
+       ON CONFLICT (month) DO UPDATE SET close_date = EXCLUDED.close_date, closed_by = EXCLUDED.closed_by, closed_at = now()
+       RETURNING month, close_date, closed_by, closed_at`,
+    [month, closeDate, by || null]);
+  return rows[0];
+}
+export async function reopenMonth(month) {
+  await pool.query('DELETE FROM closed_months WHERE month = $1', [month]);
 }
 
 // ---- Sales Support periods ----
