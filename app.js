@@ -2455,16 +2455,23 @@ function wireOffsetReview() {
     const sel = state.offsetSel || {};
     const cur = sel[bid];
     if (!cur || !cur.churnId) { toast('Choose a churn to offset with.', true); return; }
+    // Show a spinner on the button while the offset applies + data reloads.
+    btn.disabled = true;
+    btn.innerHTML = '<span class="btn-spinner"></span>Applying…';
     try {
       await api('/api/bookings/apply-offset', { method: 'POST', body: JSON.stringify({ bookingId: Number(bid), churnId: cur.churnId, offsetAmount: cur.amount }) });
       delete sel[bid];
       state.rows.bookings = await api('/api/bookings');
       state.rows.churn = await api('/api/churn');
       pruneOffsetSel(); // clear selections invalidated by the split/contraction
-      renderOffsetReview();
+      renderOffsetReview(); // rebuilds the table (and the button) from fresh data
       renderAll();
       toast('Offset applied');
-    } catch (err) { toast(err.message, true); }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Apply';
+      toast(err.message, true);
+    }
   });
 }
 
