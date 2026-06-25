@@ -273,6 +273,10 @@ export async function initDb() {
       await pool.query("UPDATE bookings SET property_only=$1 WHERE id=$2 AND (property_only IS NULL OR property_only='')", [only, b.id]);
     }
   });
+  // Backfill the new churn "Date Added" from each row's created_at (the date it was first added).
+  await runOnce('churn_date_added_backfill_v1', async () => {
+    await pool.query("UPDATE churn SET date_added = created_at::date WHERE date_added IS NULL");
+  });
   // Seed the products table once from the Booking "product" options (category from bprCategory).
   await runOnce('seed_products_v1', seedProducts);
   await ensureAdmin();

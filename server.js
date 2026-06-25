@@ -325,6 +325,11 @@ function crud(table, computeFn, afterInsert, beforeInsert) {
         const prev = await pool.query(`SELECT ${f.key} AS v FROM ${table} WHERE id=$1`, [id]);
         old[f.key] = prev.rows[0] ? prev.rows[0].v : undefined;
       }
+      // Churn: changing Last Date Under Contract re-stamps Date Added (the drop re-entered now).
+      if (table === 'churn' && req.body && Object.prototype.hasOwnProperty.call(req.body, 'last_date_under_contract')) {
+        const norm = (v) => (v ? String(v).slice(0, 10) : '');
+        if (norm(old.last_date_under_contract) !== norm(req.body.last_date_under_contract)) req.body.date_added = todayStr();
+      }
       const row = await updateRow(table, id, req.body || {});
       if (!row) return res.status(404).json({ error: 'Not found' });
       for (const f of watched) {
@@ -417,7 +422,13 @@ async function maybeConvertExisting(body) {
   return updateRow('bookings', target.id, merged);
 }
 crud('bookings', computeBooking, onBookingCreated, maybeConvertExisting);
-crud('churn', computeChurn);
+// "Date Added" is system-generated: stamp it on creation (manual add / upload) when not provided.
+const todayStr = () => new Date().toISOString().slice(0, 10);
+function churnDefaults(body) {
+  if (body && !body.date_added) body.date_added = todayStr();
+  return null; // not handled as an update — proceed to a normal insert with the stamped body
+}
+crud('churn', computeChurn, undefined, churnDefaults);
 
 // ---- License Transfer offset: a booking offsets a same-PMC, same-quarter churn ----
 // Tags the booking as a License Transfer with the offset, reclassifies the churn as a
@@ -631,6 +642,7 @@ app.post('/api/churn/migrate-legacy', requireRole('admin'), async (_req, res, ne
       const last = String(r.last_date_under_contract).slice(0, 10);
       const notes = ['[From Legacy AR Tracker — billing already processed]',
         r.reason_lost ? `Reason: ${r.reason_lost}` : '', r.note || ''].filter(Boolean).join(' — ');
+      const legacyAdded = Date.parse(String(r.date_added || r.cancellation_date_added || ''));
       const ins = await insertRow('churn', {
         property_id: r.property_id || '',
         sage_id: r.sage_id || '',
@@ -643,6 +655,8 @@ app.post('/api/churn/migrate-legacy', requireRole('admin'), async (_req, res, ne
         completed: 'No Action needed', // billing: already handled in the legacy workbook
         notes,
         classification: 'Churn',
+        // Preserve the legacy "Date Added" when present, else stamp the migration date.
+        date_added: Number.isFinite(legacyAdded) ? new Date(legacyAdded).toISOString().slice(0, 10) : todayStr(),
       });
       existingKeys.add(k);
       added += 1;
@@ -828,8 +842,8 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       const k = key(row);
       const match = byKey.get(k);
       if (!match) {
-        // No existing churn line for this property/product/MRR -> add it.
-        const ins = await insertRow('churn', row);
+        // No existing churn line for this property/product/MRR -> add it (stamp Date Added = today).
+        const ins = await insertRow('churn', { ...row, date_added: todayStr() });
         byKey.set(k, ins);
         added += 1;
         addedRows.push({ property: ins.property || ins.property_id || '', product: ins.product || '', mrr: ins.mrr, last_date_under_contract: next });
@@ -838,8 +852,8 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       // Same property/product/MRR already exists: compare Last Date Under Contract.
       const cur = match.last_date_under_contract ? String(match.last_date_under_contract).slice(0, 10) : '';
       if (cur === next) { unchanged += 1; continue; }
-      // Last Date Under Contract changed -> update the existing row and notify billing.
-      await updateRow('churn', match.id, { last_date_under_contract: next });
+      // Last Date Under Contract changed -> update the existing row (re-stamp Date Added) + notify.
+      await updateRow('churn', match.id, { last_date_under_contract: next, date_added: todayStr() });
       const who = match.property || match.property_id || 'a property';
       const msg = `Last Date Under Contract changed for ${who} (${match.product || 'product'}) from ${cur || '(blank)'} to ${next || '(blank)'}`;
       await createNotification('churn', match.id, msg);
@@ -955,8 +969,10 @@ app.post('/api/import', requireRole('admin'), upload.single('file'), async (req,
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const { bookings, churn } = parseWorkbook(req.file.buffer);
+    // Date Added isn't in the workbook — stamp today for any churn row that lacks it.
+    const stamped = churn.map((r) => (r.date_added ? r : { ...r, date_added: todayStr() }));
     await replaceAll('bookings', bookings);
-    await replaceAll('churn', churn);
+    await replaceAll('churn', stamped);
     res.json({ imported: { bookings: bookings.length, churn: churn.length } });
   } catch (e) { next(e); }
 });

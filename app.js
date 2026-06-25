@@ -86,7 +86,10 @@ function canAddDelete() { return role() === 'admin' || role() === 'standard'; } 
 function canImport() { return role() === 'admin'; }
 function canEditSalesSupport() { return ['admin', 'standard', 'sales_admin', 'sales'].includes(role()); }
 function canManageQuarters() { return ['admin', 'sales_admin'].includes(role()); } // open/close quarter
+// System-generated fields are never user-editable in the grid (shown read-only).
+const READONLY_FIELDS = new Set(['date_added']);
 function canEditField(f) {
+  if (READONLY_FIELDS.has(f.key)) return false;
   const r = role();
   if (r === 'admin' || r === 'standard') return true;
   if (r === 'billing') return isBilling(f.key);
@@ -1524,8 +1527,9 @@ function wireGrid() {
         });
       }
       updateRowInState(state.tab, updated);
-      // Changing CTAM Type flips whether the Offset cell is editable — re-render the page.
-      if (key === 'ctam_type') {
+      // Changing CTAM Type flips whether the Offset cell is editable; changing a churn's Last
+      // Date Under Contract re-stamps the read-only Date Added — both need a row re-render.
+      if (key === 'ctam_type' || (state.tab === 'churn' && key === 'last_date_under_contract')) {
         renderBody();
       } else {
         refreshComputedCells(tr, updated);
