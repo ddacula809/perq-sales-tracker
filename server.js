@@ -602,13 +602,50 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
         const cNote = appendNote(churn.notes, `Used to offset ${bookingProp} (${bookingPeriod}) — License Transfer`);
         await updateRow('churn', churn.id, { classification: 'Contraction', notes: cNote });
       } else {
-        // Partially used — split into the Contraction (used) portion + remaining real churn.
-        const remaining = drop - used;
-        const cNote = appendNote(churn.notes,
-          `${usd(used)} used to offset ${bookingProp} (${bookingPeriod}); ${usd(remaining)} net remaining churn (split out to a new line) — License Transfer`);
-        await updateRow('churn', churn.id, { mrr: sign * used, classification: 'Contraction', notes: cNote });
-        const rNote = `Net remaining churn after License Transfer offset — ${usd(used)} used to offset ${bookingProp} (${bookingPeriod}), ${usd(remaining)} remaining`;
-        await insertRow('churn', { ...churn, mrr: sign * remaining, classification: String(churn.classification || '') || 'Churn', notes: rNote });
+        // Partially used (open months) — consume the OLDEST month first: the prorated/final-invoice
+        // month, then the rooftop (final churn) month. Decompose into per-month pieces so each
+        // contracts independently and the leftover stays as Churn Net / Churn Rooftop in its month.
+        const cls = String(churn.classification || '') || 'Churn';
+        const cc = computeChurn(churn);
+        const Pa = Math.abs(Number(cc.prorated_churn_amount) || 0);
+        const Pm = String(cc.prorated_churn_month || '').trim();
+        const Fa = Math.abs(Number(cc.final_churn_amount) || 0);
+        const Fm = String(cc.final_churn_month || '').trim();
+        const hasPro = Pm && Pm !== '-' && Pa > 0;
+        const proratedUsed = hasPro ? Math.min(used, Pa) : 0;
+        const proratedRemain = hasPro ? Pa - proratedUsed : 0;
+        const rooftopUsed = Math.min(Math.max(0, used - proratedUsed), Fa);
+        const rooftopRemain = Fa - rooftopUsed;
+        const roofLast = lastDayBeforeMonth(Fm); // a row whose Final Churn lands in the rooftop month
+        if (hasPro) {
+          // Repurpose the original as the prorated-month Contraction (oldest month, used first).
+          await updateRow('churn', churn.id, {
+            mrr: sign * proratedUsed, last_date_under_contract: lastDayBeforeMonth(Pm), classification: 'Contraction',
+            notes: appendNote(churn.notes, `Contracted ${usd(proratedUsed)} of the ${Pm} drop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`),
+          });
+          if (proratedRemain > 0.005) await insertRow('churn', {
+            ...churn, mrr: sign * proratedRemain, last_date_under_contract: lastDayBeforeMonth(Pm), classification: cls,
+            notes: `Churn Net — ${usd(proratedRemain)} of the ${Pm} drop not offset`,
+          });
+          if (rooftopUsed > 0.005) await insertRow('churn', {
+            ...churn, mrr: sign * rooftopUsed, last_date_under_contract: roofLast, classification: 'Contraction',
+            notes: `Contracted ${usd(rooftopUsed)} of the ${Fm} rooftop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`,
+          });
+          if (rooftopRemain > 0.005) await insertRow('churn', {
+            ...churn, mrr: sign * rooftopRemain, last_date_under_contract: roofLast, classification: cls,
+            notes: `Churn Rooftop — ${usd(rooftopRemain)} of the ${Fm} drop not offset`,
+          });
+        } else {
+          // No prorated piece (full-month churn) — only the rooftop month.
+          await updateRow('churn', churn.id, {
+            mrr: sign * rooftopUsed, last_date_under_contract: roofLast, classification: 'Contraction',
+            notes: appendNote(churn.notes, `Contracted ${usd(rooftopUsed)} of the ${Fm} drop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`),
+          });
+          if (rooftopRemain > 0.005) await insertRow('churn', {
+            ...churn, mrr: sign * rooftopRemain, last_date_under_contract: roofLast, classification: cls,
+            notes: `Churn Net — ${usd(rooftopRemain)} of the ${Fm} drop not offset`,
+          });
+        }
       }
     }
 
