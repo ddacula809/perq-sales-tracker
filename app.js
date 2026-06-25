@@ -2423,7 +2423,7 @@ function pruneOffsetSel() {
   }
 }
 function wireOffsetReview() {
-  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; state.offsetSel = {}; $('#offsetModal').hidden = false; renderOffsetReview(); };
+  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; state.offsetSel = {}; state.offsetPmc = 'All'; $('#offsetModal').hidden = false; renderOffsetReview(); };
   $('#offsetClose').onclick = () => { $('#offsetModal').hidden = true; };
   $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
   $('#offsetBody').addEventListener('change', (e) => {
