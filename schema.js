@@ -72,6 +72,10 @@ export const CHURN_FIELDS = [
   // System-generated: the date this churn entered the system (set on add/upload, and refreshed
   // when Last Date Under Contract changes). Not part of the upload template; read-only in the UI.
   { key: 'date_added',               label: 'Date Added',            excel: 23, type: 'date' },
+  // Admin-only manual override for the AR Final Invoice Amount. When set (non-blank), compute.js
+  // uses it instead of the auto proration, and the prorated/final churn amounts derive from it.
+  // Edited through the "AR Final Invoice Amt" cell itself (no separate column in the grid).
+  { key: 'ar_override',              label: 'AR Override',           excel: 24, type: 'number' },
   { key: 'lost_mrr_reason',          label: 'Lost MRR Reason',       excel: 10, type: 'select', options: ['', 'Property Sold/PMC Change', 'Product', 'Persona', 'Process', 'Price', 'Other'] },
   { key: 'client_success_manager',   label: 'Client Success Mgr',    excel: 11, type: 'text' },
   { key: 'google_search_budget',     label: 'Google Search Budget',  excel: 12, type: 'number' },

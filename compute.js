@@ -141,7 +141,11 @@ export function computeChurn(r) {
   if (!j || isNaN(j) || S === null) return blank;
 
   const daysInMonth = new Date(j.getFullYear(), j.getMonth() + 1, 0).getDate();
-  const ar = (S / daysInMonth) * j.getDate();        // O: prorated final-month AR
+  // O: prorated final-month AR. Admins can override it manually (ar_override) to match a figure
+  // from the old tracker; the prorated/final churn amounts below then derive from the override.
+  const autoAr = (S / daysInMonth) * j.getDate();
+  const override = num(r.ar_override);
+  const ar = override !== null ? override : autoAr;
   const proratedAmt = ar - S;                         // Q: prorated remainder (negative)
   const finalInvoiceMonth = monthYear(j);             // N
   const nextMonth = new Date(j.getFullYear(), j.getMonth() + 1, 1);

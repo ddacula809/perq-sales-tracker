@@ -184,7 +184,9 @@ function isBilling(key) { return !!(BILLING_KEYS[state.tab] && BILLING_KEYS[stat
 function fieldsForTab() {
   const s = state.schema[state.tab];
   const computedKeys = new Set(s.computed.map((f) => f.key));
-  let cols = [...s.editable, ...s.computed];
+  // ar_override has no column of its own — it's edited inline through the "AR Final Invoice Amt"
+  // computed cell (see arOverrideCell). Drop it from the displayed column list.
+  let cols = [...s.editable, ...s.computed].filter((c) => c.key !== 'ar_override');
   // Move this tab's billing fields to the very end, after the computed columns.
   const billing = BILLING_KEYS[state.tab];
   if (billing) {
@@ -261,6 +263,7 @@ function rowInnerHtml(row, i, fields) {
   let html = `<td class="rownum">${i + 1}</td>`;
   for (const f of cols) {
     if (f.key === 'churn_status') html += churnStatusCell(row);
+    else if (f.key === 'ar_final_invoice_amount' && state.tab === 'churn' && isAdmin()) html += arOverrideCell(row);
     else if (computedKeys.has(f.key)) html += computedCell(f, row);
     else if (canEditField(f)) html += editCell(f, row);
     else html += readonlyCell(f, row);
@@ -436,6 +439,20 @@ function computedCell(f, row) {
   const isNeg = typeof raw === 'number' && raw < 0;
   const text = MONEY.has(f.key) ? fmtMoney(raw) : (f.type === 'number' ? fmtNum(raw) : (raw ?? ''));
   return `<td class="computed${isNeg ? ' neg' : ''}" data-comp="${f.key}" data-col="${f.key}">${text}</td>`;
+}
+
+// Admin-only editable "AR Final Invoice Amt" cell. Blank = use the auto proration (placeholder
+// shows it); a typed value overrides it (stored as ar_override) and the prorated/final churn
+// amounts recompute from it. Clearing the box reverts to auto.
+function arOverrideCell(row) {
+  const ov = row.ar_override;
+  const hasOv = ov !== null && ov !== undefined && ov !== '';
+  const auto = fmtMoney(row.ar_final_invoice_amount); // effective value (= auto when no override)
+  const title = hasOv
+    ? 'Manual override — clear the box to use the auto-calculated AR.'
+    : 'Auto-calculated. Type a value to override the AR Final Invoice Amount.';
+  return `<td class="num computed ar-override${hasOv ? ' ar-overridden' : ''}" data-col="ar_final_invoice_amount" title="${escapeAttr(title)}">`
+    + `<input type="text" inputmode="decimal" data-key="ar_override" value="${escapeAttr(hasOv ? ov : '')}" placeholder="${escapeAttr(auto)}" /></td>`;
 }
 
 // A field the current user can see but not edit: render the value as static text.
@@ -1590,7 +1607,7 @@ function wireGrid() {
       updateRowInState(state.tab, updated);
       // Changing CTAM Type flips whether the Offset cell is editable; changing a churn's Last
       // Date Under Contract re-stamps the read-only Date Added — both need a row re-render.
-      if (key === 'ctam_type' || (state.tab === 'churn' && key === 'last_date_under_contract')) {
+      if (key === 'ctam_type' || (state.tab === 'churn' && (key === 'last_date_under_contract' || key === 'ar_override'))) {
         renderBody();
       } else {
         refreshComputedCells(tr, updated);

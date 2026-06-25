@@ -375,6 +375,14 @@ tbody td.computed {
   padding: 7px 10px; font-weight: 500;
 }
 tbody td.computed.neg { color: var(--neg); }
+/* Admin-editable "AR Final Invoice Amt" cell: an input that sits in the computed column. */
+tbody td.ar-override { padding: 0; }
+tbody td.ar-override input {
+  font-family: 'Fira Mono', monospace; text-align: right; color: var(--compute-ink); font-weight: 500;
+}
+tbody td.ar-override input::placeholder { color: var(--ink-soft); font-style: italic; opacity: .8; }
+tbody td.ar-override.ar-overridden { box-shadow: inset 0 0 0 2px var(--accent); }
+tbody td.ar-override.ar-overridden input { color: var(--accent); font-weight: 700; }
 tbody td.billing { background: var(--billing-bg) !important; }
 /* Read-only cells (fields the current user may view but not edit) */
 tbody td.ro { padding: 7px 9px; color: var(--ink); white-space: nowrap; }

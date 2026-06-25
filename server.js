@@ -569,6 +569,9 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
         const Pm = locked.month;
         const Fa = Math.abs(Number(cc.final_churn_amount) || 0);        // rooftop drop (open)
         const Fm = String(cc.final_churn_month || '').trim();
+        // The math above already used any manual AR override (via computeChurn). The derived rows
+        // below set their own MRR/dates and must re-prorate normally, so drop the override on them.
+        churn.ar_override = null;
         const proratedUsed = Math.min(used, Pa);
         const proratedNet = Pa - proratedUsed;
         const broughtLast = lastDayOfMonthLabel(Pm) || churn.last_date_under_contract; // -> recognizes the open month
@@ -590,7 +593,7 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
           // is restored as a locked real churn so the closed month's total is unchanged.
           await updateRow('churn', churn.id, {
             mrr: sign * rooftopUsed, last_date_under_contract: lastDayOfMonthLabel(Pm),
-            classification: 'Contraction', date_added: todayStr(),
+            classification: 'Contraction', date_added: todayStr(), ar_override: null,
             notes: appendNote(churn.notes, `Rooftop contracted to offset ${bookingProp} (${bookingPeriod}); prorated carried over (License Transfer)`),
           });
           await insertRow('churn', {
@@ -618,6 +621,9 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
         const Pm = String(cc.prorated_churn_month || '').trim();
         const Fa = Math.abs(Number(cc.final_churn_amount) || 0);
         const Fm = String(cc.final_churn_month || '').trim();
+        // The math above already used any manual AR override (via computeChurn). The derived rows
+        // below set their own MRR/dates and must re-prorate normally, so drop the override on them.
+        churn.ar_override = null;
         const hasPro = Pm && Pm !== '-' && Pa > 0;
         const proratedUsed = hasPro ? Math.min(used, Pa) : 0;
         const proratedRemain = hasPro ? Pa - proratedUsed : 0;
@@ -627,7 +633,7 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
         if (hasPro) {
           // Repurpose the original as the prorated-month Contraction (oldest month, used first).
           await updateRow('churn', churn.id, {
-            mrr: sign * proratedUsed, last_date_under_contract: lastDayBeforeMonth(Pm), classification: 'Contraction',
+            mrr: sign * proratedUsed, last_date_under_contract: lastDayBeforeMonth(Pm), classification: 'Contraction', ar_override: null,
             notes: appendNote(churn.notes, `Contracted ${usd(proratedUsed)} of the ${Pm} drop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`),
           });
           if (proratedRemain > 0.005) await insertRow('churn', {
@@ -645,7 +651,7 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
         } else {
           // No prorated piece (full-month churn) — only the rooftop month.
           await updateRow('churn', churn.id, {
-            mrr: sign * rooftopUsed, last_date_under_contract: roofLast, classification: 'Contraction',
+            mrr: sign * rooftopUsed, last_date_under_contract: roofLast, classification: 'Contraction', ar_override: null,
             notes: appendNote(churn.notes, `Contracted ${usd(rooftopUsed)} of the ${Fm} drop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`),
           });
           if (rooftopRemain > 0.005) await insertRow('churn', {
