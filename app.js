@@ -349,10 +349,13 @@ const TOTALS_FIELDS = {
   bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings'], ['Commissionable + OTF', commissionablePlusOtf]],
   churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
 };
-function renderBookingTotals(rows) {
+function renderBookingTotals(allRows) {
   const el = $('#bookingTotals');
   const fields = TOTALS_FIELDS[state.tab];
   if (!fields) { el.hidden = true; return; }
+  // Churn Credits are a positive accounting adjustment recognized in the dashboard, not a raw
+  // churn drop — exclude them from the raw Churn grid totals (their computed amounts are negative).
+  const rows = state.tab === 'churn' ? allRows.filter((r) => String(r.classification || '') !== 'Churn Credit') : allRows;
   const sum = (k) => {
     if (typeof k === 'function') return rows.reduce((a, r) => a + (Number(k(r)) || 0), 0);
     const keys = Array.isArray(k) ? k : [k];
@@ -816,6 +819,11 @@ function renderSummary() {
     for (const r of state.rows.churn) {
       if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
       if (!churnOwnerMatch(r)) continue;
+      if (String(r.classification || '') === 'Churn Credit') {
+        // A positive credit (cancels a locked closed-month drop), recognized in its open month.
+        addChurn(r.final_churn_month, Math.abs(Number(r.mrr) || 0), r.date_added);
+        continue;
+      }
       addChurn(r.prorated_churn_month, r.prorated_churn_amount, r.date_added);
       addChurn(r.final_churn_month, r.final_churn_amount, r.date_added);
     }
@@ -926,11 +934,19 @@ function renderChurnDetail(quarterLabel) {
   const rowsFor = (monthLabel, wantContraction) => {
     const out = [];
     for (const r of state.rows.churn) {
-      const isContraction = String(r.classification || '') === 'Contraction';
-      if (isContraction !== wantContraction) continue;
+      const cls = String(r.classification || '');
       // Honor the Churn section's Account Owner filter.
       if (state.churnOwner !== 'All' && String(r.account_owner || '').trim() !== state.churnOwner) continue;
       const e = { prop: r.property || r.property_id || '—', pmc: r.pmc_buying_center || '', last: r.last_date_under_contract || '', note: r.notes || '' };
+      // Churn Credit: a positive line in the real-churn table (cancels a locked closed-month drop).
+      if (cls === 'Churn Credit') {
+        if (wantContraction) continue;
+        const cm = effectiveChurnMonth(r.final_churn_month, r.date_added);
+        if (cm.month === monthLabel) out.push({ ...e, amt: Math.abs(Number(r.mrr) || 0), carriedFrom: cm.carriedFrom, credit: true });
+        continue;
+      }
+      const isContraction = cls === 'Contraction';
+      if (isContraction !== wantContraction) continue;
       // A churn event can land a prorated remainder one month and the full amount the next.
       // Each is shifted to the next open month if its natural month is closed (carry-over).
       const pm = effectiveChurnMonth(r.prorated_churn_month, r.date_added);
@@ -958,7 +974,7 @@ function renderChurnDetail(quarterLabel) {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td data-col="pmc" title="${escapeAttr(x.pmc || '')}">${escapeHtml(x.pmc || '—')}</td><td data-col="prop" title="${escapeAttr(x.prop || '')}">${escapeHtml(x.prop)}${x.carriedFrom ? ` <span class="carry-badge" title="Carried over because ${escapeAttr(x.carriedFrom)} was closed before this churn was added">carried from ${escapeHtml(x.carriedFrom)}</span>` : ''}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      ? list.map((x) => `<tr><td data-col="pmc" title="${escapeAttr(x.pmc || '')}">${escapeHtml(x.pmc || '—')}</td><td data-col="prop" title="${escapeAttr(x.prop || '')}">${escapeHtml(x.prop)}${x.credit ? ' <span class="carry-badge credit-badge">Churn Credit</span>' : (x.carriedFrom ? ` <span class="carry-badge" title="Carried over because ${escapeAttr(x.carriedFrom)} was closed before this churn was added">carried from ${escapeHtml(x.carriedFrom)}</span>` : '')}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
       : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
@@ -4042,6 +4058,7 @@ function saasChurnFor(b) {
   const prod = String(b.product || '').trim().toLowerCase();
   let best = null;
   for (const c of state.rows.churn) {
+    if (String(c.classification || '') === 'Churn Credit') continue; // accounting credit, not a real churn
     if (!c.last_date_under_contract) continue;
     if (String(c.property_id || '').trim().toLowerCase() !== pid) continue;
     if (String(c.product || '').trim().toLowerCase() !== prod) continue;

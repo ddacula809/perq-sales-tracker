@@ -286,6 +286,7 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
   display: inline-block; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
   background: #fbe6cf; color: #8a5a12; padding: 1px 5px; border-radius: 999px; white-space: nowrap;
 }
+.carry-badge.credit-badge { background: #d8efe0; color: #1f6b46; } /* Churn Credit (positive) */
 .filter, .metric {
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   padding: 9px 13px; box-shadow: var(--shadow);

@@ -80,7 +80,9 @@ export const CHURN_FIELDS = [
   { key: 'notes',                    label: 'Notes',                 excel: 21, type: 'text' },
   // Churn vs Contraction. A churn used to offset a License Transfer booking is reclassified
   // as 'Contraction' and excluded from churn totals. Set via the offset flow.
-  { key: 'classification',           label: 'Classification',        excel: 22, type: 'select', options: ['', 'Churn', 'Contraction'] },
+  // 'Churn Credit' is a positive adjustment auto-created when a CLOSED-month churn is offset:
+  // it cancels the locked drop in the open month (the original closed-month churn is untouched).
+  { key: 'classification',           label: 'Classification',        excel: 22, type: 'select', options: ['', 'Churn', 'Contraction', 'Churn Credit'] },
 ];
 
 export const CHURN_COMPUTED = [

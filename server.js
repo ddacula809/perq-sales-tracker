@@ -12,7 +12,7 @@ import {
   listProducts, loadCatalog,
   listClosedMonths, closeMonth, reopenMonth,
 } from './db.js';
-import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear } from './compute.js';
+import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear, monthYear } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
@@ -508,6 +508,15 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
       work.push({ churn, amount: o.amount });
     }
 
+    // A churn "locked" in a closed month can't be reclassified (that would change a closed
+    // month's totals). Instead we bring the offset over to the open month + issue a Churn Credit.
+    const closed = Object.fromEntries((await listClosedMonths()).map((r) => [r.month, String(r.close_date).slice(0, 10)]));
+    const lockedInClosedMonth = (churn) => {
+      const ld = monthYear(churn.last_date_under_contract); // "May 2026"
+      const cd = closed[ld];
+      return cd ? { month: ld, locked: String(churn.date_added || '').slice(0, 10) <= cd } : { month: ld, locked: false };
+    };
+
     const labels = [];
     let total = 0;
     for (const { churn, amount } of work) {
@@ -517,7 +526,20 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
       total += used;
       const churnProp = churn.property || churn.pmc_buying_center || 'churned property';
       labels.push(`${churnProp} (${usd(used)})`);
-      if (used >= drop - 0.005) {
+      const cm = lockedInClosedMonth(churn);
+      if (cm.locked) {
+        // Closed-month churn: leave the original untouched (the closed month stays frozen). Bring
+        // the offset over to the open month as a Contraction (display only), and issue a positive
+        // Churn Credit that cancels the locked drop so net churn nets to zero.
+        await insertRow('churn', {
+          ...churn, mrr: sign * used, classification: 'Contraction', date_added: todayStr(),
+          notes: `Brought over from ${cm.month} (closed) to offset ${bookingProp} (${bookingPeriod}) — License Transfer`,
+        });
+        await insertRow('churn', {
+          ...churn, mrr: sign * used, classification: 'Churn Credit', date_added: todayStr(),
+          notes: `Churn Credit from ${cm.month} (offset of ${bookingProp}, ${bookingPeriod})`,
+        });
+      } else if (used >= drop - 0.005) {
         // Fully used — the whole churn was a transfer, not a loss.
         const cNote = appendNote(churn.notes, `Used to offset ${bookingProp} (${bookingPeriod}) — License Transfer`);
         await updateRow('churn', churn.id, { classification: 'Contraction', notes: cNote });
