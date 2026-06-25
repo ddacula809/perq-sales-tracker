@@ -287,6 +287,11 @@ export async function initDb() {
   await runOnce('churn_date_added_backfill_v1', async () => {
     await pool.query("UPDATE churn SET date_added = created_at::date WHERE date_added IS NULL");
   });
+  // Backfill "GoLive Set Date" for already-live bookings from created_at, so closing a month
+  // never retroactively carries over MRR that was already live before the close.
+  await runOnce('booking_golive_set_date_backfill_v1', async () => {
+    await pool.query("UPDATE bookings SET golive_set_date = created_at::date WHERE golive_date IS NOT NULL AND golive_set_date IS NULL");
+  });
   // Seed the products table once from the Booking "product" options (category from bprCategory).
   await runOnce('seed_products_v1', seedProducts);
   await ensureAdmin();

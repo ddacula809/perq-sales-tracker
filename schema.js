@@ -36,6 +36,9 @@ export const BOOKING_FIELDS = [
   { key: 'month3',                          label: 'Month 3',                excel: 31, type: 'number' },
   { key: 'golive_date_added',               label: 'GoLive Added',           excel: 32, type: 'text' },
   { key: 'golive_date',                     label: 'GoLive Date',            excel: 33, type: 'date' },
+  // System-generated: the date the GoLive Date was set in the system (stamped on GoLives upload
+  // and on manual edits). Admin-editable; drives the closed-month MRR carry-over. Excel 44.
+  { key: 'golive_set_date',                 label: 'GoLive Set Date',        excel: 44, type: 'date' },
   { key: 'billing_trigger',                 label: 'Billing Trigger',        excel: 34, type: 'select', options: ['', 'Go Live', 'Billing Schedule', 'DA Billing Sheet', 'No Action'] },
   { key: 'recurring_billing_status',        label: 'Recurring Billing',      excel: 35, type: 'select', options: ['', 'Completed', 'Pending'] },
   { key: 'implementation_billing_status',   label: 'Impl. Billing',          excel: 36, type: 'select', options: ['', 'Completed', 'Pending', 'Not Applicable'] },

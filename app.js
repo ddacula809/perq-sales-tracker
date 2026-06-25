@@ -88,10 +88,11 @@ function canAddDelete() { return role() === 'admin' || role() === 'standard'; } 
 function canImport() { return role() === 'admin'; }
 function canEditSalesSupport() { return ['admin', 'standard', 'sales_admin', 'sales'].includes(role()); }
 function canManageQuarters() { return ['admin', 'sales_admin'].includes(role()); } // open/close quarter
-// System-generated fields are never user-editable in the grid (shown read-only).
-const READONLY_FIELDS = new Set(['date_added']);
+// System-generated fields: read-only for everyone EXCEPT admins, who may correct them
+// (e.g. Date Added / GoLive Set Date, which drive the closed-month carry-over recognition).
+const ADMIN_EDIT_FIELDS = new Set(['date_added', 'golive_set_date']);
 function canEditField(f) {
-  if (READONLY_FIELDS.has(f.key)) return false;
+  if (ADMIN_EDIT_FIELDS.has(f.key)) return isAdmin();
   const r = role();
   if (r === 'admin' || r === 'standard') return true;
   if (r === 'billing') return isBilling(f.key);
@@ -4017,6 +4018,17 @@ function monthIdxFromMonthYear(my) {
   const mi = MONTHS.indexOf(mn);
   return (mi >= 0 && y) ? Number(y) * 12 + mi : null;
 }
+function monthLabelFromIdx(idx) { return idx == null ? '' : `${MONTHS[((idx % 12) + 12) % 12]} ${Math.floor(idx / 12)}`; }
+// A booking's EFFECTIVE go-live month: if its go-live month is closed and the go-live was SET
+// (golive_set_date) after that month's official close date, MRR recognition carries to the next
+// open month. Returns the effective absolute month index + the month it was carried from.
+function effectiveGoLive(b) {
+  const gi = monthIdxFromDate(b.golive_date);
+  if (gi == null) return { idx: null, carriedFrom: null };
+  const eff = effectiveChurnMonth(monthLabelFromIdx(gi), b.golive_set_date);
+  return { idx: monthIdxFromMonthYear(eff.month), carriedFrom: eff.carriedFrom };
+}
+function effectiveGoLiveIdx(b) { return effectiveGoLive(b).idx; }
 function parseQuarterLabel(label) {
   const m = String(label || '').match(/Q(\d)\s+(\d{4})/);
   return m ? { q: Number(m[1]), year: Number(m[2]) } : { q: 1, year: 2000 };
@@ -4040,7 +4052,7 @@ function saasChurnFor(b) {
 // MRR a single booking recognizes in absolute month `idx`, with churn proration:
 //  before GoLive -> 0; GoLive..(churn month-1) -> full MRR; churn month -> prorated Final AR; after -> 0.
 function saasBookingMonthMRR(b, churn, idx) {
-  const goLive = monthIdxFromDate(b.golive_date);
+  const goLive = effectiveGoLiveIdx(b); // shifts forward if the go-live month is closed (carry-over)
   if (goLive == null || idx < goLive) return 0;
   const mrr = Number(b.mrr) || 0;
   if (!churn) return mrr;
@@ -4054,7 +4066,7 @@ function saasBookingMonthMRR(b, churn, idx) {
 function saasQuarterOptions() {
   const set = new Set();
   const addIdx = (idx) => { if (idx != null) { const y = Math.floor(idx / 12); const q = Math.floor((idx % 12) / 3) + 1; set.add(`Q${q} ${y}`); } };
-  for (const b of state.rows.bookings) addIdx(monthIdxFromDate(b.golive_date));
+  for (const b of state.rows.bookings) addIdx(effectiveGoLiveIdx(b));
   for (const c of state.rows.churn) { addIdx(monthIdxFromMonthYear(c.final_invoice_month)); addIdx(monthIdxFromMonthYear(c.final_churn_month)); }
   set.add(currentQuarterLabel());
   return [...set].sort((a, b) => { const A = parseQuarterLabel(a); const B = parseQuarterLabel(b); return (A.year - B.year) || (A.q - B.q); });
@@ -4108,7 +4120,7 @@ function renderSaas() {
   const pmcFirstGoLive = new Map(); // pmc -> earliest go-live idx (drives New Logo)
   for (const b of state.rows.bookings) {
     if (!saasRecognized(b)) continue; // pure pilots aren't recognized until converted
-    const gi = monthIdxFromDate(b.golive_date);
+    const gi = effectiveGoLiveIdx(b); // carry-over: closed go-live months shift forward
     if (gi == null) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
     if (!allByProp.has(pid)) allByProp.set(pid, []);
@@ -4124,16 +4136,19 @@ function renderSaas() {
 
   // MRR Type for a property+category row in absolute month `idx`. Returns { type, note }.
   function saasTypeFor(pid, pmc, catBookings, idx) {
-    // Adds first: a product going live this month.
-    const goLives = catBookings.filter((b) => monthIdxFromDate(b.golive_date) === idx);
+    // Adds first: a product whose (effective) go-live lands this month.
+    const goLives = catBookings.filter((b) => effectiveGoLiveIdx(b) === idx);
     if (goLives.length) {
+      // If recognition was carried over from a closed month, note it.
+      const carriedFrom = goLives.map((b) => effectiveGoLive(b).carriedFrom).find(Boolean);
+      const carryNote = carriedFrom ? `MRR carried over from ${carriedFrom} (closed month)` : '';
       const off = goLives.find((b) => b.offset_churn_id);
-      if (off) return { type: 'Reactivation', note: String(off.notes || '') }; // offset/license-transfer booking
+      if (off) return { type: 'Reactivation', note: [String(off.notes || ''), carryNote].filter(Boolean).join(' — ') };
       if (idx === firstGoLive.get(pid)) {
-        return { type: pmcFirstGoLive.get(pmc) === idx ? 'New Logo' : 'Expansion', note: '' };
+        return { type: pmcFirstGoLive.get(pmc) === idx ? 'New Logo' : 'Expansion', note: carryNote };
       }
-      if (goLives.some((b) => String(b.ctam_type || '').trim() === 'Downgrade')) return { type: 'Downgrade', note: '' };
-      return { type: 'Upsell', note: '' };
+      if (goLives.some((b) => String(b.ctam_type || '').trim() === 'Downgrade')) return { type: 'Downgrade', note: carryNote };
+      return { type: 'Upsell', note: carryNote };
     }
     // Churn drops: prorated (final invoice month) then full ($0) the next month.
     const proBk = catBookings.find((b) => { const c = churnOf(b); return c && monthIdxFromMonthYear(c.final_invoice_month) === idx; });
@@ -4290,8 +4305,8 @@ function renderSaasUnit(idxs, category, h) {
     const pmcProperty = b.property_name || b.property_id || '—'; // combined "PMC - Property"
     const mrr = Number(b.mrr) || 0;
     const push = (type, monthIdx) => events.push({ type, pmcProperty, product: b.product || '—', monthIdx, mrr });
-    // Go-live (add) event.
-    const gi = monthIdxFromDate(b.golive_date);
+    // Go-live (add) event — effective month (carries over out of closed go-live months).
+    const gi = effectiveGoLiveIdx(b);
     if (gi != null && idxSet.has(gi)) {
       if (b.offset_churn_id) push('Reactivation', gi);
       else if (gi === firstGoLive.get(pid)) push(pmcFirstGoLive.get(String(b.pmc || '').trim().toLowerCase()) === gi ? 'New Logo' : 'Expansion', gi);

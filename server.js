@@ -334,6 +334,8 @@ function crud(table, computeFn, afterInsert, beforeInsert) {
         const bad = Object.keys(req.body || {}).filter((k) => !allowed.includes(k));
         if (bad.length) return res.status(403).json({ error: 'Billing users can only edit the billing columns.' });
       }
+      // Only admins may set the system-generated date fields (Date Added / GoLive Set Date).
+      if (role !== 'admin' && req.body) { delete req.body.date_added; delete req.body.golive_set_date; }
       const id = Number(req.params.id);
       // Capture old values of any watched fields touched by this edit, so we can tell whether
       // they actually changed and raise a Billing notification (GoLive/Last Date and MRR).
@@ -347,6 +349,12 @@ function crud(table, computeFn, afterInsert, beforeInsert) {
       if (table === 'churn' && req.body && Object.prototype.hasOwnProperty.call(req.body, 'last_date_under_contract')) {
         const norm = (v) => (v ? String(v).slice(0, 10) : '');
         if (norm(old.last_date_under_contract) !== norm(req.body.last_date_under_contract)) req.body.date_added = todayStr();
+      }
+      // Bookings: changing GoLive Date stamps GoLive Set Date = today (unless explicitly provided).
+      if (table === 'bookings' && req.body && Object.prototype.hasOwnProperty.call(req.body, 'golive_date')
+        && !Object.prototype.hasOwnProperty.call(req.body, 'golive_set_date')) {
+        const norm = (v) => (v ? String(v).slice(0, 10) : '');
+        if (norm(old.golive_date) !== norm(req.body.golive_date)) req.body.golive_set_date = todayStr();
       }
       const row = await updateRow(table, id, req.body || {});
       if (!row) return res.status(404).json({ error: 'Not found' });
@@ -946,6 +954,8 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
             mrrUpdated += 1;
           }
         }
+        // Whenever the GoLive date is set/changed here, stamp when it was set (drives MRR carry-over).
+        if (patch.golive_date) patch.golive_set_date = todayStr();
         if (Object.keys(patch).length) await updateRow('bookings', b.id, patch);
       }
     }
