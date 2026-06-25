@@ -576,20 +576,26 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
           notes: `Churn Net — prorated churn brought over from ${Pm}; ${usd(proratedNet)} not offset` });
         // Rooftop (final churn, open month): only touched if the offset reaches past the prorated.
         if (used > Pa + 0.005 && Fa > 0) {
-          const rooftopRemain = Fa - Math.min(used - Pa, Fa);
-          // Contract the original (its open rooftop), then restore the closed prorated so the
-          // closed month stays frozen, and restore any rooftop remainder that wasn't offset.
+          const rooftopUsed = Math.min(used - Pa, Fa);
+          const rooftopRemain = Fa - rooftopUsed;
+          // Repurpose the ORIGINAL row into just the rooftop (open month) as a Contraction, so the
+          // closed-month prorated is NOT shown as a contraction in the closed month. The prorated
+          // is restored as a locked real churn so the closed month's total is unchanged.
           await updateRow('churn', churn.id, {
-            classification: 'Contraction',
-            notes: appendNote(churn.notes, `Offset by ${bookingProp} (${bookingPeriod}); prorated carried over + rooftop contracted (License Transfer)`),
+            mrr: sign * rooftopUsed, last_date_under_contract: lastDayOfMonthLabel(Pm),
+            classification: 'Contraction', date_added: todayStr(),
+            notes: appendNote(churn.notes, `Rooftop contracted to offset ${bookingProp} (${bookingPeriod}); prorated carried over (License Transfer)`),
           });
           await insertRow('churn', {
             ...churn, mrr: sign * Pa, last_date_under_contract: lastDayBeforeMonth(Pm),
             classification: String(churn.classification || '') || 'Churn', date_added: churn.date_added,
-            notes: `Prorated churn retained in ${Pm} (closed) — its original was carried over to offset ${bookingProp}`,
+            notes: `Prorated churn retained in ${Pm} (closed) after the original was carried over to offset ${bookingProp}`,
           });
-          if (rooftopRemain > 0.005) await insertRow('churn', { ...openBase, mrr: sign * rooftopRemain, classification: String(churn.classification || '') || 'Churn',
-            notes: `Churn Rooftop remaining in ${Fm}; ${usd(rooftopRemain)} not offset` });
+          if (rooftopRemain > 0.005) await insertRow('churn', {
+            ...churn, mrr: sign * rooftopRemain, last_date_under_contract: lastDayOfMonthLabel(Pm),
+            classification: String(churn.classification || '') || 'Churn', date_added: todayStr(),
+            notes: `Churn Rooftop remaining in ${Fm}; ${usd(rooftopRemain)} not offset`,
+          });
         }
       } else if (used >= drop - 0.005) {
         // Fully used — the whole churn was a transfer, not a loss.
