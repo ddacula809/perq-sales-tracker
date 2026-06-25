@@ -775,7 +775,13 @@ function renderSummary() {
         .concat(cols.filter((c) => !activeSet.has(c.key)).map((c) => `<option value="${c.key}">${escapeHtml(c.label)}</option>`)).join('');
       addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="addFilterSelect">${addOpts}</select></div>`;
     }
-    filtersHtml = `<div class="filters-row" style="zoom:${state.filterZoom}">${tiles}${addTile}</div>`;
+    // Churn tab: a fixed "Enter Churn" button sits before the filter tiles (lives in the filters
+    // row, so it hides with "Hide Multiple Filters"). Opens the single-entry churn form.
+    let enterChurn = '';
+    if (tab === 'churn' && canAddDelete()) {
+      enterChurn = `<div class="filter enter-churn-tile"><button type="button" class="btn solid" id="enterChurnBtn">+ Enter Churn</button></div>`;
+    }
+    filtersHtml = `<div class="filters-row" style="zoom:${state.filterZoom}">${enterChurn}${tiles}${addTile}</div>`;
   }
 
   // Metric cards live on the Dashboard tab only, on their own row below the filters.
@@ -896,6 +902,8 @@ function renderSummary() {
   el.innerHTML = filtersHtml + metricsHtml;
 
   if (!state.filtersHidden) {
+    const ecBtn = $('#enterChurnBtn');
+    if (ecBtn) ecBtn.onclick = openChurnForm;
     // Filter value dropdowns are checkbox multi-selects, wired once via wireFilterMenus().
     const addSel = $('#addFilterSelect');
     if (addSel) addSel.onchange = (e) => {
@@ -3025,6 +3033,59 @@ async function submitSsForm(e) {
   } catch (err) { toast(err.message, true); }
 }
 
+// ---------- Single-entry Churn form (the "+ Enter Churn" button on the Churn tab) ----------
+function churnFormFieldHtml(f) {
+  let control;
+  if (f.type === 'select') {
+    const opts = f.options.map((o) => `<option value="${escapeAttr(o)}">${o || '—'}</option>`).join('');
+    control = `<select data-churn-key="${f.key}">${opts}</select>`;
+  } else if (f.type === 'date') {
+    control = `<input type="date" data-churn-key="${f.key}" />`;
+  } else {
+    control = `<input type="text" data-churn-key="${f.key}" />`; // money/text/number typed in
+  }
+  return `<div class="entry-field" data-field="${f.key}"><label>${escapeHtml(f.label)}</label>${control}</div>`;
+}
+
+function openChurnForm() {
+  if (state.tab !== 'churn' || !canAddDelete()) return;
+  // System-generated (date_added is stamped server-side) and inline-only (ar_override is edited
+  // in the grid cell) fields are not part of the manual entry form.
+  const skip = new Set(['date_added', 'ar_override']);
+  $('#churnForm').innerHTML = state.schema.churn.editable
+    .filter((f) => !skip.has(f.key))
+    .map(churnFormFieldHtml).join('');
+  $('#churnEntryModal').hidden = false;
+  const first = $('#churnForm [data-churn-key]');
+  if (first) first.focus();
+}
+
+async function submitChurnForm(e) {
+  e.preventDefault();
+  const payload = {};
+  $('#churnForm').querySelectorAll('[data-churn-key]').forEach((ctl) => {
+    let v = ctl.value;
+    if (MONEY.has(ctl.dataset.churnKey)) v = parseMoney(v);
+    payload[ctl.dataset.churnKey] = v;
+  });
+  try {
+    const row = await api('/api/churn', { method: 'POST', body: JSON.stringify(payload) });
+    state.rows.churn.push(row);
+    $('#churnEntryModal').hidden = true;
+    renderBody(); renderSummary(); renderBookingTotals(currentRows('churn'));
+    $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+    $('#scroller').scrollTop = $('#scroller').scrollHeight;
+    toast('Churn added');
+  } catch (err) { toast(err.message, true); }
+}
+
+function wireChurnEntry() {
+  $('#churnEntryClose').onclick = () => { $('#churnEntryModal').hidden = true; };
+  $('#churnEntryCancel').onclick = () => { $('#churnEntryModal').hidden = true; };
+  $('#churnEntryModal').addEventListener('click', (e) => { if (e.target.id === 'churnEntryModal') $('#churnEntryModal').hidden = true; });
+  $('#churnForm').addEventListener('submit', submitChurnForm);
+}
+
 function wireSalesSupport() {
   $('#ssAddRow').onclick = () => { if (ssEditable()) openSsForm(); };
   $('#ssBarToggle').onclick = () => {
@@ -4458,7 +4519,7 @@ function wireSaas() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireCloseMonth(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireCloseMonth(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireChurnEntry(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
   applyZoom();
   $('#returnAdminBtn').onclick = returnToAdmin;
   if (state.token) {

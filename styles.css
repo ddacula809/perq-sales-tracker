@@ -299,6 +299,9 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .filter-x:hover { color: var(--neg); }
 .filter.add-filter { border-style: dashed; border-color: var(--plum); }
 .filter.add-filter label { color: var(--plum); }
+/* "+ Enter Churn" action sits in the filters row but reads as a button, not a filter tile. */
+.filter.enter-churn-tile { padding: 0; background: none; border: none; box-shadow: none; display: flex; align-items: center; }
+.filter.enter-churn-tile .btn { white-space: nowrap; }
 .filter label, .metric .k {
   display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--ink-soft); margin-bottom: 4px;
