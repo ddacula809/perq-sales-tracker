@@ -358,6 +358,13 @@ function crud(table, computeFn, afterInsert, beforeInsert) {
       }
       const row = await updateRow(table, id, req.body || {});
       if (!row) return res.status(404).json({ error: 'Not found' });
+      // Bookings: if an offset is reverted (CTAM Type no longer License Transfer), drop the stale
+      // churn link so the booking becomes available to offset again.
+      if (table === 'bookings' && row.offset_churn_id != null
+        && String(row.ctam_type || '').trim() !== 'License Transfer') {
+        await pool.query('UPDATE bookings SET offset_churn_id = NULL WHERE id=$1', [id]);
+        row.offset_churn_id = null;
+      }
       for (const f of watched) {
         if (old[f.key] === undefined || sameWatched(old[f.key], row[f.key], f.money)) continue;
         await createNotification(table, row.id,

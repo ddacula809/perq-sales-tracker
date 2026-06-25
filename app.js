@@ -2346,7 +2346,9 @@ async function confirmBookings() {
 function offsetCandidates() {
   const out = [];
   for (const b of state.rows.bookings) {
-    if (b.offset_churn_id) continue; // already offset
+    // Already offset = still linked to a churn AND still a License Transfer. If the offset was
+    // reverted (CTAM Type changed back), a stale link no longer counts — the booking is available.
+    if (b.offset_churn_id && String(b.ctam_type || '').trim() === 'License Transfer') continue;
     const bq = monthYearQuarter(`${b.booking_month || ''} ${b.booking_year || ''}`);
     if (!bq) continue;
     const eligible = offsetEligibleChurns(b.pmc, bq);
