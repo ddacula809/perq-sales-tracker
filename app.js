@@ -496,10 +496,13 @@ function rowMatchesFilters(r, f) {
   for (const key in f) {
     const sel = selectedValues(f[key]);
     if (!sel.length) continue;
-    if (key === 'added_recent') { // "recently added" — use the widest selected window
+    if (key === 'added_recent' || key === 'golive_added_recent') { // "recently added" — widest selected window
       const days = Math.max(...sel.map((v) => ADDED_WINDOWS[v] || 0));
       if (!days) continue;
-      const t = Date.parse(r.created_at || '');
+      // Churn "Added" = the row's creation time; Bookings "GoLive Added" = when the GoLive Date
+      // was set in the system (golive_set_date). A blank stamp never matches a recency window.
+      const stamp = key === 'golive_added_recent' ? r.golive_set_date : r.created_at;
+      const t = Date.parse(stamp || '');
       if (!Number.isFinite(t) || t < Date.now() - days * 86400000) return false;
       continue;
     }
@@ -694,14 +697,17 @@ function renderSummary() {
     cols.unshift({ key: 'churn_quarter', label: 'Quarter', type: 'text' });
     cols.unshift({ key: 'added_recent', label: 'Added', type: 'text' });
   }
-  // Bookings: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from Booking Month/Year.
+  // Bookings: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from Booking Month/Year,
+  // plus a "GoLive Added" recency filter by when the GoLive Date was set in the system
+  // (golive_set_date — stamped on GoLives upload and manual edits). Mirrors churn's "Added".
   if (tab === 'bookings') {
     cols.unshift({ key: 'booking_quarter', label: 'Quarter', type: 'text' });
+    cols.unshift({ key: 'golive_added_recent', label: 'GoLive Added (recent)', type: 'text' });
   }
   const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
-    if (col.key === 'added_recent') return ['All', ...Object.keys(ADDED_WINDOWS)];
+    if (col.key === 'added_recent' || col.key === 'golive_added_recent') return ['All', ...Object.keys(ADDED_WINDOWS)];
     // GoLive filter is a has-date / no-date toggle, not a list of dates.
     if (col.key === 'golive_date') return ['All', 'Go Live', 'Not Live'];
     // Options reflect rows matching every OTHER active filter (cascading).
