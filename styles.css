@@ -362,7 +362,9 @@ tbody td {
   background: var(--panel); white-space: nowrap;
 }
 tbody tr:nth-child(even) td { background: #f7f4ec; }
-tbody tr:hover td { background: #fff7ee; }
+/* Row hover: a clear coral wash spanning the WHOLE row — !important + high specificity so it
+   also covers the computed/billing "automated" columns (which set their own !important bg). */
+tbody tr:hover td { background: #f7d3bc !important; }
 
 tbody td input, tbody td select {
   font: inherit; border: none; background: transparent; padding: 7px 9px;
@@ -397,6 +399,12 @@ tbody td.offset-na { text-align: right; }
    !important + later source order so the tint wins over zebra, computed and billing cells. */
 tbody tr.row-churned td { background: #fbe1e1 !important; }
 tbody tr.row-never-live td { background: #e3ebfb !important; }
+/* Hovering a status-tinted row: a deeper shade of its own tint so the row highlight stays clear
+   without losing the churned/never-live meaning. Higher specificity than the tint rules above. */
+tbody tr.row-churned:hover td { background: #f6c3c3 !important; }
+tbody tr.row-never-live:hover td { background: #cdd9f6 !important; }
+/* Keep the whole-row hover consistent over the overridden AR cell too (its coral border remains). */
+tbody tr:hover td.ar-override.ar-overridden { background: #f7d3bc !important; }
 .booking-status { font-weight: 600; white-space: nowrap; }
 .booking-status.status-churned { color: #b3261e; }
 .booking-status.status-never-live { color: #1f4fb0; }
