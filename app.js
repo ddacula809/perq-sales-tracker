@@ -1902,7 +1902,7 @@ async function doExport() {
 const SHARED_KEYS = [
   'booking_month', 'booking_year',
   'centralized', 'sales_rep', 'property_id', 'pmc', 'property_only', 'property_name', 'buying_center',
-  'pilot_or_ctam', 'pilot_type', 'ctam_type', 'mql',
+  'pilot_or_ctam', 'pilot_type', 'ctam_type', 'rerate_paid_months', 'rerate_old_mrr', 'mql',
   'contract_term', 'booked_term', 'date_signed',
 ];
 // Per-product fields. Offset Amount only applies (and only shows) on License Transfers.
@@ -1913,6 +1913,9 @@ let entryDefaults = { booking_month: MONTHS[new Date().getMonth()], booking_year
 
 // Fields a booking can't be submitted without (marked with * and enforced on submit).
 const REQUIRED_ENTRY_KEYS = new Set(['sales_rep', 'contract_term', 'booked_term', 'date_signed']);
+// Re-rate-only fields: shown in the New Booking form only when CTAM Type = Re-rate (hidden and
+// blanked otherwise), and required when shown. They feed the Re-rate math in compute.js.
+const RERATE_KEYS = ['rerate_paid_months', 'rerate_old_mrr'];
 
 function entryFieldHtml(f) {
   let control;
@@ -1928,8 +1931,9 @@ function entryFieldHtml(f) {
     const ro = f.key === 'property_name' ? ' readonly title="Auto-combined from PMC + Property Name"' : '';
     control = `<input type="${inputType}"${step}${ro} data-key="${f.key}" />`;
   }
-  const hidden = f.key === 'offset_amount' ? ' hidden' : '';
-  const req = REQUIRED_ENTRY_KEYS.has(f.key) ? ' <span class="req">*</span>' : '';
+  // Offset (License Transfer) and the Re-rate fields start hidden — shown by CTAM Type.
+  const hidden = (f.key === 'offset_amount' || RERATE_KEYS.includes(f.key)) ? ' hidden' : '';
+  const req = (REQUIRED_ENTRY_KEYS.has(f.key) || RERATE_KEYS.includes(f.key)) ? ' <span class="req">*</span>' : '';
   return `<div class="entry-field" data-field="${f.key}"${hidden}><label>${f.label}${req}</label>${control}</div>`;
 }
 
@@ -1977,6 +1981,7 @@ function updatePilotCtam(block) {
   setSharedSelect(block.querySelector('[data-shared] [data-key="pilot_type"]'), v === 'Pilot');
   setSharedSelect(block.querySelector('[data-shared] [data-key="ctam_type"]'), v === 'CTAM');
   setProductOffsets(block); // CTAM Type may have changed → refresh product Offset visibility
+  setRerateFields(block);   // …and the Re-rate-only fields
 }
 
 // Combine PMC + Property Name into "PMC - Property Name" (either alone if the other is blank).
@@ -2025,6 +2030,19 @@ function productLineHtml() {
 }
 
 // Offset Amount shows on a block's product lines only when that block's CTAM Type is License Transfer.
+// Re-rate fields (Re-rate Paid Months / Re-rate Old MRR) show on a block only when its CTAM Type
+// is Re-rate; otherwise they're hidden and blanked.
+function setRerateFields(block) {
+  const ctam = block.querySelector('[data-shared] [data-key="ctam_type"]');
+  const isRerate = !!ctam && ctam.value.trim() === 'Re-rate';
+  for (const key of RERATE_KEYS) {
+    const field = block.querySelector(`[data-shared] [data-field="${key}"]`);
+    if (!field) continue;
+    field.hidden = !isRerate;
+    if (!isRerate) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
+  }
+}
+
 function setProductOffsets(block) {
   const ctam = block.querySelector('[data-shared] [data-key="ctam_type"]');
   const isLT = !!ctam && ctam.value.trim() === 'License Transfer';
@@ -2147,6 +2165,18 @@ async function submitEntries() {
         const ctl = block.querySelector(`[data-shared] [data-key="${key}"]`);
         if (ctl) ctl.focus();
         return;
+      }
+    }
+    // Re-rate requires its two extra fields (Re-rate Paid Months / Re-rate Old MRR).
+    if (String(shared.ctam_type || '').trim() === 'Re-rate') {
+      for (const key of RERATE_KEYS) {
+        if (!String(shared[key] ?? '').trim()) {
+          const f = fieldDef(key);
+          toast(`${f ? f.label : key} is required for a Re-rate.`, true);
+          const ctl = block.querySelector(`[data-shared] [data-key="${key}"]`);
+          if (ctl) ctl.focus();
+          return;
+        }
       }
     }
     block.querySelectorAll('[data-products] [data-product]').forEach((line) => {
@@ -2580,7 +2610,7 @@ function wireEntry() {
     }
     const key = e.target.dataset && e.target.dataset.key;
     if (!key) return;
-    if (key === 'ctam_type') setProductOffsets(block);
+    if (key === 'ctam_type') { setProductOffsets(block); setRerateFields(block); }
     if (key === 'pilot_or_ctam') updatePilotCtam(block);
     if (key === 'pmc' || key === 'property_only') recomputeCombinedName(block); // rebuild "PMC - Property"
     if (key === 'property_only' || key === 'property_id') refreshDupFroms(); // keep dropdown labels fresh
