@@ -2702,20 +2702,35 @@ const ssSectionMatch = (row, b) => (String(row.section || '').trim() === 'Pilot 
 // quarter's total bookings, the un-tracked total, and the list of those bookings.
 function ssReconcileViewed() {
   const p = viewedPeriodObj();
-  if (!p) return { bookingsTotal: 0, gap: 0, list: [] };
+  if (!p) return { bookingsTotal: 0, ssTotal: 0, gap: 0, dupeExtra: 0, list: [], dupes: [] };
   const months = new Set(QUARTER_MONTHS[p.quarter]);
   const rows = state.rows.sales_support.filter((r) => r.period === p.period);
-  const matched = (b) => rows.some((r) =>
-    String(r.pmc || '').trim().toLowerCase() === String(b.pmc || '').trim().toLowerCase()
-    && String(r.product_category || '').trim() === ssCategoryOf(b)
-    && ssSectionMatch(r, b));
-  const booked = state.rows.bookings.filter((b) => months.has(b.booking_month) && reconNum(b.booking_year) === p.year);
-  const list = booked.filter((b) => (Number(b.company_total_booking) || 0) !== 0 && !matched(b));
-  return {
-    bookingsTotal: booked.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0),
-    gap: list.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0),
-    list,
+  // The Sales Support rows that PULL a given booking (same PMC + SS category + section). Zero rows
+  // = the booking isn't tracked; more than one = it's double-counted in the SS grand total.
+  const matchRows = (b) => {
+    const bpmc = String(b.pmc || '').trim().toLowerCase();
+    const bcat = ssCategoryOf(b);
+    if (!bpmc || !bcat) return []; // ssActual can't pull a booking with no PMC/category
+    return rows.filter((r) =>
+      String(r.pmc || '').trim().toLowerCase() === bpmc
+      && String(r.product_category || '').trim() === bcat
+      && ssSectionMatch(r, b));
   };
+  const booked = state.rows.bookings.filter((b) => months.has(b.booking_month) && reconNum(b.booking_year) === p.year);
+  const list = [];   // untracked: no matching SS row (drags the SS total BELOW Bookings)
+  const dupes = [];  // matched by >1 SS row (inflates the SS total ABOVE Bookings)
+  let bookingsTotal = 0, gap = 0, dupeExtra = 0;
+  for (const b of booked) {
+    const amt = Number(b.company_total_booking) || 0;
+    bookingsTotal += amt;
+    const n = matchRows(b).length;
+    if (n === 0) { if (amt !== 0) { list.push(b); gap += amt; } }
+    else if (n > 1) { dupes.push({ b, count: n }); dupeExtra += amt * (n - 1); }
+  }
+  // The SS grand total (q_actual across ALL period rows) counts each booking once per matching row:
+  // = (bookingsTotal − untracked) + double-counted extra. Matches the SS footer when no SS filter.
+  const ssTotal = bookingsTotal - gap + dupeExtra;
+  return { bookingsTotal, ssTotal, gap, dupeExtra, list, dupes };
 }
 // Why a booking isn't represented by any Sales Support row.
 function ssUntrackedReason(b) {
@@ -2725,21 +2740,58 @@ function ssUntrackedReason(b) {
 }
 function ssReconcileReportHtml(rec) {
   const p = viewedPeriodObj();
-  const body = rec.list
-    .slice()
-    .sort((a, b) => (Number(b.company_total_booking) || 0) - (Number(a.company_total_booking) || 0))
-    .map((b) => `<tr>
-      <td title="${escapeAttr(b.property_id || '')}">${escapeHtml(b.pmc || '—')}</td>
-      <td>${escapeHtml(b.property_only || b.property_name || b.property_id || '—')}</td>
-      <td>${escapeHtml(b.product || '—')}</td>
-      <td>${escapeHtml(b.booking_month || '—')}</td>
-      <td class="num">${fmtMoney(b.company_total_booking)}</td>
-      <td>${escapeHtml(ssUntrackedReason(b))}</td>
-    </tr>`).join('');
-  return `<p>${p ? escapeHtml(p.period) : ''}: <strong>${fmtMoney(rec.gap)}</strong> across ${rec.list.length} booking${rec.list.length === 1 ? '' : 's'} isn’t pulled into Sales Support.</p>`
-    + '<table class="recon-table"><thead><tr><th>PMC</th><th>Property</th><th>Product</th><th>Month</th><th class="num">Company Total</th><th>Reason</th></tr></thead>'
-    + `<tbody>${body}</tbody></table>`
-    + '<p class="muted" style="margin-top:8px">Fix the flagged field (PMC / Product) on each booking in the Bookings section, then run Sync from Bookings again. Note: bookings with a $0 Company Total (e.g. New-Free / New-Paid pilots) are already tracked but add $0, so they won’t appear here.</p>';
+  const diff = rec.ssTotal - rec.bookingsTotal; // SS − Bookings
+  // Top summary: the two totals and how the difference decomposes.
+  let html = `<p><strong>${p ? escapeHtml(p.period) : ''}</strong> reconciliation:</p>`
+    + '<table class="recon-table"><tbody>'
+    + `<tr><td>Bookings (Company Total, this quarter)</td><td class="num">${fmtMoney(rec.bookingsTotal)}</td></tr>`
+    + `<tr><td>Sales Support grand total (all rows)</td><td class="num">${fmtMoney(rec.ssTotal)}</td></tr>`
+    + `<tr class="ss-subtotal-row"><td>Difference (Sales Support − Bookings)</td><td class="num">${fmtMoney(diff)}</td></tr>`
+    + `<tr><td>· Not pulled into Sales Support (lowers SS)</td><td class="num">${fmtMoney(-rec.gap)}</td></tr>`
+    + `<tr><td>· Double-counted by multiple rows (raises SS)</td><td class="num">${fmtMoney(rec.dupeExtra)}</td></tr>`
+    + '</tbody></table>';
+  const ff = state.ssFilters || {};
+  if (ff.owner !== 'All' || ff.product !== 'All' || ff.section !== 'All') {
+    html += '<p class="muted" style="margin-top:6px">Note: the on-screen Grand Total reflects your active Account Owner / Product / Section filters, but this reconciliation uses <strong>all rows</strong> for the quarter.</p>';
+  }
+  if (Math.abs(diff) < 0.005 && !rec.list.length && !rec.dupes.length) {
+    return html + '<p class="muted" style="margin-top:8px">Sales Support matches Bookings exactly for this quarter. 🎉</p>';
+  }
+  // Untracked bookings (in Bookings, no Sales Support row).
+  if (rec.list.length) {
+    const body = rec.list.slice()
+      .sort((a, b) => (Number(b.company_total_booking) || 0) - (Number(a.company_total_booking) || 0))
+      .map((b) => `<tr>
+        <td title="${escapeAttr(b.property_id || '')}">${escapeHtml(b.pmc || '—')}</td>
+        <td>${escapeHtml(b.property_only || b.property_name || b.property_id || '—')}</td>
+        <td>${escapeHtml(b.product || '—')}</td>
+        <td>${escapeHtml(b.booking_month || '—')}</td>
+        <td class="num">${fmtMoney(b.company_total_booking)}</td>
+        <td>${escapeHtml(ssUntrackedReason(b))}</td>
+      </tr>`).join('');
+    html += `<h3 class="recon-h">Not pulled into Sales Support (${rec.list.length}) — ${fmtMoney(rec.gap)}</h3>`
+      + '<table class="recon-table"><thead><tr><th>PMC</th><th>Property</th><th>Product</th><th>Month</th><th class="num">Company Total</th><th>Reason</th></tr></thead>'
+      + `<tbody>${body}</tbody></table>`
+      + '<p class="muted" style="margin-top:6px">Fix the flagged field (PMC / Product) on each booking, then run Sync from Bookings. $0-Company-Total pilots are already tracked (they add $0), so they don’t appear here.</p>';
+  }
+  // Double-counted bookings (matched by more than one Sales Support row).
+  if (rec.dupes.length) {
+    const body = rec.dupes.slice()
+      .sort((a, b) => (Number(b.b.company_total_booking) || 0) - (Number(a.b.company_total_booking) || 0))
+      .map(({ b, count }) => `<tr>
+        <td title="${escapeAttr(b.property_id || '')}">${escapeHtml(b.pmc || '—')}</td>
+        <td>${escapeHtml(b.property_only || b.property_name || b.property_id || '—')}</td>
+        <td>${escapeHtml(b.product || '—')}</td>
+        <td>${escapeHtml(b.booking_month || '—')}</td>
+        <td class="num">${fmtMoney(b.company_total_booking)}</td>
+        <td class="num">${count} rows</td>
+      </tr>`).join('');
+    html += `<h3 class="recon-h">Double-counted by multiple Sales Support rows (${rec.dupes.length}) — +${fmtMoney(rec.dupeExtra)}</h3>`
+      + '<table class="recon-table"><thead><tr><th>PMC</th><th>Property</th><th>Product</th><th>Month</th><th class="num">Company Total</th><th class="num">Matches</th></tr></thead>'
+      + `<tbody>${body}</tbody></table>`
+      + '<p class="muted" style="margin-top:6px">These bookings match more than one Sales Support row (same PMC + Product + Section), so their Company Total is counted once per row. Remove the duplicate Sales Support row(s) so each PMC + Product + Section appears once.</p>';
+  }
+  return html;
 }
 function ssActual(row, monthName, year) {
   const pmc = String(row.pmc || '').trim().toLowerCase();
@@ -2940,6 +2992,7 @@ function renderSalesSupport() {
   pill.style.display = viewed ? '' : 'none';
   $('#ssAddRow').style.display = ssEditable() ? '' : 'none';
   $('#ssSyncBookings').hidden = !canManageQuarters();
+  $('#ssReconcile').hidden = !viewed; // read-only diagnostic — available to anyone viewing SS
   $('#ssCloseQuarter').hidden = !(canManageQuarters() && viewed && viewed.status === 'open');
   // Open New Quarter only applies on the most recent quarter (it creates the next one).
   // If a later quarter already exists, disable it so you can't open ahead from an older quarter.
@@ -3144,10 +3197,11 @@ function wireSalesSupport() {
       renderSalesSupport(); ssApplyFreeze();
       const rec = ssReconcileViewed();
       toast(created ? `Added ${created} row${created === 1 ? '' : 's'} from Bookings` : 'No new rows needed');
-      // If anything still isn't pulled in, show exactly which bookings and why.
-      if (rec.gap) showResult('Bookings not pulled into Sales Support', ssReconcileReportHtml(rec));
+      // If the SS total still doesn't match Bookings (untracked OR double-counted), show why.
+      if (rec.gap || rec.dupeExtra) showResult('Sales Support vs Bookings', ssReconcileReportHtml(rec));
     } catch (err) { toast(err.message, true); }
   };
+  $('#ssReconcile').onclick = () => showResult('Sales Support vs Bookings', ssReconcileReportHtml(ssReconcileViewed()));
   $('#ssCloseQuarter').onclick = async () => {
     const period = state.salesPeriod;
     if (!period) return;
