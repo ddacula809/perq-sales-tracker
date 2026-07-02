@@ -697,11 +697,14 @@ function renderSummary() {
     cols.unshift({ key: 'churn_quarter', label: 'Quarter', type: 'text' });
     cols.unshift({ key: 'added_recent', label: 'Added', type: 'text' });
   }
-  // Bookings: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from Booking Month/Year,
-  // plus a "GoLive Added" recency filter by when the GoLive Date was set in the system
+  // Bookings + Dashboard: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from
+  // Booking Month/Year.
+  if (tab === 'bookings' || tab === 'dashboard') {
+    cols.unshift({ key: 'booking_quarter', label: 'Quarter', type: 'text' });
+  }
+  // Bookings only: a "GoLive Added" recency filter by when the GoLive Date was set in the system
   // (golive_set_date — stamped on GoLives upload and manual edits). Mirrors churn's "Added".
   if (tab === 'bookings') {
-    cols.unshift({ key: 'booking_quarter', label: 'Quarter', type: 'text' });
     cols.unshift({ key: 'golive_added_recent', label: 'GoLive Added (recent)', type: 'text' });
   }
   const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
@@ -749,7 +752,7 @@ function renderSummary() {
   // Bookings + Churn use the adjustable "Add Filter" system (removable tiles). The Dashboard
   // keeps its fixed filter set. Churn defaults to the synthetic Quarter filter on first use.
   const FIXED = {
-    dashboard: ['booking_my', 'pmc', 'sales_rep', 'bpr_prod_category'],
+    dashboard: ['booking_quarter', 'booking_my', 'pmc', 'sales_rep', 'bpr_prod_category'],
   };
   if (tab === 'churn' && !state.activeFilters.churn) state.activeFilters.churn = ['churn_quarter'];
   if (tab === 'bookings' && !state.activeFilters.bookings) state.activeFilters.bookings = ['booking_quarter'];
