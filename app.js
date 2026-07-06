@@ -524,12 +524,25 @@ function selectedValues(v) {
   if (Array.isArray(v)) return v.filter((x) => x != null && x !== 'All' && x !== '');
   return (v == null || v === 'All' || v === '') ? [] : [v];
 }
+// Macro product grouping used on the Dashboard and as the "Main Category" filter:
+// Professional Services = the Digital Advertising products (SEO / Google Search Management /
+// Google Performance Max); Software = everything else. Works for bookings (which carry a computed
+// bpr_prod_category) and churn (which carries only a product -> mapped via the Products catalog).
+const PRO_SVC_PRODUCTS = new Set(['Google Search Management', 'SEO', 'Google Performance Max']);
+function mainCategoryOf(row) {
+  const prod = String(row.product || '').trim();
+  let cat = String(row.bpr_prod_category || '').trim(); // present on bookings
+  if (!cat) { const map = (state.schema && state.schema.productCategories) || {}; cat = map[prod] || ''; }
+  return (cat === 'Digital Advertising' || PRO_SVC_PRODUCTS.has(prod)) ? 'Professional Services' : 'Software';
+}
+
 // The value a row presents to a given filter (handles synthetic columns). For value-list
 // filters, an empty value is represented as the "(blank)" option.
 function rowFilterValue(r, key) {
   if (key === 'booking_my') {
     return (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
   }
+  if (key === 'main_category') return mainCategoryOf(r);
   if (key === 'churn_quarter') { const i = monthYearQuarter(r.final_churn_month || ''); return i ? i.label : '(blank)'; }
   if (key === 'booking_quarter') {
     const my = (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '';
@@ -751,6 +764,11 @@ function renderSummary() {
   if (tab === 'bookings' || tab === 'dashboard') {
     cols.unshift({ key: 'booking_quarter', label: 'Quarter', type: 'text' });
   }
+  // Bookings + Churn: a synthetic "Main Category" filter — Professional Services (Digital
+  // Advertising products) vs Software (everything else). Matches the Dashboard's macro grouping.
+  if (tab === 'bookings' || tab === 'churn') {
+    cols.unshift({ key: 'main_category', label: 'Main Category', type: 'text' });
+  }
   // Bookings only: a "GoLive Added" recency filter by when the GoLive Date was set in the system
   // (golive_set_date — stamped on GoLives upload and manual edits). Mirrors churn's "Added".
   if (tab === 'bookings') {
@@ -760,6 +778,10 @@ function renderSummary() {
   const MONTH_YEAR_COLS = new Set(['final_churn_month', 'prorated_churn_month', 'final_invoice_month']);
   const valuesFor = (col) => {
     if (col.key === 'added_recent' || col.key === 'golive_added_recent') return ['All', ...Object.keys(ADDED_WINDOWS)];
+    if (col.key === 'main_category') {
+      const present = new Set(rowsExcept(col.key).map((r) => mainCategoryOf(r)));
+      return ['All', ...['Professional Services', 'Software'].filter((v) => present.has(v))];
+    }
     // GoLive filter is a has-date / no-date toggle, not a list of dates.
     if (col.key === 'golive_date') return ['All', 'Go Live', 'Not Live'];
     // Options reflect rows matching every OTHER active filter (cascading).
@@ -872,20 +894,15 @@ function renderSummary() {
       catRows = catRows.filter((r) => { const i = bookingMY(r); return i && i.label === state.bookingQuarter; });
     }
     const byCat = {};
-    // Two macro buckets: "Professional Services" = the Digital Advertising products (SEO,
-    // Google Search Management, Google Performance Max — all the Digital Advertising BPR category);
-    // "Software" = everything else (Software, Pulse, Website, Tools for Google).
-    const isProfServices = (r) => {
-      const cat = (r.bpr_prod_category || '').trim();
-      const prod = (r.product || '').trim();
-      return cat === 'Digital Advertising' || prod === 'SEO' || prod === 'Google Performance Max';
-    };
+    // Two macro buckets (see mainCategoryOf): "Professional Services" = the Digital Advertising
+    // products (SEO, Google Search Management, Google Performance Max); "Software" = everything else
+    // (Software, Pulse, Website, Tools for Google). Same grouping as the "Main Category" filter.
     let profSvc = 0, software = 0;
     for (const r of catRows) {
       const c = (r.bpr_prod_category || '').trim() || 'Uncategorized';
       const amt = Number(r.company_total_booking) || 0;
       byCat[c] = (byCat[c] || 0) + amt;
-      if (isProfServices(r)) profSvc += amt; else software += amt;
+      if (mainCategoryOf(r) === 'Professional Services') profSvc += amt; else software += amt;
     }
     const catCards = Object.keys(byCat).sort().map((c) => metric(c, byCat[c])).join('');
     const bQuarterSel = '<select id="bookingQuarter" class="churn-quarter">' +
