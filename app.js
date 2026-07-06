@@ -872,15 +872,29 @@ function renderSummary() {
       catRows = catRows.filter((r) => { const i = bookingMY(r); return i && i.label === state.bookingQuarter; });
     }
     const byCat = {};
+    // Two macro buckets: "Professional Services" = the Digital Advertising products (SEO,
+    // Google Search Management, Google Performance Max — all the Digital Advertising BPR category);
+    // "Software" = everything else (Software, Pulse, Website, Tools for Google).
+    const isProfServices = (r) => {
+      const cat = (r.bpr_prod_category || '').trim();
+      const prod = (r.product || '').trim();
+      return cat === 'Digital Advertising' || prod === 'SEO' || prod === 'Google Performance Max';
+    };
+    let profSvc = 0, software = 0;
     for (const r of catRows) {
       const c = (r.bpr_prod_category || '').trim() || 'Uncategorized';
-      byCat[c] = (byCat[c] || 0) + (Number(r.company_total_booking) || 0);
+      const amt = Number(r.company_total_booking) || 0;
+      byCat[c] = (byCat[c] || 0) + amt;
+      if (isProfServices(r)) profSvc += amt; else software += amt;
     }
     const catCards = Object.keys(byCat).sort().map((c) => metric(c, byCat[c])).join('');
     const bQuarterSel = '<select id="bookingQuarter" class="churn-quarter">' +
       bQuarterVals.map((q) => `<option${q === state.bookingQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
-    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Booking Per Product Category</span>${bQuarterSel}</div>` +
-      `<div class="metrics-row">${catCards || '<span class="muted">No data.</span>'}</div>`;
+    metricsHtml += `<div class="metrics-title metrics-title-row"><span>Booking Per Product Category</span>${bQuarterSel}</div>`
+      + '<div class="metrics-subtitle">Main category</div>'
+      + `<div class="metrics-row">${metric('Professional Services', profSvc, true) + metric('Software', software, true)}</div>`
+      + '<div class="metrics-subtitle">By product category</div>'
+      + `<div class="metrics-row">${catCards || '<span class="muted">No data.</span>'}</div>`;
 
     // Account Owner filter for the whole Churn section (tiles + details). Sales users default
     // to their own name on login; the value is validated against the owners actually present.
