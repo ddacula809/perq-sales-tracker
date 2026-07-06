@@ -206,6 +206,16 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 }
 .col-item:hover { background: var(--paper); }
 .col-item input { margin: 0; }
+.col-menu-actions { display: flex; gap: 8px; align-items: center; }
+.col-vis { display: flex; align-items: center; gap: 8px; flex: 1; cursor: pointer; min-width: 0; }
+.col-vis > :last-child { overflow: hidden; text-overflow: ellipsis; }
+/* Pin toggle: greyed 📌 when off, coral-highlighted when the column is pinned (frozen-left). */
+.col-pin {
+  flex: none; border: 1px solid var(--line-strong); background: var(--panel); border-radius: 6px;
+  cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 5px; opacity: .4; filter: grayscale(1);
+}
+.col-pin:hover { opacity: .85; }
+.col-pin.pinned { opacity: 1; filter: none; background: var(--accent-soft); border-color: var(--accent); }
 
 /* Summary */
 .summary {

@@ -32,6 +32,8 @@ const state = {
   zoom: parseFloat(localStorage.getItem('perqZoom')) || 1,
   // Hidden columns per tab, e.g. { bookings: ['notes'], churn: [...] }.
   hiddenCols: (() => { try { return JSON.parse(localStorage.getItem('perqHiddenCols') || '{}'); } catch { return {}; } })(),
+  // Pinned (frozen-left) columns per tab. Absent tab = use the default freeze (GRID_FREEZE).
+  pinnedCols: (() => { try { return JSON.parse(localStorage.getItem('perqPinnedCols') || '{}'); } catch { return {}; } })(),
   // User-set column widths (px) per tab, e.g. { bookings: { mrr: 120 }, churn: {} }.
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
   churnQuarter: 'All',   // dashboard churn-by-month quarter filter
@@ -3565,13 +3567,24 @@ function wireView() {
 // Freeze key column(s) per grid: on Bookings it's Property Name; on Churn it's PMC Buying
 // Center + Property (a contiguous pinned block). The columns before them scroll away normally,
 // and once pinned they stick to the left (after the sticky row-number) while the rest scrolls.
+// Default pinned (frozen-left) columns per tab. Users can change these via the Columns menu;
+// their choice is stored in state.pinnedCols and overrides these defaults.
 const BOOKING_FREEZE = ['property_name', 'product', 'mrr'];
 const CHURN_FREEZE = ['property_id', 'pmc_buying_center', 'property', 'product', 'mrr', 'last_date_under_contract'];
 const GRID_FREEZE = { bookings: BOOKING_FREEZE, churn: CHURN_FREEZE };
+// The pinned columns for a tab: the user's saved set if any, else the default freeze.
+function pinnedFor(tab) {
+  const saved = state.pinnedCols[tab];
+  return Array.isArray(saved) ? saved : (GRID_FREEZE[tab] || []);
+}
+function savePinnedCols() { localStorage.setItem('perqPinnedCols', JSON.stringify(state.pinnedCols)); }
 function applyGridFreeze() {
-  const freezeKeys = GRID_FREEZE[state.tab];
-  if (!freezeKeys) { $('#gridFreezeStyle').textContent = ''; return; }
+  if (!GRID_FREEZE[state.tab]) { $('#gridFreezeStyle').textContent = ''; return; }
   const hidden = new Set(state.hiddenCols[state.tab] || []);
+  // Pin in DISPLAY order so the sticky left-offsets accumulate left-to-right, whatever order the
+  // user toggled them in.
+  const order = fieldsForTab().cols.map((c) => c.key);
+  const freezeKeys = pinnedFor(state.tab).slice().sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const zoom = state.zoom || 1;
   const rownumTh = $('#thead th.rownum');
   let left = rownumTh ? rownumTh.getBoundingClientRect().width / zoom : 46;
@@ -3753,11 +3766,20 @@ function wireResize() {
 function renderColMenu() {
   const { cols } = fieldsForTab();
   const hidden = state.hiddenCols[state.tab] || [];
-  const items = cols.map((f) =>
-    `<label class="col-item"><input type="checkbox" data-col="${f.key}"${hidden.includes(f.key) ? '' : ' checked'} /> ${f.label}</label>`
-  ).join('');
+  const canPin = !!GRID_FREEZE[state.tab]; // pinning applies to the Bookings & Churn grids
+  const pinned = new Set(pinnedFor(state.tab));
+  const items = cols.map((f) => {
+    const vis = `<label class="col-vis"><input type="checkbox" data-col="${f.key}"${hidden.includes(f.key) ? '' : ' checked'} /> ${escapeHtml(f.label)}</label>`;
+    const pin = canPin
+      ? `<button type="button" class="col-pin${pinned.has(f.key) ? ' pinned' : ''}" data-pin="${f.key}" title="${pinned.has(f.key) ? 'Unpin' : 'Pin'} column">📌</button>`
+      : '';
+    return `<div class="col-item">${vis}${pin}</div>`;
+  }).join('');
+  const resetPins = canPin ? '<button type="button" class="view-btn" id="colResetPins">Reset pins</button>' : '';
   $('#colMenu').innerHTML =
-    '<div class="col-menu-head"><span>Show columns</span><button type="button" class="view-btn" id="colShowAll">Show all</button></div>' + items;
+    `<div class="col-menu-head"><span>${canPin ? 'Show / pin columns' : 'Show columns'}</span>`
+    + `<span class="col-menu-actions"><button type="button" class="view-btn" id="colShowAll">Show all</button>${resetPins}</span></div>`
+    + items;
 }
 
 function wireColumns() {
@@ -3777,8 +3799,27 @@ function wireColumns() {
     applyColHide();
     applyGridFreeze();
   });
-  // "Show all" resets visibility for the current tab.
   $('#colMenu').addEventListener('click', (e) => {
+    // Pin / unpin a column (frozen-left).
+    const pinBtn = e.target.closest('[data-pin]');
+    if (pinBtn) {
+      const key = pinBtn.dataset.pin;
+      const cur = pinnedFor(state.tab).slice();
+      const i = cur.indexOf(key);
+      if (i >= 0) cur.splice(i, 1); else cur.push(key);
+      state.pinnedCols[state.tab] = cur;
+      savePinnedCols();
+      renderColMenu(); applyGridFreeze();
+      return;
+    }
+    // "Reset pins" restores this tab's default pinned columns.
+    if (e.target.id === 'colResetPins') {
+      delete state.pinnedCols[state.tab];
+      savePinnedCols();
+      renderColMenu(); applyGridFreeze();
+      return;
+    }
+    // "Show all" resets visibility for the current tab.
     if (e.target.id !== 'colShowAll') return;
     state.hiddenCols[state.tab] = [];
     saveHiddenCols();
