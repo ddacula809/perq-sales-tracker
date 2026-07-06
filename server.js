@@ -1052,24 +1052,37 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
     let mrrUpdated = 0;
     const changeLines = [];
     const mrrLines = [];
+    // Detail rows returned to the client (mirrors the Churn upload result tables).
+    const setRows = [];       // GoLive date set (was blank)
+    const changedRows = [];   // GoLive date changed (old -> new)
+    const mrrRows = [];        // MRR updated from the sheet (old -> new)
+    const notFoundRows = [];   // in the file, no matching booking (Property ID + Product)
     for (const row of incoming) {
       if (!row.golive_date) continue;
-      const matches = byKey.get(key(row));
-      if (!matches || !matches.length) { notFound += 1; continue; }
       const next = String(row.golive_date).slice(0, 10);
       const sheetMrr = toNum(row.mrr);
+      const matches = byKey.get(key(row));
+      if (!matches || !matches.length) {
+        notFound += 1;
+        notFoundRows.push({ property: row.property_id || '—', product: row.product || '—', golive_date: next });
+        continue;
+      }
       for (const b of matches) {
         const who = b.property_name || b.property_id || 'a property';
+        const dispMrr = sheetMrr !== null ? sheetMrr : b.mrr;
         const patch = {};
         // GoLive date.
         const cur = b.golive_date ? String(b.golive_date).slice(0, 10) : '';
-        if (!cur) { patch.golive_date = next; updated += 1; }
-        else if (cur === next) { unchanged += 1; }
+        if (!cur) {
+          patch.golive_date = next; updated += 1;
+          setRows.push({ property: who, product: b.product || '—', mrr: dispMrr, golive_date: next });
+        } else if (cur === next) { unchanged += 1; }
         else {
           patch.golive_date = next;
           const msg = `GoLive date changed for ${who} (${b.product || 'product'}) from ${cur} to ${next}`;
           await createNotification('bookings', b.id, msg);
           changeLines.push(msg);
+          changedRows.push({ property: who, product: b.product || '—', mrr: dispMrr, from: cur, to: next });
           changed += 1;
         }
         // MRR — update to the sheet's value when provided and different; notify billing on change.
@@ -1081,6 +1094,7 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
             const msg = `MRR changed for ${who} (${b.product || 'product'}) from ${money(curMrr)} to ${money(sheetMrr)}`;
             await createNotification('bookings', b.id, msg);
             mrrLines.push(msg);
+            mrrRows.push({ property: who, product: b.product || '—', from: curMrr, to: sheetMrr });
             mrrUpdated += 1;
           }
         }
@@ -1097,7 +1111,8 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
         html: changeEmailHtml('Booking changes', 'The following GoLive dates / MRR values were updated from a GoLives upload:', allLines),
       });
     }
-    res.json({ updated, changed, unchanged, notFound, mrrUpdated, total: incoming.length });
+    res.json({ updated, changed, unchanged, notFound, mrrUpdated, total: incoming.length,
+      setRows, changedRows, mrrRows, notFoundRows });
   } catch (e) { next(e); }
 });
 

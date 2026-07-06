@@ -136,6 +136,53 @@ function churnResultHtml(data) {
   return html;
 }
 
+// Build the GoLives upload result: the count summary, plus detail tables of exactly what was
+// set / changed / MRR-updated / not found — mirroring the Churn upload result.
+function golivesResultHtml(data) {
+  const setRows = data.setRows || [];
+  const changedRows = data.changedRows || [];
+  const mrrRows = data.mrrRows || [];
+  const notFoundRows = data.notFoundRows || [];
+  let html = '<ul class="result-list">'
+    + `<li><strong>${data.updated}</strong> GoLive date(s) set (were blank)</li>`
+    + `<li><strong>${data.changed}</strong> GoLive date(s) changed (billing notified)</li>`
+    + `<li><strong>${data.unchanged}</strong> unchanged (same date)</li>`
+    + `<li><strong>${data.mrrUpdated || 0}</strong> MRR value(s) updated from the sheet (billing notified)</li>`
+    + `<li><strong>${data.notFound}</strong> not found in Bookings (matched by Property ID + Product)</li>`
+    + `<li class="muted">${data.total} row(s) in the file</li>`
+    + '</ul>';
+  if (setRows.length) {
+    html += `<div class="result-detail-title">GoLive date set (${setRows.length})</div>`
+      + '<div class="result-detail"><table><thead><tr><th>Property</th><th>Product</th><th>MRR</th><th>GoLive Date</th></tr></thead><tbody>'
+      + setRows.map((r) => `<tr><td>${escapeHtml(r.property || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+        + `<td class="num">${fmtMoney(r.mrr)}</td><td>${escapeHtml(r.golive_date || '—')}</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  if (changedRows.length) {
+    html += `<div class="result-detail-title">GoLive date changed (${changedRows.length})</div>`
+      + '<div class="result-detail"><table><thead><tr><th>Property</th><th>Product</th><th>MRR</th><th>Old date</th><th>New date</th></tr></thead><tbody>'
+      + changedRows.map((r) => `<tr><td>${escapeHtml(r.property || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+        + `<td class="num">${fmtMoney(r.mrr)}</td><td>${escapeHtml(r.from || '(blank)')}</td><td><strong>${escapeHtml(r.to || '(blank)')}</strong></td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  if (mrrRows.length) {
+    html += `<div class="result-detail-title">MRR updated from the sheet (${mrrRows.length})</div>`
+      + '<div class="result-detail"><table><thead><tr><th>Property</th><th>Product</th><th>Old MRR</th><th>New MRR</th></tr></thead><tbody>'
+      + mrrRows.map((r) => `<tr><td>${escapeHtml(r.property || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+        + `<td class="num">${fmtMoney(r.from)}</td><td class="num"><strong>${fmtMoney(r.to)}</strong></td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  if (notFoundRows.length) {
+    html += `<div class="result-detail-title">Not found in Bookings (${notFoundRows.length})</div>`
+      + '<div class="result-detail"><table><thead><tr><th>Property ID</th><th>Product</th><th>GoLive Date</th></tr></thead><tbody>'
+      + notFoundRows.map((r) => `<tr><td>${escapeHtml(r.property || '—')}</td><td>${escapeHtml(r.product || '—')}</td>`
+        + `<td>${escapeHtml(r.golive_date || '—')}</td></tr>`).join('')
+      + '</tbody></table>'
+      + '<p class="muted" style="margin-top:6px">These file rows had no matching booking (by Property ID + Product). Check the Property ID / Product, or add the booking first.</p></div>';
+  }
+  return html;
+}
+
 function wireResult() {
   const close = () => { $('#resultModal').hidden = true; };
   $('#resultClose').onclick = close;
@@ -1846,15 +1893,7 @@ function wireActions() {
       state.rows.bookings = await api('/api/bookings');
       if (isAdmin() || role() === 'billing') state.notifications = await api('/api/notifications');
       renderAll();
-      showResult('GoLives upload complete',
-        '<ul class="result-list">'
-        + `<li><strong>${data.updated}</strong> GoLive date(s) set (were blank)</li>`
-        + `<li><strong>${data.changed}</strong> GoLive date(s) changed (billing notified)</li>`
-        + `<li><strong>${data.unchanged}</strong> unchanged (same date)</li>`
-        + `<li><strong>${data.mrrUpdated || 0}</strong> MRR value(s) updated from the sheet (billing notified)</li>`
-        + `<li><strong>${data.notFound}</strong> not found in Bookings (matched by Property ID + Product)</li>`
-        + `<li class="muted">${data.total} row(s) in the file</li>`
-        + '</ul>');
+      showResult('GoLives upload complete', golivesResultHtml(data));
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };
