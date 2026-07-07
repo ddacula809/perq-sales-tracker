@@ -1710,8 +1710,10 @@ function wireGrid() {
       }
       updateRowInState(state.tab, updated);
       // Changing CTAM Type flips whether the Offset cell is editable; changing a churn's Last
-      // Date Under Contract re-stamps the read-only Date Added — both need a row re-render.
-      if (key === 'ctam_type' || (state.tab === 'churn' && (key === 'last_date_under_contract' || key === 'ar_override'))) {
+      // Date Under Contract re-stamps the read-only Date Added. On churn, MRR / Last Date also
+      // drive the admin-editable AR Final Invoice Amt cell (an input, not a data-comp cell, so
+      // refreshComputedCells can't update it) — rebuild the row so its placeholder recomputes.
+      if (key === 'ctam_type' || (state.tab === 'churn' && (key === 'last_date_under_contract' || key === 'ar_override' || key === 'mrr'))) {
         renderBody();
       } else {
         refreshComputedCells(tr, updated);
@@ -1793,7 +1795,11 @@ function wireGrid() {
       const cur = state.rows[table].find((r) => r.id === Number(dup.dataset.dup));
       if (!cur) return;
       const payload = {};
-      state.schema[table].editable.forEach((fld) => { if (cur[fld.key] != null) payload[fld.key] = cur[fld.key]; });
+      // Don't carry a manual AR override to the copy — it should recompute from its own MRR /
+      // Last Date (otherwise a changed MRR wouldn't update the AR Final Invoice Amt).
+      state.schema[table].editable.forEach((fld) => {
+        if (fld.key !== 'ar_override' && cur[fld.key] != null) payload[fld.key] = cur[fld.key];
+      });
       try {
         const row = await api(`/api/${table}`, { method: 'POST', body: JSON.stringify(payload) });
         afterCreate(cur.id, row, table);
