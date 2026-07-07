@@ -318,8 +318,8 @@ function rowInnerHtml(row, i, fields) {
     else html += readonlyCell(f, row);
   }
   let actions = canAddDelete() ? `<button class="row-del" title="Delete row" data-del="${row.id}">✕</button>` : '';
-  // Super-admin only, Bookings only: a ▾ reveals Add-below / Duplicate.
-  if (state.tab === 'bookings' && isAdmin()) {
+  // Admin only, on the Bookings & Churn grids: a ▾ reveals Add-below / Duplicate.
+  if ((state.tab === 'bookings' || state.tab === 'churn') && isAdmin()) {
     actions += '<div class="row-more">'
       + '<button type="button" class="row-more-btn" title="More row actions">▾</button>'
       + '<div class="row-more-menu" hidden>'
@@ -1682,6 +1682,13 @@ function refreshComputedCells(tr, row) {
   }
 }
 
+// "Add row below" carries the source row's identifying context (so the new blank row stays
+// visible under the current filter). Transaction fields (MRR / dates / product) are left blank.
+const ADD_BELOW_CTX = {
+  bookings: ['booking_month', 'booking_year', 'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center'],
+  churn: ['property_id', 'sage_id', 'pmc_buying_center', 'property'],
+};
+
 // ---------- Events ----------
 function wireGrid() {
   const tbody = $('#tbody');
@@ -1720,14 +1727,14 @@ function wireGrid() {
   });
 
   // Insert a freshly created row right after the source row so it appears "below" it.
-  const insertRowAfter = (afterId, row) => {
-    const arr = state.rows.bookings;
+  const insertRowAfter = (afterId, row, table) => {
+    const arr = state.rows[table];
     const idx = arr.findIndex((r) => r.id === afterId);
     if (idx >= 0) arr.splice(idx + 1, 0, row); else arr.push(row);
   };
-  const afterCreate = (id, row) => {
-    insertRowAfter(id, row);
-    renderBody(); renderSummary(); renderBookingTotals(currentRows('bookings'));
+  const afterCreate = (id, row, table) => {
+    insertRowAfter(id, row, table);
+    renderBody(); renderSummary(); renderBookingTotals(currentRows(table));
     $('#status').textContent = `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
   };
 
@@ -1765,30 +1772,31 @@ function wireGrid() {
       return;
     }
     // Add a blank line below, carrying the row's identifying context (so it stays visible
-    // under the current filter); Bookings + admin only.
+    // under the current filter); Bookings & Churn, admin only.
     const add = e.target.closest('[data-add-below]');
     if (add) {
-      const cur = state.rows.bookings.find((r) => r.id === Number(add.dataset.addBelow));
+      const table = state.tab;
+      const cur = state.rows[table].find((r) => r.id === Number(add.dataset.addBelow));
       const ctx = {};
-      ['booking_month', 'booking_year', 'centralized', 'sales_rep', 'property_id', 'property_name', 'pmc', 'buying_center']
-        .forEach((k) => { if (cur && cur[k] != null && cur[k] !== '') ctx[k] = cur[k]; });
+      (ADD_BELOW_CTX[table] || []).forEach((k) => { if (cur && cur[k] != null && cur[k] !== '') ctx[k] = cur[k]; });
       try {
-        const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(ctx) });
-        afterCreate(cur.id, row);
+        const row = await api(`/api/${table}`, { method: 'POST', body: JSON.stringify(ctx) });
+        afterCreate(cur.id, row, table);
         toast('Row added');
       } catch (err) { toast(err.message, true); }
       return;
     }
-    // Duplicate this row (copy all editable fields); Bookings + admin only.
+    // Duplicate this row (copy all editable fields); Bookings & Churn, admin only.
     const dup = e.target.closest('[data-dup]');
     if (dup) {
-      const cur = state.rows.bookings.find((r) => r.id === Number(dup.dataset.dup));
+      const table = state.tab;
+      const cur = state.rows[table].find((r) => r.id === Number(dup.dataset.dup));
       if (!cur) return;
       const payload = {};
-      state.schema.bookings.editable.forEach((fld) => { if (cur[fld.key] != null) payload[fld.key] = cur[fld.key]; });
+      state.schema[table].editable.forEach((fld) => { if (cur[fld.key] != null) payload[fld.key] = cur[fld.key]; });
       try {
-        const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
-        afterCreate(cur.id, row);
+        const row = await api(`/api/${table}`, { method: 'POST', body: JSON.stringify(payload) });
+        afterCreate(cur.id, row, table);
         toast('Row duplicated');
       } catch (err) { toast(err.message, true); }
     }
