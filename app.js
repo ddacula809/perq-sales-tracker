@@ -55,8 +55,9 @@ const state = {
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
-  ssView: localStorage.getItem('perqSsView') || 'product', // Sales Support view: 'product' | 'property'
-  ssExpanded: new Set(), // Property-level rows whose per-product detail is expanded (by row id)
+  ssView: (localStorage.getItem('perqSsView') === 'property' ? 'pmc' : localStorage.getItem('perqSsView')) || 'product', // 'product' | 'pmc'
+  ssExpanded: new Set(),    // property rows whose per-order detail is expanded (by row id)
+  ssExpandedPmc: new Set(), // PMCs whose property rows are expanded (by PMC name)
   ssBarCollapsed: localStorage.getItem('perqSsBarCollapsed') === '1', // Sales Support toolbar collapsed
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
@@ -2952,13 +2953,13 @@ const ssFieldDef = (key) => state.schema.sales_support.editable.find((f) => f.ke
 // Freeze the leading columns (through PMC) so they stay visible when scrolling right.
 // Offsets are computed from the actual header widths (recomputed on resize).
 const SS_FREEZE = ['product_category', 'section', 'pmc'];
-const SS_FREEZE_PROPERTY = ['property', 'pmc'];
+const SS_FREEZE_PMC = ['name'];
 function ssApplyFreeze() {
   // Start past the sticky row-number column so the frozen columns don't overlap it.
   const rownumTh = $('#ssHead th.rownum');
   let left = rownumTh ? rownumTh.getBoundingClientRect().width / (state.zoom || 1) : 0;
   let css = '';
-  for (const key of (state.ssView === 'property' ? SS_FREEZE_PROPERTY : SS_FREEZE)) {
+  for (const key of (state.ssView === 'pmc' ? SS_FREEZE_PMC : SS_FREEZE)) {
     css += `#ssTable td[data-col="${key}"]{position:sticky;left:${left}px;z-index:1;}`;
     css += `#ssTable th[data-col="${key}"]{position:sticky;left:${left}px;top:0;z-index:4;}`;
     const th = $(`#ssHead th[data-col="${key}"]`);
@@ -3123,9 +3124,9 @@ function renderSalesSupport() {
   document.querySelectorAll('.ss-view-btn').forEach((b) => b.classList.toggle('active', b.dataset.ssView === state.ssView));
   const prodFilterLbl = $('#ssFilterProduct') && $('#ssFilterProduct').closest('label');
   const secFilterLbl = $('#ssFilterSection') && $('#ssFilterSection').closest('label');
-  if (prodFilterLbl) prodFilterLbl.style.display = state.ssView === 'property' ? 'none' : '';
-  if (secFilterLbl) secFilterLbl.style.display = state.ssView === 'property' ? 'none' : '';
-  if (state.ssView === 'property') { renderSsPropertyTable(viewed, editCol); return; }
+  if (prodFilterLbl) prodFilterLbl.style.display = state.ssView === 'pmc' ? 'none' : '';
+  if (secFilterLbl) secFilterLbl.style.display = state.ssView === 'pmc' ? 'none' : '';
+  if (state.ssView === 'pmc') { renderSsPmcTable(viewed, editCol); return; }
   const ff = state.ssFilters;
   const rows = state.rows.sales_support
     .filter((r) => (r.level || 'product') !== 'property')
@@ -3172,14 +3173,15 @@ function renderSalesSupport() {
   $('#ssFoot').innerHTML = rows.length ? ssGrandTotalRowHtml(cols, rows, editCol) : '';
 }
 
-// ----- Property Level view (per-property forecast: manual targets, actuals from Bookings) -----
-function ssColumnsProperty() {
+// ----- PMC Level view: PMC rows (aggregated) → expand to Property rows (manual targets) →
+// expand to per-order detail. Stored rows stay at property level; PMC rows are computed sums. -----
+function ssColumnsPmc() {
   const p = viewedPeriodObj();
   const q = p ? `Q${p.quarter}` : 'Q';
   const y = p ? p.year : '';
   const m = p ? QUARTER_MONTHS[p.quarter] : ['Month 1', 'Month 2', 'Month 3'];
   const cols = [
-    ['property', 'Property'], ['pmc', 'PMC'], ['account_owner', 'Account Owner'],
+    ['name', 'PMC / Property'], ['account_owner', 'Account Owner'],
     ['q2_target', `${q} Target`],
     ['apr_target', `${m[0]} ${y} Target`], ['m1_actual', `${m[0]} ${y} Actual`],
     ['may_target', `${m[1]} ${y} Target`], ['m2_actual', `${m[1]} ${y} Actual`],
@@ -3203,21 +3205,13 @@ function ssActualProperty(propId, monthName, year) {
   return sum;
 }
 const SS_PROP_MONTHS = { m1_actual: 0, m2_actual: 1, m3_actual: 2 };
-// One cell in the property view: computed actuals, editable targets, or read-only identity.
-function ssPropCell(row, key) {
-  const p = viewedPeriodObj();
-  const year = p ? p.year : null;
-  const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
-  if (SS_COMPUTED.has(key)) {
-    const months = key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]];
-    const value = months.reduce((a, mn) => a + ssActualProperty(row.property_id, mn, year), 0);
-    return `<td class="ss-actual" data-col="${key}">${fmtMoney(value)}</td>`;
-  }
-  if (key === 'property') {
-    const caret = `<button type="button" class="ss-expand${state.ssExpanded.has(row.id) ? ' open' : ''}" data-ss-expand="${row.id}" title="Show / hide product detail">▸</button>`;
-    return `<td data-col="property" class="ss-prop-name">${caret}<span>${escapeHtml(row.property || row.property_id || '—')}</span></td>`;
-  }
-  if (key === 'pmc') return `<td data-col="pmc">${escapeHtml(row.pmc || '—')}</td>`;
+// The actual for a property row + actual-column key (q_actual = whole quarter).
+function ssPropActualFor(row, key, year, qm) {
+  const months = key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]];
+  return months.reduce((a, mn) => a + ssActualProperty(row.property_id, mn, year), 0);
+}
+// A non-name, non-actual cell on a property row: editable target / owner / notes (or read-only).
+function ssPropEditCell(row, key) {
   const f = ssFieldDef(key);
   if (!ssEditable()) {
     const text = SS_MONEY.has(key) ? fmtMoney(row[key]) : (row[key] ?? '');
@@ -3232,8 +3226,40 @@ function ssPropCell(row, key) {
   }
   return `<td data-col="${key}"><input type="text" data-ss-key="${key}" value="${escapeAttr(row[key] ?? '')}" /></td>`;
 }
-// Expanded per-property detail: one row per Product × (Pilot/CTAM), actuals per month.
-function ssPropertyDetailRows(row, cols, editCol) {
+// A PMC aggregate row (level 1): sums of its property rows' targets + actuals; expands to properties.
+function ssPmcMainRow(pmc, props, cols, editCol) {
+  const p = viewedPeriodObj();
+  const year = p ? p.year : null;
+  const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const cells = cols.map(([k]) => {
+    if (k === 'name') {
+      const caret = `<button type="button" class="ss-expand${state.ssExpandedPmc.has(pmc) ? ' open' : ''}" data-ss-expand-pmc="${escapeAttr(pmc)}" title="Show / hide properties">▸</button>`;
+      return `<td data-col="name" class="ss-prop-name">${caret}<span>${escapeHtml(pmc)}</span> <span class="ss-count">${props.length}</span></td>`;
+    }
+    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + ssPropActualFor(r, k, year, qm), 0))}</td>`;
+    if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
+    return `<td data-col="${k}"></td>`;
+  }).join('');
+  return `<tr class="ss-pmc-row"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
+}
+// A property row (level 2): editable targets, computed actuals; expands to per-order detail.
+function ssPropertyRow(row, cols, editCol) {
+  const p = viewedPeriodObj();
+  const year = p ? p.year : null;
+  const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const cells = cols.map(([k]) => {
+    if (k === 'name') {
+      const caret = `<button type="button" class="ss-expand${state.ssExpanded.has(row.id) ? ' open' : ''}" data-ss-expand="${row.id}" title="Show / hide order detail">▸</button>`;
+      return `<td data-col="name" class="ss-prop-name ss-lvl2"><span class="ss-detail-indent">↳</span>${caret}<span>${escapeHtml(row.property || row.property_id || '—')}</span></td>`;
+    }
+    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(ssPropActualFor(row, k, year, qm))}</td>`;
+    return ssPropEditCell(row, k);
+  }).join('');
+  const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
+  return `<tr data-ss-id="${row.id}" class="ss-lvl2-row"><td class="rownum"></td>${cells}${del}</tr>`;
+}
+// Expanded per-property order detail: one row per Product × (Pilot/CTAM), actuals per month.
+function ssOrderDetailRows(row, cols, editCol) {
   const p = viewedPeriodObj();
   const year = p ? p.year : null;
   const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
@@ -3259,59 +3285,60 @@ function ssPropertyDetailRows(row, cols, editCol) {
   return list.map((g) => {
     const vals = { m1_actual: g.m[0], m2_actual: g.m[1], m3_actual: g.m[2], q_actual: g.m[0] + g.m[1] + g.m[2] };
     const cells = cols.map(([k]) => {
-      if (k === 'property') return `<td class="ss-detail-name" data-col="property"><span class="ss-detail-indent">↳</span> ${escapeHtml(g.product)} <span class="ss-tag ss-tag-${g.section.toLowerCase()}">${g.section}</span></td>`;
+      if (k === 'name') return `<td class="ss-detail-name ss-lvl3" data-col="name"><span class="ss-detail-indent">↳↳</span> ${escapeHtml(g.product)} <span class="ss-tag ss-tag-${g.section.toLowerCase()}">${g.section}</span></td>`;
       if (Object.prototype.hasOwnProperty.call(vals, k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(vals[k])}</td>`;
       return `<td data-col="${k}"></td>`;
     }).join('');
     return `<tr class="ss-detail-row"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
   }).join('');
 }
-// Grand total for the property view: stored targets summed; actuals summed from Bookings.
-function ssPropGrandTotalHtml(cols, rows, editCol) {
+// Grand total (PMC view): stored targets summed across all property rows; actuals from Bookings.
+function ssPmcGrandTotal(cols, rows, editCol) {
   const p = viewedPeriodObj();
   const year = p ? p.year : null;
   const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
-  const sumActual = (key) => {
-    const months = key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]];
-    return rows.reduce((a, r) => a + months.reduce((s, mn) => s + ssActualProperty(r.property_id, mn, year), 0), 0);
-  };
   const cells = cols.map(([k], i) => {
-    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(sumActual(k))}</td>`;
+    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + ssPropActualFor(r, k, year, qm), 0))}</td>`;
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     if (i === 0) return `<td data-col="${k}">Grand Total</td>`;
     return `<td data-col="${k}"></td>`;
   }).join('');
   return `<tr class="ss-grand-total"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
 }
-function renderSsPropertyTable(viewed, editCol) {
-  const cols = ssColumnsProperty();
+function renderSsPmcTable(viewed, editCol) {
+  const cols = ssColumnsPmc();
   $('#ssHead').innerHTML = '<tr><th class="rownum">#</th>'
     + cols.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}" data-col="${k}">${escapeHtml(label)}<span class="col-resize"></span></th>`).join('')
     + (editCol ? '<th></th>' : '') + '</tr>';
   const ff = state.ssFilters;
-  const rows = state.rows.sales_support
+  const propRows = state.rows.sales_support
     .filter((r) => (r.level || '') === 'property')
     .filter((r) => r.period === state.salesPeriod)
-    .filter((r) => ff.owner === 'All' || (r.account_owner || '') === ff.owner)
-    .sort((a, b) => String(a.pmc || '').localeCompare(String(b.pmc || ''))
-      || String(a.property || '').localeCompare(String(b.property || '')));
+    .filter((r) => ff.owner === 'All' || (r.account_owner || '') === ff.owner);
+  // Group property rows by PMC (the top hierarchy level).
+  const byPmc = new Map();
+  for (const r of propRows) { const key = String(r.pmc || '').trim() || '—'; if (!byPmc.has(key)) byPmc.set(key, []); byPmc.get(key).push(r); }
+  const pmcs = [...byPmc.keys()].sort((a, b) => a.localeCompare(b));
   const colCount = cols.length + (editCol ? 1 : 0);
   let html = '';
-  let n = 0;
-  for (const row of rows) {
-    n += 1;
-    const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
-    html += `<tr data-ss-id="${row.id}" class="${(n % 2 === 0) ? 'ss-alt' : ''}"><td class="rownum">${n}</td>${cols.map(([k]) => ssPropCell(row, k)).join('')}${del}</tr>`;
-    if (state.ssExpanded.has(row.id)) html += ssPropertyDetailRows(row, cols, editCol);
+  for (const pmc of pmcs) {
+    const list = byPmc.get(pmc).sort((a, b) => String(a.property || '').localeCompare(String(b.property || '')));
+    html += ssPmcMainRow(pmc, list, cols, editCol);
+    if (state.ssExpandedPmc.has(pmc)) {
+      for (const row of list) {
+        html += ssPropertyRow(row, cols, editCol);
+        if (state.ssExpanded.has(row.id)) html += ssOrderDetailRows(row, cols, editCol);
+      }
+    }
   }
-  if (!rows.length) {
+  if (!propRows.length) {
     const msg = !viewed ? 'No quarters yet.'
       : (editCol ? 'No properties yet. Use “Sync from Bookings” to pull them in, or “+ Add row”.'
         : (viewed.status === 'open' ? 'No properties yet.' : 'Archived quarter (read-only).'));
     html = `<tr><td class="muted" colspan="${colCount + 1}" style="padding:14px">${escapeHtml(msg)}</td></tr>`;
   }
   $('#ssBody').innerHTML = html;
-  $('#ssFoot').innerHTML = rows.length ? ssPropGrandTotalHtml(cols, rows, editCol) : '';
+  $('#ssFoot').innerHTML = propRows.length ? ssPmcGrandTotal(cols, propRows, editCol) : '';
 }
 
 // Bold "Grand Total" row summing every numeric column across all shown rows (pinned at bottom).
@@ -3352,8 +3379,8 @@ function ssFormFieldHtml(f) {
 function openSsForm() {
   const defs = state.schema.sales_support.editable;
   let fields;
-  if (state.ssView === 'property') {
-    // Property row: identity + manual targets (no product/section).
+  if (state.ssView === 'pmc') {
+    // PMC view adds a Property row: identity + manual targets (no product/section).
     const keys = ['property', 'property_id', 'pmc', 'account_owner',
       'q2_target', 'apr_target', 'may_target', 'jun_target', 'worst', 'accurate', 'best', 'notes'];
     fields = keys.map((k) => defs.find((f) => f.key === k)).filter(Boolean);
@@ -3361,7 +3388,7 @@ function openSsForm() {
     const skip = new Set(['period', 'level', 'property_id', 'property']); // internal / property-only
     fields = defs.filter((f) => !skip.has(f.key));
   }
-  $('#ssModalTitle').textContent = state.ssView === 'property' ? 'Add Property row' : 'Add Sales Support row';
+  $('#ssModalTitle').textContent = state.ssView === 'pmc' ? 'Add Property row' : 'Add Sales Support row';
   $('#ssForm').innerHTML = fields.map(ssFormFieldHtml).join('');
   $('#ssModal').hidden = false;
   const first = $('#ssForm [data-ss-key]');
@@ -3378,7 +3405,7 @@ async function submitSsForm(e) {
     payload[ctl.dataset.ssKey] = v;
   });
   payload.period = state.salesPeriod; // add to the quarter currently being viewed
-  payload.level = state.ssView === 'property' ? 'property' : 'product';
+  payload.level = state.ssView === 'product' ? 'product' : 'property';
   try {
     const row = await api('/api/sales_support', { method: 'POST', body: JSON.stringify(payload) });
     state.rows.sales_support.push(row);
@@ -3521,7 +3548,15 @@ function wireSalesSupport() {
     } catch (err) { toast(err.message, true); }
   });
   $('#ssBody').addEventListener('click', async (e) => {
-    // Expand / collapse a property's per-product detail.
+    // Expand / collapse a PMC's property rows.
+    const expPmc = e.target.closest('[data-ss-expand-pmc]');
+    if (expPmc) {
+      const pmc = expPmc.dataset.ssExpandPmc;
+      if (state.ssExpandedPmc.has(pmc)) state.ssExpandedPmc.delete(pmc); else state.ssExpandedPmc.add(pmc);
+      renderSalesSupport(); ssApplyFreeze();
+      return;
+    }
+    // Expand / collapse a property's per-order detail.
     const exp = e.target.closest('[data-ss-expand]');
     if (exp) {
       const id = Number(exp.dataset.ssExpand);
