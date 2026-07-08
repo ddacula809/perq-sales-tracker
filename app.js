@@ -1121,7 +1121,7 @@ const BD_DETAIL_KEYS = ['property_id', 'property_name', 'pmc', 'product', 'mrr',
 // Per-card column overrides for the drill-down (defaults to BD_DETAIL_KEYS). The "without Sage ID"
 // list is focused on the columns needed to fill the Sage ID in: identity + Sage ID + Billing Notes.
 const BD_DETAIL_KEYS_BY = {
-  noSage: ['property_id', 'property_name', 'sage_id', 'billing_notes'],
+  noSage: ['property_id', 'property_name', 'mrr', 'golive_date', 'sage_id', 'billing_notes'],
 };
 // Columns shown in the Churn "For Immediate Action" drill-down (editable so billing can act).
 const CHURN_DETAIL_KEYS = ['property_id', 'property', 'product', 'mrr', 'last_date_under_contract',
