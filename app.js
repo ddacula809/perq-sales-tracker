@@ -1118,6 +1118,11 @@ function bdCanEdit(key) {
 }
 const BD_DETAIL_KEYS = ['property_id', 'property_name', 'pmc', 'product', 'mrr', 'one_time_fee',
   'billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'golive_date', 'sage_id', 'billing_notes'];
+// Per-card column overrides for the drill-down (defaults to BD_DETAIL_KEYS). The "without Sage ID"
+// list is focused on the columns needed to fill the Sage ID in: identity + Sage ID + Billing Notes.
+const BD_DETAIL_KEYS_BY = {
+  noSage: ['property_id', 'property_name', 'sage_id', 'billing_notes'],
+};
 // Columns shown in the Churn "For Immediate Action" drill-down (editable so billing can act).
 const CHURN_DETAIL_KEYS = ['property_id', 'property', 'product', 'mrr', 'last_date_under_contract',
   'template_deleted', 'completed', 'notes'];
@@ -1202,7 +1207,8 @@ function renderBillingDashboard() {
   // Columns are resizable, and a multi-filter (on any shown column) narrows the rows.
   if (state.bdDetail && BD_PREDS[state.bdDetail]) {
     const { pred, label } = BD_PREDS[state.bdDetail];
-    const defs = BD_DETAIL_KEYS.map((k) => state.schema.bookings.editable.find((f) => f.key === k)).filter(Boolean);
+    const keys = BD_DETAIL_KEYS_BY[state.bdDetail] || BD_DETAIL_KEYS;
+    const defs = keys.map((k) => state.schema.bookings.editable.find((f) => f.key === k)).filter(Boolean);
     const matching = rows.filter(pred);
     const shown = matching.filter(bdRowMatches);
     const headRow = defs.map((f) => `<th data-col="${f.key}">${escapeHtml(f.label)}<span class="col-resize"></span></th>`).join('');
