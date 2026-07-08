@@ -217,4 +217,10 @@ export const SALES_SUPPORT_FIELDS = [
   { key: 'best',             label: 'Best',           type: 'number' },
   { key: 'notes',            label: 'Notes',          type: 'text' },
   { key: 'period',           label: 'Period',         type: 'text' },  // 'Q2 2026' (scoping; not shown)
+  // Row level: '' / 'product' = the per-Product-category forecast (default). 'property' = the
+  // per-Property forecast (targets entered manually per property; actuals summed from Bookings by
+  // Property ID). Property rows carry property_id + property (PMC - Property) instead of a category.
+  { key: 'level',            label: 'Level',          type: 'text' },
+  { key: 'property_id',      label: 'Property ID',    type: 'text' },
+  { key: 'property',         label: 'Property',       type: 'text' },
 ];

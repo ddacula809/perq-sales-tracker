@@ -55,6 +55,8 @@ const state = {
   salesPeriods: [],   // [{ period, quarter, year, status }]
   salesPeriod: '',    // the quarter currently being viewed in Sales Support
   ssFilters: { owner: 'All', product: 'All', section: 'All' }, // Sales Support filters
+  ssView: localStorage.getItem('perqSsView') || 'product', // Sales Support view: 'product' | 'property'
+  ssExpanded: new Set(), // Property-level rows whose per-product detail is expanded (by row id)
   ssBarCollapsed: localStorage.getItem('perqSsBarCollapsed') === '1', // Sales Support toolbar collapsed
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
@@ -2950,12 +2952,13 @@ const ssFieldDef = (key) => state.schema.sales_support.editable.find((f) => f.ke
 // Freeze the leading columns (through PMC) so they stay visible when scrolling right.
 // Offsets are computed from the actual header widths (recomputed on resize).
 const SS_FREEZE = ['product_category', 'section', 'pmc'];
+const SS_FREEZE_PROPERTY = ['property', 'pmc'];
 function ssApplyFreeze() {
   // Start past the sticky row-number column so the frozen columns don't overlap it.
   const rownumTh = $('#ssHead th.rownum');
   let left = rownumTh ? rownumTh.getBoundingClientRect().width / (state.zoom || 1) : 0;
   let css = '';
-  for (const key of SS_FREEZE) {
+  for (const key of (state.ssView === 'property' ? SS_FREEZE_PROPERTY : SS_FREEZE)) {
     css += `#ssTable td[data-col="${key}"]{position:sticky;left:${left}px;z-index:1;}`;
     css += `#ssTable th[data-col="${key}"]{position:sticky;left:${left}px;top:0;z-index:4;}`;
     const th = $(`#ssHead th[data-col="${key}"]`);
@@ -3115,8 +3118,17 @@ function renderSalesSupport() {
 
   // Filter controls (Account Owner / Product / Section).
   populateSsFilters();
+  // View toggle (Product Level / Property Level) — reflect the active mode and hide the
+  // product-only filters (Product / Section) when viewing per-property.
+  document.querySelectorAll('.ss-view-btn').forEach((b) => b.classList.toggle('active', b.dataset.ssView === state.ssView));
+  const prodFilterLbl = $('#ssFilterProduct') && $('#ssFilterProduct').closest('label');
+  const secFilterLbl = $('#ssFilterSection') && $('#ssFilterSection').closest('label');
+  if (prodFilterLbl) prodFilterLbl.style.display = state.ssView === 'property' ? 'none' : '';
+  if (secFilterLbl) secFilterLbl.style.display = state.ssView === 'property' ? 'none' : '';
+  if (state.ssView === 'property') { renderSsPropertyTable(viewed, editCol); return; }
   const ff = state.ssFilters;
   const rows = state.rows.sales_support
+    .filter((r) => (r.level || 'product') !== 'property')
     .filter((r) => r.period === state.salesPeriod)
     .filter((r) => ff.owner === 'All' || (r.account_owner || '') === ff.owner)
     .filter((r) => ff.product === 'All' || ssMainCategory(r.product_category) === ff.product)
@@ -3160,6 +3172,148 @@ function renderSalesSupport() {
   $('#ssFoot').innerHTML = rows.length ? ssGrandTotalRowHtml(cols, rows, editCol) : '';
 }
 
+// ----- Property Level view (per-property forecast: manual targets, actuals from Bookings) -----
+function ssColumnsProperty() {
+  const p = viewedPeriodObj();
+  const q = p ? `Q${p.quarter}` : 'Q';
+  const y = p ? p.year : '';
+  const m = p ? QUARTER_MONTHS[p.quarter] : ['Month 1', 'Month 2', 'Month 3'];
+  const cols = [
+    ['property', 'Property'], ['pmc', 'PMC'], ['account_owner', 'Account Owner'],
+    ['q2_target', `${q} Target`],
+    ['apr_target', `${m[0]} ${y} Target`], ['m1_actual', `${m[0]} ${y} Actual`],
+    ['may_target', `${m[1]} ${y} Target`], ['m2_actual', `${m[1]} ${y} Actual`],
+    ['jun_target', `${m[2]} ${y} Target`], ['m3_actual', `${m[2]} ${y} Actual`],
+    ['q_actual', `${q} Actual`],
+    ['worst', 'Worst'], ['accurate', 'Accurate'], ['best', 'Best'], ['notes', 'Notes'],
+  ];
+  return isSales() ? cols.filter(([k]) => k !== 'account_owner') : cols;
+}
+// Actual Company Booking for a property in a given month (all products + sections combined).
+function ssActualProperty(propId, monthName, year) {
+  const pid = String(propId || '').trim().toLowerCase();
+  if (!pid || !monthName) return 0;
+  let sum = 0;
+  for (const b of state.rows.bookings) {
+    if (String(b.property_id || '').trim().toLowerCase() === pid
+      && b.booking_month === monthName && reconNum(b.booking_year) === year) {
+      sum += Number(b.company_total_booking) || 0;
+    }
+  }
+  return sum;
+}
+const SS_PROP_MONTHS = { m1_actual: 0, m2_actual: 1, m3_actual: 2 };
+// One cell in the property view: computed actuals, editable targets, or read-only identity.
+function ssPropCell(row, key) {
+  const p = viewedPeriodObj();
+  const year = p ? p.year : null;
+  const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  if (SS_COMPUTED.has(key)) {
+    const months = key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]];
+    const value = months.reduce((a, mn) => a + ssActualProperty(row.property_id, mn, year), 0);
+    return `<td class="ss-actual" data-col="${key}">${fmtMoney(value)}</td>`;
+  }
+  if (key === 'property') {
+    const caret = `<button type="button" class="ss-expand${state.ssExpanded.has(row.id) ? ' open' : ''}" data-ss-expand="${row.id}" title="Show / hide product detail">▸</button>`;
+    return `<td data-col="property" class="ss-prop-name">${caret}<span>${escapeHtml(row.property || row.property_id || '—')}</span></td>`;
+  }
+  if (key === 'pmc') return `<td data-col="pmc">${escapeHtml(row.pmc || '—')}</td>`;
+  const f = ssFieldDef(key);
+  if (!ssEditable()) {
+    const text = SS_MONEY.has(key) ? fmtMoney(row[key]) : (row[key] ?? '');
+    return `<td class="${f && f.type === 'number' ? 'num' : ''}" data-col="${key}">${escapeHtml(text)}</td>`;
+  }
+  if (f && f.type === 'select') {
+    const opts = f.options.map((o) => `<option value="${escapeAttr(o)}"${o === (row[key] ?? '') ? ' selected' : ''}>${o || '—'}</option>`).join('');
+    return `<td data-col="${key}"><select data-ss-key="${key}">${opts}</select></td>`;
+  }
+  if (SS_MONEY.has(key)) {
+    return `<td class="num" data-col="${key}"><input type="text" inputmode="decimal" data-ss-key="${key}" value="${escapeAttr(fmtMoney(row[key]))}" /></td>`;
+  }
+  return `<td data-col="${key}"><input type="text" data-ss-key="${key}" value="${escapeAttr(row[key] ?? '')}" /></td>`;
+}
+// Expanded per-property detail: one row per Product × (Pilot/CTAM), actuals per month.
+function ssPropertyDetailRows(row, cols, editCol) {
+  const p = viewedPeriodObj();
+  const year = p ? p.year : null;
+  const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const pid = String(row.property_id || '').trim().toLowerCase();
+  const groups = new Map();
+  for (const b of state.rows.bookings) {
+    if (String(b.property_id || '').trim().toLowerCase() !== pid) continue;
+    if (reconNum(b.booking_year) !== year) continue;
+    const mi = qm.indexOf(b.booking_month);
+    if (mi < 0) continue;
+    const product = String(b.product || '').trim() || '—';
+    const section = ssIsPilot(b) ? 'Pilot' : 'CTAM';
+    const k = `${product}||${section}`;
+    if (!groups.has(k)) groups.set(k, { product, section, m: [0, 0, 0] });
+    groups.get(k).m[mi] += Number(b.company_total_booking) || 0;
+  }
+  const list = [...groups.values()].sort((a, b) =>
+    a.product.localeCompare(b.product) || a.section.localeCompare(b.section));
+  const colCount = cols.length + (editCol ? 1 : 0);
+  if (!list.length) {
+    return `<tr class="ss-detail-row"><td class="rownum"></td><td class="ss-detail-empty" colspan="${colCount}">No bookings for this property this quarter.</td></tr>`;
+  }
+  return list.map((g) => {
+    const vals = { m1_actual: g.m[0], m2_actual: g.m[1], m3_actual: g.m[2], q_actual: g.m[0] + g.m[1] + g.m[2] };
+    const cells = cols.map(([k]) => {
+      if (k === 'property') return `<td class="ss-detail-name" data-col="property"><span class="ss-detail-indent">↳</span> ${escapeHtml(g.product)} <span class="ss-tag ss-tag-${g.section.toLowerCase()}">${g.section}</span></td>`;
+      if (Object.prototype.hasOwnProperty.call(vals, k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(vals[k])}</td>`;
+      return `<td data-col="${k}"></td>`;
+    }).join('');
+    return `<tr class="ss-detail-row"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
+  }).join('');
+}
+// Grand total for the property view: stored targets summed; actuals summed from Bookings.
+function ssPropGrandTotalHtml(cols, rows, editCol) {
+  const p = viewedPeriodObj();
+  const year = p ? p.year : null;
+  const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const sumActual = (key) => {
+    const months = key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]];
+    return rows.reduce((a, r) => a + months.reduce((s, mn) => s + ssActualProperty(r.property_id, mn, year), 0), 0);
+  };
+  const cells = cols.map(([k], i) => {
+    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(sumActual(k))}</td>`;
+    if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
+    if (i === 0) return `<td data-col="${k}">Grand Total</td>`;
+    return `<td data-col="${k}"></td>`;
+  }).join('');
+  return `<tr class="ss-grand-total"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
+}
+function renderSsPropertyTable(viewed, editCol) {
+  const cols = ssColumnsProperty();
+  $('#ssHead').innerHTML = '<tr><th class="rownum">#</th>'
+    + cols.map(([k, label]) => `<th class="${SS_COMPUTED.has(k) ? 'ss-actual' : ''}" data-col="${k}">${escapeHtml(label)}<span class="col-resize"></span></th>`).join('')
+    + (editCol ? '<th></th>' : '') + '</tr>';
+  const ff = state.ssFilters;
+  const rows = state.rows.sales_support
+    .filter((r) => (r.level || '') === 'property')
+    .filter((r) => r.period === state.salesPeriod)
+    .filter((r) => ff.owner === 'All' || (r.account_owner || '') === ff.owner)
+    .sort((a, b) => String(a.pmc || '').localeCompare(String(b.pmc || ''))
+      || String(a.property || '').localeCompare(String(b.property || '')));
+  const colCount = cols.length + (editCol ? 1 : 0);
+  let html = '';
+  let n = 0;
+  for (const row of rows) {
+    n += 1;
+    const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
+    html += `<tr data-ss-id="${row.id}" class="${(n % 2 === 0) ? 'ss-alt' : ''}"><td class="rownum">${n}</td>${cols.map(([k]) => ssPropCell(row, k)).join('')}${del}</tr>`;
+    if (state.ssExpanded.has(row.id)) html += ssPropertyDetailRows(row, cols, editCol);
+  }
+  if (!rows.length) {
+    const msg = !viewed ? 'No quarters yet.'
+      : (editCol ? 'No properties yet. Use “Sync from Bookings” to pull them in, or “+ Add row”.'
+        : (viewed.status === 'open' ? 'No properties yet.' : 'Archived quarter (read-only).'));
+    html = `<tr><td class="muted" colspan="${colCount + 1}" style="padding:14px">${escapeHtml(msg)}</td></tr>`;
+  }
+  $('#ssBody').innerHTML = html;
+  $('#ssFoot').innerHTML = rows.length ? ssPropGrandTotalHtml(cols, rows, editCol) : '';
+}
+
 // Bold "Grand Total" row summing every numeric column across all shown rows (pinned at bottom).
 function ssGrandTotalRowHtml(cols, allRows, editCol) {
   const cells = cols.map(([k], i) => {
@@ -3196,9 +3350,19 @@ function ssFormFieldHtml(f) {
 }
 
 function openSsForm() {
-  $('#ssForm').innerHTML = state.schema.sales_support.editable
-    .filter((f) => f.key !== 'period') // period is set server-side to the open quarter
-    .map(ssFormFieldHtml).join('');
+  const defs = state.schema.sales_support.editable;
+  let fields;
+  if (state.ssView === 'property') {
+    // Property row: identity + manual targets (no product/section).
+    const keys = ['property', 'property_id', 'pmc', 'account_owner',
+      'q2_target', 'apr_target', 'may_target', 'jun_target', 'worst', 'accurate', 'best', 'notes'];
+    fields = keys.map((k) => defs.find((f) => f.key === k)).filter(Boolean);
+  } else {
+    const skip = new Set(['period', 'level', 'property_id', 'property']); // internal / property-only
+    fields = defs.filter((f) => !skip.has(f.key));
+  }
+  $('#ssModalTitle').textContent = state.ssView === 'property' ? 'Add Property row' : 'Add Sales Support row';
+  $('#ssForm').innerHTML = fields.map(ssFormFieldHtml).join('');
   $('#ssModal').hidden = false;
   const first = $('#ssForm [data-ss-key]');
   if (first) first.focus();
@@ -3214,6 +3378,7 @@ async function submitSsForm(e) {
     payload[ctl.dataset.ssKey] = v;
   });
   payload.period = state.salesPeriod; // add to the quarter currently being viewed
+  payload.level = state.ssView === 'property' ? 'property' : 'product';
   try {
     const row = await api('/api/sales_support', { method: 'POST', body: JSON.stringify(payload) });
     state.rows.sales_support.push(row);
@@ -3279,6 +3444,15 @@ function wireChurnEntry() {
 
 function wireSalesSupport() {
   $('#ssAddRow').onclick = () => { if (ssEditable()) openSsForm(); };
+  // Product Level / Property Level toggle.
+  document.querySelectorAll('.ss-view-btn').forEach((btn) => {
+    btn.onclick = () => {
+      if (state.ssView === btn.dataset.ssView) return;
+      state.ssView = btn.dataset.ssView;
+      localStorage.setItem('perqSsView', state.ssView);
+      renderSalesSupport(); ssApplyFreeze();
+    };
+  });
   $('#ssBarToggle').onclick = () => {
     state.ssBarCollapsed = !state.ssBarCollapsed;
     localStorage.setItem('perqSsBarCollapsed', state.ssBarCollapsed ? '1' : '0');
@@ -3289,7 +3463,7 @@ function wireSalesSupport() {
   $('#ssFilterProduct').onchange = (e) => { state.ssFilters.product = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssFilterSection').onchange = (e) => { state.ssFilters.section = e.target.value; renderSalesSupport(); ssApplyFreeze(); };
   $('#ssSyncBookings').onclick = async () => {
-    if (!confirm('Create a Sales Support row for every booking (PMC + Product + Section) in the open quarter(s) that doesn’t have one yet?\n\nThis never removes or duplicates rows.')) return;
+    if (!confirm('Create any missing Sales Support rows from Bookings in the open quarter(s) — both Product-level (PMC + Product + Section) and Property-level (one per property)?\n\nThis never removes or duplicates rows.')) return;
     try {
       const { created } = await api('/api/sales_support/sync', { method: 'POST' });
       state.rows.sales_support = await api('/api/sales_support');
@@ -3347,6 +3521,14 @@ function wireSalesSupport() {
     } catch (err) { toast(err.message, true); }
   });
   $('#ssBody').addEventListener('click', async (e) => {
+    // Expand / collapse a property's per-product detail.
+    const exp = e.target.closest('[data-ss-expand]');
+    if (exp) {
+      const id = Number(exp.dataset.ssExpand);
+      if (state.ssExpanded.has(id)) state.ssExpanded.delete(id); else state.ssExpanded.add(id);
+      renderSalesSupport(); ssApplyFreeze();
+      return;
+    }
     const del = e.target.closest('[data-ss-del]');
     if (!del) return;
     if (!confirm('Delete this row?')) return;

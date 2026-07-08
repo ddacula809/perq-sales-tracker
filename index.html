@@ -142,6 +142,10 @@
     <div class="sales-bar" id="salesBar">
       <label class="ss-period">Quarter <select id="ssPeriod"></select></label>
       <span class="ss-pill" id="ssPeriodStatus"></span>
+      <div class="ss-view-toggle" role="group" aria-label="Sales Support view level">
+        <button type="button" class="ss-view-btn" data-ss-view="product">Product Level</button>
+        <button type="button" class="ss-view-btn" data-ss-view="property">Property Level</button>
+      </div>
       <button class="btn solid" id="ssAddRow">+ Add row</button>
       <div class="ss-filters">
         <label>Account Owner <select id="ssFilterOwner"></select></label>
@@ -331,7 +335,7 @@
   <div class="modal" id="ssModal" hidden>
     <div class="modal-card entry-card">
       <div class="entry-head">
-        <h2>Add Sales Support row</h2>
+        <h2 id="ssModalTitle">Add Sales Support row</h2>
         <button type="button" class="entry-close" id="ssModalClose" title="Close">✕</button>
       </div>
       <form id="ssForm" class="entry-form" autocomplete="off"></form>

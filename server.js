@@ -406,20 +406,33 @@ async function autoTrackBookingInSalesSupport(b) {
   const section = String(b.pilot_or_ctam || '').trim() === 'Pilot' ? 'Pilot / New Logo' : 'CTAM';
   const norm = (v) => String(v ?? '').trim().toLowerCase();
   const existing = await listRows('sales_support');
-  const already = existing.some((r) => r.period === period
+  const already = existing.some((r) => (r.level || 'product') !== 'property' && r.period === period
     && norm(r.pmc) === norm(pmc) && norm(r.product_category) === norm(category) && norm(r.section) === norm(section));
-  if (already) return;
-  const total = Number(b.company_total_booking) || 0;
-  await insertRow('sales_support', {
-    period,
-    product_category: category,
-    section,
-    pmc,
-    booking_type: section === 'Pilot / New Logo' ? 'Pilot' : (b.ctam_type || ''),
-    account_owner: b.sales_rep || '',
-    q2_target: total, apr_target: 0, may_target: 0, jun_target: 0,
-    worst: total, accurate: total, best: total, notes: '',
-  });
+  if (!already) {
+    const total = Number(b.company_total_booking) || 0;
+    await insertRow('sales_support', {
+      period, level: 'product', product_category: category, section, pmc,
+      booking_type: section === 'Pilot / New Logo' ? 'Pilot' : (b.ctam_type || ''),
+      account_owner: b.sales_rep || '',
+      q2_target: total, apr_target: 0, may_target: 0, jun_target: 0,
+      worst: total, accurate: total, best: total, notes: '',
+    });
+  }
+  // Also ensure a property-level row exists for this property (targets entered manually later).
+  const propId = String(b.property_id || '').trim();
+  if (propId) {
+    const haveProp = existing.some((r) => (r.level || '') === 'property'
+      && r.period === period && norm(r.property_id) === norm(propId));
+    if (!haveProp) {
+      await insertRow('sales_support', {
+        period, level: 'property', property_id: propId,
+        property: b.property_name || b.property_only || propId, pmc,
+        account_owner: b.sales_rep || '',
+        q2_target: 0, apr_target: 0, may_target: 0, jun_target: 0,
+        worst: 0, accurate: 0, best: 0, notes: '',
+      });
+    }
+  }
 }
 // When a Conversion booking is created (a pilot converting to paid), stamp its Billing Notes
 // so billing can see it's a converted property and when. The conversion is what's recognized
@@ -908,8 +921,13 @@ app.post('/api/sales_support/sync', requireRole('admin', 'sales_admin'), async (
     const openPeriods = new Set(periods.filter((p) => p.status === 'open').map((p) => p.period));
     const norm = (v) => String(v ?? '').trim().toLowerCase();
     const keyOf = (period, pmc, cat, section) => `${period}||${norm(pmc)}||${norm(cat)}||${norm(section)}`;
-    const have = new Set((await listRows('sales_support'))
+    const existingRows = await listRows('sales_support');
+    const have = new Set(existingRows.filter((r) => (r.level || 'product') !== 'property')
       .map((r) => keyOf(r.period, r.pmc, r.product_category, r.section)));
+    // Property-level rows are keyed by period + Property ID (one row per property).
+    const propKey = (period, pid) => `${period}||prop||${norm(pid)}`;
+    const haveProp = new Set(existingRows.filter((r) => (r.level || '') === 'property')
+      .map((r) => propKey(r.period, r.property_id)));
     let created = 0;
     for (const raw of await listRows('bookings')) {
       const b = withComputed(raw, computeBooking);
@@ -922,20 +940,39 @@ app.post('/api/sales_support/sync', requireRole('admin', 'sales_admin'), async (
       if (!openPeriods.has(period)) continue; // only open quarters are editable
       const pmc = String(b.pmc || '').trim();
       const category = String(b.product || '').trim() === 'SEO' ? 'SEO' : String(b.bpr_prod_category || '').trim();
-      if (!pmc || !category) continue;
       const section = String(b.pilot_or_ctam || '').trim() === 'Pilot' ? 'Pilot / New Logo' : 'CTAM';
-      const k = keyOf(period, pmc, category, section);
-      if (have.has(k)) continue;
-      have.add(k); // avoid creating duplicates within this run
-      const total = Number(b.company_total_booking) || 0;
-      await insertRow('sales_support', {
-        period, product_category: category, section, pmc,
-        booking_type: section === 'Pilot / New Logo' ? 'Pilot' : (b.ctam_type || ''),
-        account_owner: b.sales_rep || '',
-        q2_target: total, apr_target: 0, may_target: 0, jun_target: 0,
-        worst: total, accurate: total, best: total, notes: '',
-      });
-      created += 1;
+      // Product-level row (per PMC + Product category + Section).
+      if (pmc && category) {
+        const k = keyOf(period, pmc, category, section);
+        if (!have.has(k)) {
+          have.add(k);
+          const total = Number(b.company_total_booking) || 0;
+          await insertRow('sales_support', {
+            period, level: 'product', product_category: category, section, pmc,
+            booking_type: section === 'Pilot / New Logo' ? 'Pilot' : (b.ctam_type || ''),
+            account_owner: b.sales_rep || '',
+            q2_target: total, apr_target: 0, may_target: 0, jun_target: 0,
+            worst: total, accurate: total, best: total, notes: '',
+          });
+          created += 1;
+        }
+      }
+      // Property-level row (one per property; targets start blank, entered manually).
+      const propId = String(b.property_id || '').trim();
+      if (propId) {
+        const pk = propKey(period, propId);
+        if (!haveProp.has(pk)) {
+          haveProp.add(pk);
+          await insertRow('sales_support', {
+            period, level: 'property', property_id: propId,
+            property: b.property_name || b.property_only || propId, pmc,
+            account_owner: b.sales_rep || '',
+            q2_target: 0, apr_target: 0, may_target: 0, jun_target: 0,
+            worst: 0, accurate: 0, best: 0, notes: '',
+          });
+          created += 1;
+        }
+      }
     }
     res.json({ created });
   } catch (e) { next(e); }

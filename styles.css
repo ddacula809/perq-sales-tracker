@@ -578,6 +578,24 @@ tr.ss-group td {
 /* Visible boundary at the last frozen column (PMC) */
 #ssTable td[data-col="pmc"], #ssTable th[data-col="pmc"] { border-right: 2px solid var(--line-strong); }
 
+/* Sales Support: Product Level / Property Level toggle */
+.ss-view-toggle { display: inline-flex; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
+.ss-view-btn { border: none; background: var(--panel); color: var(--ink-soft); font: inherit; font-size: 12.5px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+.ss-view-btn + .ss-view-btn { border-left: 1px solid var(--line-strong); }
+.ss-view-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
+/* Property view: expand caret + per-product detail rows */
+.ss-expand { border: none; background: none; cursor: pointer; color: var(--ink-soft); font-size: 11px; padding: 0 6px 0 0; display: inline-block; transition: transform .12s ease; }
+.ss-expand.open { transform: rotate(90deg); }
+#ssTable td.ss-prop-name { font-weight: 600; }
+#ssTable tr.ss-detail-row td { background: #faf6f0; color: var(--ink-soft); font-size: 12px; }
+#ssTable tr.ss-detail-row td.ss-actual { color: var(--compute-ink); }
+.ss-detail-name { padding-left: 16px !important; }
+.ss-detail-indent { color: var(--line-strong); margin-right: 2px; }
+.ss-detail-empty { padding: 8px 12px !important; font-style: italic; }
+.ss-tag { display: inline-block; font-size: 9.5px; padding: 1px 6px; border-radius: 10px; margin-left: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.ss-tag-pilot { background: var(--compute-bg); color: var(--compute-ink); }
+.ss-tag-ctam { background: var(--accent-soft); color: var(--accent); }
+
 /* Salesforce Recon Data */
 .sfrecon-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--paper); }
 .sfrecon-view[hidden] { display: none; }
