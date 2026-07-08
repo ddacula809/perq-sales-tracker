@@ -1366,6 +1366,9 @@ function wireBilling() {
     try {
       const updated = await api(`/api/${tab}/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ [key]: ctl.value }) });
       updateRowInState(tab, updated);
+      // Sage ID is per-property: the server fills the property's other blank orders — reload so
+      // they (and the "without Sage ID" count) reflect it.
+      if (tab === 'bookings' && key === 'sage_id') state.rows.bookings = await api('/api/bookings');
       // Editing a watched date here raises a Billing alert -> reload so the tile/bell reflect it.
       if ((key === 'golive_date' || key === 'last_date_under_contract' || key === 'mrr') && (isAdmin() || role() === 'billing')) {
         state.notifications = await api('/api/notifications');
@@ -1715,12 +1718,16 @@ function wireGrid() {
         });
       }
       updateRowInState(state.tab, updated);
+      // Sage ID is per-property: the server fills the property's other blank orders — reload the
+      // bookings so the grid reflects it everywhere.
+      if (state.tab === 'bookings' && key === 'sage_id') state.rows.bookings = await api('/api/bookings');
       // Changing CTAM Type flips whether the Offset cell is editable; changing a churn's Last
       // Date Under Contract re-stamps the read-only Date Added. On churn, MRR / Last Date also
       // drive the admin-editable AR Final Invoice Amt cell (an input, not a data-comp cell, so
       // refreshComputedCells can't update it) — rebuild the row so its placeholder recomputes.
-      if (key === 'ctam_type' || (state.tab === 'churn' && (key === 'last_date_under_contract' || key === 'ar_override' || key === 'mrr'))) {
-        renderBody();
+      if (key === 'ctam_type' || (state.tab === 'churn' && (key === 'last_date_under_contract' || key === 'ar_override' || key === 'mrr'))
+        || (state.tab === 'bookings' && key === 'sage_id')) {
+        renderBody(); // Sage ID may have propagated to the property's other orders
       } else {
         refreshComputedCells(tr, updated);
       }

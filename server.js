@@ -365,6 +365,18 @@ function crud(table, computeFn, afterInsert, beforeInsert) {
         await pool.query('UPDATE bookings SET offset_churn_id = NULL WHERE id=$1', [id]);
         row.offset_churn_id = null;
       }
+      // Sage ID is per-property: setting it on one order fills the property's other orders that
+      // don't have one yet (never overwrites an existing Sage ID).
+      if (table === 'bookings' && req.body && Object.prototype.hasOwnProperty.call(req.body, 'sage_id')) {
+        const sid = String(row.sage_id || '').trim();
+        const pid = String(row.property_id || '').trim();
+        if (sid && pid) {
+          await pool.query(
+            `UPDATE bookings SET sage_id = $1
+               WHERE lower(trim(property_id)) = lower(trim($2)) AND (sage_id IS NULL OR trim(sage_id) = '') AND id <> $3`,
+            [sid, pid, id]);
+        }
+      }
       for (const f of watched) {
         if (old[f.key] === undefined || sameWatched(old[f.key], row[f.key], f.money)) continue;
         await createNotification(table, row.id,
@@ -426,11 +438,28 @@ async function onBookingCreated(b) {
   try { await autoTrackBookingInSalesSupport(b); } catch (e) { console.error('[autoTrack]', e.message); }
   try { await noteConversionBilling(b); } catch (e) { console.error('[conversionNote]', e.message); }
 }
+// The Sage ID already on file for a property (any of its bookings), or '' if none.
+async function sageIdForProperty(propertyId, excludeId) {
+  const pid = String(propertyId || '').trim();
+  if (!pid) return '';
+  const params = [pid];
+  let sql = "SELECT sage_id FROM bookings WHERE lower(trim(property_id)) = lower(trim($1))"
+    + " AND sage_id IS NOT NULL AND trim(sage_id) <> ''";
+  if (excludeId) { params.push(excludeId); sql += ' AND id <> $2'; }
+  sql += ' ORDER BY id DESC LIMIT 1';
+  const q = await pool.query(sql, params);
+  return q.rows[0] ? q.rows[0].sage_id : '';
+}
 // A Conversion booking should OVERRIDE the property's existing pilot booking (same Property ID +
 // Product) in place rather than create a duplicate. Recognition restarts at the conversion's
 // GoLive (cleared here; set it when the property actually converts/goes live). Returns the
 // updated row, or null if there's no matching pilot to convert (then it inserts normally).
 async function maybeConvertExisting(body) {
+  // Sage ID is per-property: a new order for a property that already has one inherits it.
+  if (body && String(body.property_id || '').trim() && !String(body.sage_id || '').trim()) {
+    const s = await sageIdForProperty(body.property_id);
+    if (s) body.sage_id = s;
+  }
   if (String(body.pilot_type || '').trim() !== 'Conversion') return null;
   const norm = (v) => String(v ?? '').trim().toLowerCase();
   const pid = norm(body.property_id);
