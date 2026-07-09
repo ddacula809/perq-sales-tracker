@@ -403,7 +403,7 @@ const otfForCommissionable = (r) => (String(r.pilot_type || '').trim() === 'Conv
 const commissionablePlusOtf = (r) => (Number(r.commissionable_bookings) || 0) + otfForCommissionable(r);
 // A key can be a single field, an array of fields summed together, or a per-row function.
 const TOTALS_FIELDS = {
-  bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings'], ['Commissionable + OTF', commissionablePlusOtf]],
+  bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Offset Amount', 'offset_amount'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings'], ['Commissionable + OTF', commissionablePlusOtf]],
   churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
 };
 function renderBookingTotals(allRows) {
