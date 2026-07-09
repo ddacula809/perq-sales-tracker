@@ -223,4 +223,8 @@ export const SALES_SUPPORT_FIELDS = [
   { key: 'level',            label: 'Level',          type: 'text' },
   { key: 'property_id',      label: 'Property ID',    type: 'text' },
   { key: 'property',         label: 'Property',       type: 'text' },
+  // PMC-level manual counts (shown only on the PMC Level view's aggregate row; stored on a
+  // level='pmc' record per PMC). Entered by hand, not derived.
+  { key: 'total_props_count', label: 'Total Props',   type: 'number' },
+  { key: 'active_props',      label: 'Active Props',  type: 'number' },
 ];

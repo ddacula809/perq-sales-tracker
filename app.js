@@ -3129,7 +3129,7 @@ function renderSalesSupport() {
   if (state.ssView === 'pmc') { renderSsPmcTable(viewed, editCol); return; }
   const ff = state.ssFilters;
   const rows = state.rows.sales_support
-    .filter((r) => (r.level || 'product') !== 'property')
+    .filter((r) => (r.level || 'product') === 'product') // exclude property & pmc rows
     .filter((r) => r.period === state.salesPeriod)
     .filter((r) => ff.owner === 'All' || (r.account_owner || '') === ff.owner)
     .filter((r) => ff.product === 'All' || ssMainCategory(r.product_category) === ff.product)
@@ -3181,7 +3181,8 @@ function ssColumnsPmc() {
   const y = p ? p.year : '';
   const m = p ? QUARTER_MONTHS[p.quarter] : ['Month 1', 'Month 2', 'Month 3'];
   const cols = [
-    ['name', 'PMC / Property'], ['account_owner', 'Account Owner'],
+    ['name', 'PMC / Property'], ['total_props_count', 'Total Props'], ['active_props', 'Active Props'],
+    ['account_owner', 'Account Owner'],
     ['q2_target', `${q} Target`],
     ['apr_target', `${m[0]} ${y} Target`], ['m1_actual', `${m[0]} ${y} Actual`],
     ['may_target', `${m[1]} ${y} Target`], ['m2_actual', `${m[1]} ${y} Actual`],
@@ -3190,6 +3191,14 @@ function ssColumnsPmc() {
     ['worst', 'Worst'], ['accurate', 'Accurate'], ['best', 'Best'], ['notes', 'Notes'],
   ];
   return isSales() ? cols.filter(([k]) => k !== 'account_owner') : cols;
+}
+// PMC-only manual columns (shown on the PMC aggregate row, stored on a level='pmc' record).
+const SS_PMC_MANUAL = new Set(['total_props_count', 'active_props']);
+// The stored level='pmc' record for a PMC in the viewed quarter, if one exists yet.
+function ssPmcRowFor(pmc) {
+  const key = String(pmc || '').trim().toLowerCase();
+  return state.rows.sales_support.find((r) => (r.level || '') === 'pmc'
+    && r.period === state.salesPeriod && String(r.pmc || '').trim().toLowerCase() === key) || null;
 }
 // Actual Company Booking for a property in a given month (all products + sections combined).
 function ssActualProperty(propId, monthName, year) {
@@ -3236,6 +3245,12 @@ function ssPmcMainRow(pmc, props, cols, editCol) {
       const caret = `<button type="button" class="ss-expand${state.ssExpandedPmc.has(pmc) ? ' open' : ''}" data-ss-expand-pmc="${escapeAttr(pmc)}" title="Show / hide properties">▸</button>`;
       return `<td data-col="name" class="ss-prop-name">${caret}<span>${escapeHtml(pmc)}</span> <span class="ss-count">${props.length}</span></td>`;
     }
+    if (SS_PMC_MANUAL.has(k)) { // manual PMC-level count (stored on the level='pmc' record)
+      const pr = ssPmcRowFor(pmc);
+      const val = pr && pr[k] != null && pr[k] !== '' ? pr[k] : '';
+      if (!ssEditable()) return `<td class="num" data-col="${k}">${val === '' ? '' : fmtNum(val)}</td>`;
+      return `<td class="num" data-col="${k}"><input type="number" step="any" data-pmc-key="${k}" data-pmc="${escapeAttr(pmc)}" value="${escapeAttr(val)}" /></td>`;
+    }
     if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + ssPropActualFor(r, k, year, qm), 0))}</td>`;
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     return `<td data-col="${k}"></td>`;
@@ -3252,6 +3267,7 @@ function ssPropertyRow(row, cols, editCol) {
       const caret = `<button type="button" class="ss-expand${state.ssExpanded.has(row.id) ? ' open' : ''}" data-ss-expand="${row.id}" title="Show / hide order detail">▸</button>`;
       return `<td data-col="name" class="ss-prop-name ss-lvl2"><span class="ss-detail-indent">↳</span>${caret}<span>${escapeHtml(row.property || row.property_id || '—')}</span></td>`;
     }
+    if (SS_PMC_MANUAL.has(k)) return `<td data-col="${k}"></td>`; // PMC-only columns are blank here
     if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(ssPropActualFor(row, k, year, qm))}</td>`;
     return ssPropEditCell(row, k);
   }).join('');
@@ -3297,7 +3313,9 @@ function ssPmcGrandTotal(cols, rows, editCol) {
   const p = viewedPeriodObj();
   const year = p ? p.year : null;
   const qm = p ? QUARTER_MONTHS[p.quarter] : ['', '', ''];
+  const pmcRows = state.rows.sales_support.filter((r) => (r.level || '') === 'pmc' && r.period === state.salesPeriod);
   const cells = cols.map(([k], i) => {
+    if (SS_PMC_MANUAL.has(k)) { const s = pmcRows.reduce((a, r) => a + (Number(r[k]) || 0), 0); return `<td class="num" data-col="${k}">${s ? fmtNum(s) : ''}</td>`; }
     if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + ssPropActualFor(r, k, year, qm), 0))}</td>`;
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     if (i === 0) return `<td data-col="${k}">Grand Total</td>`;
@@ -3385,7 +3403,7 @@ function openSsForm() {
       'q2_target', 'apr_target', 'may_target', 'jun_target', 'worst', 'accurate', 'best', 'notes'];
     fields = keys.map((k) => defs.find((f) => f.key === k)).filter(Boolean);
   } else {
-    const skip = new Set(['period', 'level', 'property_id', 'property']); // internal / property-only
+    const skip = new Set(['period', 'level', 'property_id', 'property', 'total_props_count', 'active_props']); // internal / other-level
     fields = defs.filter((f) => !skip.has(f.key));
   }
   $('#ssModalTitle').textContent = state.ssView === 'pmc' ? 'Add Property row' : 'Add Sales Support row';
@@ -3528,6 +3546,25 @@ function wireSalesSupport() {
   $('#ssForm').addEventListener('submit', submitSsForm);
   // (PMC in the Add-row form is a type-to-search input with a datalist — free text allowed.)
   $('#ssBody').addEventListener('change', async (e) => {
+    // PMC-level manual counts (Total Props / Active Props) live on a level='pmc' record —
+    // create it on first edit, otherwise patch it.
+    const pmcCtl = e.target.closest('[data-pmc-key]');
+    if (pmcCtl) {
+      const key = pmcCtl.dataset.pmcKey;
+      const pmc = pmcCtl.dataset.pmc;
+      const value = pmcCtl.value === '' ? null : parseMoney(pmcCtl.value);
+      try {
+        const existing = ssPmcRowFor(pmc);
+        if (existing) {
+          updateRowInState('sales_support', await api(`/api/sales_support/${existing.id}`, { method: 'PATCH', body: JSON.stringify({ [key]: value }) }));
+        } else {
+          state.rows.sales_support.push(await api('/api/sales_support', { method: 'POST', body: JSON.stringify({ period: state.salesPeriod, level: 'pmc', pmc, [key]: value }) }));
+        }
+        renderSalesSupport(); ssApplyFreeze();
+        toast('Saved');
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
     const ctl = e.target.closest('[data-ss-key]');
     if (!ctl) return;
     const id = Number(ctl.closest('[data-ss-id]').dataset.ssId);
