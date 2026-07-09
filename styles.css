@@ -588,7 +588,8 @@ tr.ss-group td {
 .ss-expand.open { transform: rotate(90deg); }
 #ssTable td.ss-prop-name { font-weight: 600; }
 #ssTable tr.ss-detail-row td { background: #faf6f0; color: var(--ink-soft); font-size: 12px; }
-#ssTable tr.ss-detail-row td.ss-actual { color: var(--compute-ink); }
+/* Keep the Actual columns cyan the whole way down (matching the header + grand total). */
+#ssTable tr.ss-detail-row td.ss-actual { background: var(--compute-bg); color: var(--compute-ink); }
 .ss-detail-name { padding-left: 16px !important; }
 .ss-detail-indent { color: var(--line-strong); margin-right: 2px; }
 .ss-detail-empty { padding: 8px 12px !important; font-style: italic; }
@@ -598,7 +599,8 @@ tr.ss-group td {
 /* PMC Level: boundary at the hierarchy column, bold aggregate PMC rows, indented sub-levels */
 #ssTable td[data-col="name"], #ssTable th[data-col="name"] { border-right: 2px solid var(--line-strong); }
 #ssTable tr.ss-pmc-row td { background: var(--plum-soft); font-weight: 700; border-bottom: 1px solid var(--line-strong); }
-#ssTable tr.ss-pmc-row td.ss-actual { color: var(--compute-ink); }
+/* Aggregate PMC row: Actual columns stay cyan (stronger shade, like the subtotal/grand total). */
+#ssTable tr.ss-pmc-row td.ss-actual { background: #cddde3; color: var(--compute-ink); }
 .ss-count { display: inline-block; font-size: 10px; font-weight: 600; color: var(--ink-soft); background: var(--paper); border-radius: 10px; padding: 0 6px; margin-left: 4px; }
 #ssTable td.ss-lvl2 { padding-left: 10px !important; font-weight: 600; }
 
