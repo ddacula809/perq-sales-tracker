@@ -3251,6 +3251,10 @@ function ssPmcMainRow(pmc, props, cols, editCol) {
       if (!ssEditable()) return `<td class="num" data-col="${k}">${val === '' ? '' : fmtNum(val)}</td>`;
       return `<td class="num" data-col="${k}"><input type="number" step="any" data-pmc-key="${k}" data-pmc="${escapeAttr(pmc)}" value="${escapeAttr(val)}" /></td>`;
     }
+    if (k === 'account_owner') { // rolls up from the properties (a PMC's owner = its properties' owner)
+      const owners = [...new Set(props.map((r) => String(r.account_owner || '').trim()).filter(Boolean))];
+      return `<td data-col="account_owner">${escapeHtml(owners.join(', '))}</td>`;
+    }
     if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + ssPropActualFor(r, k, year, qm), 0))}</td>`;
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     return `<td data-col="${k}"></td>`;
