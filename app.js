@@ -3085,12 +3085,21 @@ function ssFilterOptionsHtml(values, current) {
     .join('');
 }
 function populateSsFilters() {
-  const owners = (ssFieldDef('account_owner')?.options || []).filter(Boolean);
+  // Account Owner options = only the owners actually present in the currently-viewed quarter's
+  // rows (not the full static list), so the dropdown reflects who's active in this sheet.
+  const owners = [...new Set(state.rows.sales_support
+    .filter((r) => r.period === state.salesPeriod)
+    .map((r) => String(r.account_owner || '').trim())
+    .filter(Boolean))].sort((a, b) => a.localeCompare(b));
   // The Product filter groups SEO under Digital Advertising, so it's not its own filter option.
   const products = (ssFieldDef('product_category')?.options || []).filter((c) => c && c !== 'SEO');
   const sections = (ssFieldDef('section')?.options || []).filter(Boolean);
   // If a now-removed option (e.g. SEO) was selected, fall back to All.
   if (state.ssFilters.product !== 'All' && !products.includes(state.ssFilters.product)) state.ssFilters.product = 'All';
+  // If the selected owner isn't in this quarter (e.g. after switching quarters), reset to All.
+  if (state.ssFilters.owner !== 'All' && !owners.includes(state.ssFilters.owner) && !isSales()) state.ssFilters.owner = 'All';
+  // A tagged salesperson is locked to their own name — keep it selectable even with no rows yet.
+  if (isSales() && salesOwner() && !owners.includes(salesOwner())) owners.unshift(salesOwner());
   $('#ssFilterOwner').innerHTML = ssFilterOptionsHtml(owners, state.ssFilters.owner);
   $('#ssFilterProduct').innerHTML = ssFilterOptionsHtml(products, state.ssFilters.product);
   $('#ssFilterSection').innerHTML = ssFilterOptionsHtml(sections, state.ssFilters.section);
