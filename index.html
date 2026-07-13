@@ -287,7 +287,13 @@
         <h2>Export</h2>
         <button type="button" class="entry-close" id="exportClose" title="Close">✕</button>
       </div>
-      <p>Choose the booking period to export. Churn Tracker is always included in full.</p>
+      <p>Choose what to export. The Booking period filters only apply to the Bookings tab; the Churn Tracker exports in full.</p>
+      <label class="export-label">Sheets</label>
+      <select id="exportSheets">
+        <option value="both">Bookings + Churn Tracker</option>
+        <option value="bookings">Bookings only</option>
+        <option value="churn">Churn Tracker only</option>
+      </select>
       <label class="export-label">Booking Month</label>
       <select id="exportMonth"></select>
       <label class="export-label">Booking Year</label>

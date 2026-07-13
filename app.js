@@ -1965,6 +1965,7 @@ function wireActions() {
   $('#exportBtn').onclick = (e) => { e.preventDefault(); $('#moreMenu').hidden = true; openExport(); };
   $('#exportClose').onclick = () => { $('#exportModal').hidden = true; };
   $('#exportModal').addEventListener('click', (e) => { if (e.target.id === 'exportModal') $('#exportModal').hidden = true; });
+  $('#exportSheets').onchange = syncExportSheetControls;
   $('#exportConfirm').onclick = doExport;
 }
 
@@ -1975,27 +1976,40 @@ function openExport() {
   const yearVals = ['All', ...[...new Set(rows.map((r) => r.booking_year).filter((v) => v != null && v !== ''))].sort((a, b) => a - b)];
   $('#exportMonth').innerHTML = monthVals.map((m) => `<option>${m}</option>`).join('');
   $('#exportYear').innerHTML = yearVals.map((y) => `<option>${y}</option>`).join('');
+  // Default the Sheets choice to the tab you're on (Churn Tracker only when on the Churn tab).
+  $('#exportSheets').value = state.tab === 'churn' ? 'churn' : 'both';
+  syncExportSheetControls();
   $('#exportModal').hidden = false;
+}
+// The Booking period filters only apply when Bookings are being exported — disable them for
+// a Churn-only export.
+function syncExportSheetControls() {
+  const churnOnly = $('#exportSheets').value === 'churn';
+  $('#exportMonth').disabled = churnOnly;
+  $('#exportYear').disabled = churnOnly;
 }
 
 async function doExport() {
+  const sheets = $('#exportSheets').value;
   const month = $('#exportMonth').value;
   const year = $('#exportYear').value;
   const scope = $('#exportScope').value;
   const params = new URLSearchParams();
-  if (month && month !== 'All') params.set('month', month);
-  if (year && year !== 'All') params.set('year', year);
+  if (sheets && sheets !== 'both') params.set('sheets', sheets);
+  if (sheets !== 'churn' && month && month !== 'All') params.set('month', month);
+  if (sheets !== 'churn' && year && year !== 'All') params.set('year', year);
   if (scope === 'commission') params.set('scope', 'commission');
   try {
     const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
     const res = await fetch(`/api/export?${params.toString()}`, { headers });
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();
-    const label = ([month !== 'All' ? month : '', year !== 'All' ? year : ''].filter(Boolean).join('_')
+    const prefix = sheets === 'churn' ? 'Churn_Tracker' : (sheets === 'bookings' ? 'Bookings' : 'Export');
+    const label = ([sheets !== 'churn' && month !== 'All' ? month : '', sheets !== 'churn' && year !== 'All' ? year : ''].filter(Boolean).join('_')
       || new Date().toISOString().slice(0, 10)) + (scope === 'commission' ? '_Commission' : '');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `PERQ_Revenue_Desk_Export_${label}.xlsx`.replace(/\s+/g, '_');
+    a.download = `PERQ_Revenue_Desk_${prefix}_${label}.xlsx`.replace(/\s+/g, '_');
     a.click();
     URL.revokeObjectURL(a.href);
     $('#exportModal').hidden = true;

@@ -41,14 +41,15 @@ export function buildWorkbook(bookings, churn, opts = {}) {
   const wb = XLSX.utils.book_new();
   const bExclude = opts.excludeBookingKeys || new Set();
   const cExclude = opts.excludeChurnKeys || new Set();
+  const sheets = opts.sheets || 'both'; // 'both' | 'bookings' | 'churn'
 
-  const bAoa = buildAoa(bookings, BOOKING_FIELDS, BOOKING_COMPUTED, computeBooking, bExclude);
-  const bWs = XLSX.utils.aoa_to_sheet(bAoa);
-  XLSX.utils.book_append_sheet(wb, bWs, BOOKING_SHEET);
-
-  const cAoa = buildAoa(churn, CHURN_FIELDS, CHURN_COMPUTED, computeChurn, cExclude);
-  const cWs = XLSX.utils.aoa_to_sheet(cAoa);
-  XLSX.utils.book_append_sheet(wb, cWs, CHURN_SHEET);
-
+  if (sheets !== 'churn') {
+    const bAoa = buildAoa(bookings, BOOKING_FIELDS, BOOKING_COMPUTED, computeBooking, bExclude);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(bAoa), BOOKING_SHEET);
+  }
+  if (sheets !== 'bookings') {
+    const cAoa = buildAoa(churn, CHURN_FIELDS, CHURN_COMPUTED, computeChurn, cExclude);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cAoa), CHURN_SHEET);
+  }
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }

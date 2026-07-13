@@ -1263,10 +1263,14 @@ app.get('/api/export', async (req, res, next) => {
     const opts = req.query.scope === 'commission'
       ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set(CHURN_BILLING_KEYS) }
       : {};
+    // Which tabs to include: 'both' (default), 'bookings', or 'churn'.
+    const sheets = ['bookings', 'churn'].includes(req.query.sheets) ? req.query.sheets : 'both';
+    opts.sheets = sheets;
     const buf = buildWorkbook(bookings, churn, opts);
     const stamp = new Date().toISOString().slice(0, 10);
+    const namePart = sheets === 'churn' ? 'Churn_Tracker' : (sheets === 'bookings' ? 'Bookings' : 'Export');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="PERQ_Revenue_Desk_Export_${stamp}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="PERQ_Revenue_Desk_${namePart}_${stamp}.xlsx"`);
     res.send(buf);
   } catch (e) { next(e); }
 });
