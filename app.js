@@ -3223,25 +3223,29 @@ function ssPmcRowFor(pmc) {
   return state.rows.sales_support.find((r) => (r.level || '') === 'pmc'
     && r.period === state.salesPeriod && String(r.pmc || '').trim().toLowerCase() === key) || null;
 }
-// Actual Company Booking for a property in a given month (all products + sections combined).
-function ssActualProperty(propId, monthName, year) {
-  const pid = String(propId || '').trim().toLowerCase();
-  if (!pid || !monthName) return 0;
-  let sum = 0;
-  for (const b of state.rows.bookings) {
-    if (String(b.property_id || '').trim().toLowerCase() === pid
-      && b.booking_month === monthName && reconNum(b.booking_year) === year) {
-      sum += Number(b.company_total_booking) || 0;
-    }
-  }
-  return sum;
-}
 const SS_PROP_MONTHS = { m1_actual: 0, m2_actual: 1, m3_actual: 2 };
-// The actual for a property row + actual-column key (q_actual = whole quarter).
-function ssPropActualFor(row, key, year, qm) {
-  const months = key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]];
-  return months.reduce((a, mn) => a + ssActualProperty(row.property_id, mn, year), 0);
+// A booking that "went live" via a License Transfer (its Company Total is offset toward $0).
+const isBookingLT = (b) => String(b.ctam_type || '').trim() === 'License Transfer' || !!b.offset_churn_id;
+// The bookings for a property across a set of months (a quarter, or a single month).
+function ssPropertyBookingsIn(propId, months, year) {
+  const pid = String(propId || '').trim().toLowerCase();
+  const mset = new Set(months);
+  return state.rows.bookings.filter((b) => String(b.property_id || '').trim().toLowerCase() === pid
+    && mset.has(b.booking_month) && reconNum(b.booking_year) === year);
 }
+// Sum a set of bookings' Company Total + whether any was a License Transfer (for the $0 flag).
+function ssSumLT(bookings) {
+  let value = 0, hasLT = false;
+  for (const b of bookings) { value += Number(b.company_total_booking) || 0; if (isBookingLT(b)) hasLT = true; }
+  return { value, hasLT };
+}
+// Render an Actual cell; flag a $0 that's really a License Transfer (offset to $0), same as the
+// Product view, so it doesn't read as "no activity".
+function ssActualCellHtml(key, value, hasLT) {
+  const ltZero = value === 0 && hasLT;
+  return `<td class="ss-actual${ltZero ? ' ss-lt-zero' : ''}" data-col="${key}">${fmtMoney(value)}</td>`;
+}
+const ssMonthsForKey = (key, qm) => (key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]]);
 // A non-name, non-actual cell on a property row: editable target / owner / notes (or read-only).
 function ssPropEditCell(row, key) {
   const f = ssFieldDef(key);
@@ -3278,7 +3282,11 @@ function ssPmcMainRow(pmc, props, cols, editCol) {
       const owners = [...new Set(props.map((r) => String(r.account_owner || '').trim()).filter(Boolean))];
       return `<td data-col="account_owner">${escapeHtml(owners.join(', '))}</td>`;
     }
-    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + ssPropActualFor(r, k, year, qm), 0))}</td>`;
+    if (SS_COMPUTED.has(k)) {
+      const months = ssMonthsForKey(k, qm);
+      const { value, hasLT } = ssSumLT(props.flatMap((r) => ssPropertyBookingsIn(r.property_id, months, year)));
+      return ssActualCellHtml(k, value, hasLT);
+    }
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     return `<td data-col="${k}"></td>`;
   }).join('');
@@ -3295,7 +3303,10 @@ function ssPropertyRow(row, cols, editCol) {
       return `<td data-col="name" class="ss-prop-name ss-lvl2"><span class="ss-detail-indent">↳</span>${caret}<span>${escapeHtml(row.property || row.property_id || '—')}</span></td>`;
     }
     if (SS_PMC_MANUAL.has(k)) return `<td data-col="${k}"></td>`; // PMC-only columns are blank here
-    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(ssPropActualFor(row, k, year, qm))}</td>`;
+    if (SS_COMPUTED.has(k)) {
+      const { value, hasLT } = ssSumLT(ssPropertyBookingsIn(row.property_id, ssMonthsForKey(k, qm), year));
+      return ssActualCellHtml(k, value, hasLT);
+    }
     return ssPropEditCell(row, k);
   }).join('');
   const del = editCol ? `<td><button type="button" class="view-btn danger" data-ss-del="${row.id}" title="Delete row">✕</button></td>` : '';
@@ -3316,8 +3327,10 @@ function ssOrderDetailRows(row, cols, editCol) {
     const product = String(b.product || '').trim() || '—';
     const section = ssIsPilot(b) ? 'Pilot' : 'CTAM';
     const k = `${product}||${section}`;
-    if (!groups.has(k)) groups.set(k, { product, section, m: [0, 0, 0] });
-    groups.get(k).m[mi] += Number(b.company_total_booking) || 0;
+    if (!groups.has(k)) groups.set(k, { product, section, m: [0, 0, 0], lt: [false, false, false] });
+    const g = groups.get(k);
+    g.m[mi] += Number(b.company_total_booking) || 0;
+    if (isBookingLT(b)) g.lt[mi] = true;
   }
   const list = [...groups.values()].sort((a, b) =>
     a.product.localeCompare(b.product) || a.section.localeCompare(b.section));
@@ -3327,9 +3340,10 @@ function ssOrderDetailRows(row, cols, editCol) {
   }
   return list.map((g) => {
     const vals = { m1_actual: g.m[0], m2_actual: g.m[1], m3_actual: g.m[2], q_actual: g.m[0] + g.m[1] + g.m[2] };
+    const lts = { m1_actual: g.lt[0], m2_actual: g.lt[1], m3_actual: g.lt[2], q_actual: g.lt[0] || g.lt[1] || g.lt[2] };
     const cells = cols.map(([k]) => {
       if (k === 'name') return `<td class="ss-detail-name ss-lvl3" data-col="name"><span class="ss-detail-indent">↳↳</span> ${escapeHtml(g.product)} <span class="ss-tag ss-tag-${g.section.toLowerCase()}">${g.section}</span></td>`;
-      if (Object.prototype.hasOwnProperty.call(vals, k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(vals[k])}</td>`;
+      if (Object.prototype.hasOwnProperty.call(vals, k)) return ssActualCellHtml(k, vals[k], lts[k]);
       return `<td data-col="${k}"></td>`;
     }).join('');
     return `<tr class="ss-detail-row"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
@@ -3343,7 +3357,11 @@ function ssPmcGrandTotal(cols, rows, editCol) {
   const pmcRows = state.rows.sales_support.filter((r) => (r.level || '') === 'pmc' && r.period === state.salesPeriod);
   const cells = cols.map(([k], i) => {
     if (SS_PMC_MANUAL.has(k)) { const s = pmcRows.reduce((a, r) => a + (Number(r[k]) || 0), 0); return `<td class="num" data-col="${k}">${s ? fmtNum(s) : ''}</td>`; }
-    if (SS_COMPUTED.has(k)) return `<td class="ss-actual" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + ssPropActualFor(r, k, year, qm), 0))}</td>`;
+    if (SS_COMPUTED.has(k)) {
+      const months = ssMonthsForKey(k, qm);
+      const { value, hasLT } = ssSumLT(rows.flatMap((r) => ssPropertyBookingsIn(r.property_id, months, year)));
+      return ssActualCellHtml(k, value, hasLT);
+    }
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     if (i === 0) return `<td data-col="${k}">Grand Total</td>`;
     return `<td data-col="${k}"></td>`;
