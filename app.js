@@ -2022,7 +2022,7 @@ const SHARED_KEYS = [
   'booking_month', 'booking_year',
   'centralized', 'sales_rep', 'property_id', 'pmc', 'property_only', 'property_name', 'buying_center',
   'pilot_or_ctam', 'pilot_type', 'ctam_type', 'rerate_paid_months', 'rerate_old_mrr', 'mql',
-  'contract_term', 'booked_term', 'date_signed',
+  'contract_term', 'booked_term', 'free_months', 'date_signed',
 ];
 // Per-product fields. Offset Amount only applies (and only shows) on License Transfers.
 const PRODUCT_KEYS = ['product', 'mrr', 'one_time_fee', 'offset_amount'];
@@ -4717,7 +4717,9 @@ function monthLabelFromIdx(idx) { return idx == null ? '' : `${MONTHS[((idx % 12
 function effectiveGoLive(b) {
   const gi = monthIdxFromDate(b.golive_date);
   if (gi == null) return { idx: null, carriedFrom: null };
-  const eff = effectiveChurnMonth(monthLabelFromIdx(gi), b.golive_set_date);
+  // Free (promotional) months delay recognition: 3 free months → MRR starts the 4th month.
+  const free = Math.max(0, Math.floor(Number(b.free_months) || 0));
+  const eff = effectiveChurnMonth(monthLabelFromIdx(gi + free), b.golive_set_date);
   return { idx: monthIdxFromMonthYear(eff.month), carriedFrom: eff.carriedFrom };
 }
 function effectiveGoLiveIdx(b) { return effectiveGoLive(b).idx; }

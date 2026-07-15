@@ -22,6 +22,9 @@ export const BOOKING_FIELDS = [
   { key: 'rerate_old_mrr',                  label: 'Re-rate Old MRR',        excel: 14, type: 'number' },
   { key: 'contract_term',                   label: 'Contract Term',          excel: 15, type: 'number' },
   { key: 'booked_term',                     label: 'Booked Term',            excel: 16, type: 'number' },
+  // Free (promotional) months after GoLive before MRR is recognized in SaaS Financials — e.g. 3
+  // free months = recognition starts the 4th month. Doesn't change booking totals.
+  { key: 'free_months',                     label: 'Free Months',            excel: 45, type: 'number' },
   { key: 'date_signed',                     label: 'Date Signed',            excel: 17, type: 'date' },
   { key: 'mrr',                             label: 'MRR',                    excel: 18, type: 'number' },
   { key: 'offset_amount',                   label: 'Offset Amount',          excel: 19, type: 'number' },
