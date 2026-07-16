@@ -104,6 +104,41 @@ export const CHURN_COMPUTED = [
 export const BOOKING_SHEET = 'May 2026';
 export const CHURN_SHEET = 'Churn Tracker';
 
+// ---------------------------------------------------------------------------
+// Convert instance — Bookings
+// ---------------------------------------------------------------------------
+// The Convert instance's Bookings diverge from Multifamily's. Every Convert booking is
+// tagged with one of three categories (the first column); the specific fields per category
+// come from the "Retail SaaS Financials" workbook. Only the MRR category is built out for
+// now — Spend + Billable and One Time Fees exist as category options and get their own
+// fields later. These fields are additive nullable columns on the shared `bookings` table;
+// `sales_rep` and `mrr` reuse the existing Multifamily columns (same meaning). `excel` is the
+// 0-based column position used by the Convert export sheet.
+export const CONVERT_BOOKING_CATEGORIES = ['MRR', 'Spend + Billable', 'One Time Fees'];
+
+export const CONVERT_BOOKING_FIELDS = [
+  { key: 'category',             label: 'Category',             excel: 0,  type: 'select', options: CONVERT_BOOKING_CATEGORIES },
+  // --- MRR category fields ---
+  { key: 'division',             label: 'Division',             excel: 1,  type: 'text' },
+  { key: 'channel',              label: 'Channel',              excel: 2,  type: 'text' },
+  { key: 'customer_name',        label: 'Customer Name',        excel: 3,  type: 'text' },
+  { key: 'location',             label: 'Location',             excel: 4,  type: 'text' }, // new field (not in the source sheet)
+  { key: 'contract_signed_date', label: 'Contract Signed Date', excel: 5,  type: 'date' },
+  { key: 'term_length',          label: 'Term Length',          excel: 6,  type: 'text' }, // e.g. "Month-to-Month" or a number of months
+  { key: 'sales_rep',            label: 'Sales Rep',            excel: 7,  type: 'text' }, // reuses the shared `sales_rep` column
+  { key: 'product_type',         label: 'Product Type',         excel: 8,  type: 'text' },
+  { key: 'term_start_date',      label: 'Term Start Date',      excel: 9,  type: 'date' },
+  { key: 'opt_out_period',       label: 'Opt Out Period',       excel: 10, type: 'text' },
+  { key: 'opt_out_expiration',   label: 'Opt Out Expiration',   excel: 11, type: 'text' }, // e.g. "never"
+  { key: 'term_end_date',        label: 'Term End Date',        excel: 12, type: 'date' },
+  { key: 'implementation_fee',   label: 'Implementation Fee',   excel: 13, type: 'number' },
+  { key: 'mrr',                  label: 'MRR',                  excel: 14, type: 'number' }, // reuses the shared `mrr` column
+];
+
+// No computed columns for Convert bookings yet (all fields are manual for now).
+export const CONVERT_BOOKING_COMPUTED = [];
+export const CONVERT_BOOKING_SHEET = 'MRR';
+
 // Legacy trackers — read-only archive migrated from the old "AR Tracking" workbook
 // (admin + billing). GoLives from the "Go Lives" tab; Churn combines "Notices Churn -
 // Software" and "Notices Churn - PPC" into one table tagged by Section.

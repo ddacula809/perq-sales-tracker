@@ -4,6 +4,7 @@ import XLSX from 'xlsx';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
   BOOKING_SHEET, CHURN_SHEET,
+  CONVERT_BOOKING_FIELDS, CONVERT_BOOKING_COMPUTED, CONVERT_BOOKING_SHEET,
 } from './schema.js';
 import { computeBooking, computeChurn } from './compute.js';
 
@@ -42,6 +43,13 @@ export function buildWorkbook(bookings, churn, opts = {}) {
   const bExclude = opts.excludeBookingKeys || new Set();
   const cExclude = opts.excludeChurnKeys || new Set();
   const sheets = opts.sheets || 'both'; // 'both' | 'bookings' | 'churn'
+
+  // Convert instance: one Bookings sheet built from the Convert field set, no churn tab.
+  if (opts.instance === 'convert') {
+    const bAoa = buildAoa(bookings, CONVERT_BOOKING_FIELDS, CONVERT_BOOKING_COMPUTED, () => ({}), bExclude);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(bAoa), CONVERT_BOOKING_SHEET);
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  }
 
   if (sheets !== 'churn') {
     const bAoa = buildAoa(bookings, BOOKING_FIELDS, BOOKING_COMPUTED, computeBooking, bExclude);

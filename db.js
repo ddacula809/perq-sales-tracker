@@ -3,13 +3,28 @@
 import pg from 'pg';
 import {
   BOOKING_FIELDS, CHURN_FIELDS, SALES_SUPPORT_FIELDS, SALESFORCE_RECON_FIELDS,
-  LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS, PRODUCT_FIELDS,
+  LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS, PRODUCT_FIELDS, CONVERT_BOOKING_FIELDS,
 } from './schema.js';
 import { hashPassword } from './auth.js';
 import { bprCategory } from './compute.js';
 import { setCatalog } from './catalog.js';
 
 const { Pool, types } = pg;
+
+// Merge field lists, keeping the first definition of each key. The `bookings` table holds both
+// Multifamily and Convert bookings (distinguished by the `instance` column), so its column set
+// is the union of both schemas. `sales_rep` and `mrr` are shared, so they appear once.
+function mergeByKey(...lists) {
+  const seen = new Set();
+  const out = [];
+  for (const f of lists.flat()) {
+    if (seen.has(f.key)) continue;
+    seen.add(f.key);
+    out.push(f);
+  }
+  return out;
+}
+const BOOKINGS_ALL_FIELDS = mergeByKey(BOOKING_FIELDS, CONVERT_BOOKING_FIELDS);
 
 // DATE columns (OID 1082): return the raw 'YYYY-MM-DD' string instead of a JS Date.
 // Without this, pg hands back a Date object that JSON-serializes to a full ISO
@@ -247,6 +262,9 @@ export async function initDb() {
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS products_name_lower_idx ON products (lower(name))');
   await ensureColumns('products', PRODUCT_FIELDS);
   await ensureColumns('bookings', BOOKING_FIELDS);
+  // Convert-instance booking fields are additive nullable columns on the shared bookings table
+  // (sales_rep/mrr already exist, so those ALTERs are no-ops).
+  await ensureColumns('bookings', CONVERT_BOOKING_FIELDS);
   await ensureColumns('churn', CHURN_FIELDS);
   await ensureColumns('sales_support', SALES_SUPPORT_FIELDS);
   await ensureColumns('salesforce_recon', SALESFORCE_RECON_FIELDS);
@@ -475,7 +493,7 @@ export async function countAdmins() {
 }
 
 const TABLES = {
-  bookings: BOOKING_FIELDS,
+  bookings: BOOKINGS_ALL_FIELDS, // Multifamily + Convert fields (deduped) — insertRow/updateRow whitelist
   churn: CHURN_FIELDS,
   sales_support: SALES_SUPPORT_FIELDS,
   salesforce_recon: SALESFORCE_RECON_FIELDS,

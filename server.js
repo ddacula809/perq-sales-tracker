@@ -19,6 +19,7 @@ import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
   BOOKING_BILLING_KEYS, CHURN_BILLING_KEYS, USER_ROLES, SALES_SUPPORT_FIELDS,
   SALESFORCE_RECON_FIELDS, LEGACY_GOLIVE_FIELDS, LEGACY_CHURN_FIELDS, BPR_CATEGORIES,
+  CONVERT_BOOKING_FIELDS, CONVERT_BOOKING_COMPUTED,
 } from './schema.js';
 import { verifyPassword, signToken, verifyToken } from './auth.js';
 import { sendEmail, changeEmailHtml } from './mailer.js';
@@ -116,7 +117,7 @@ function ownerOptions(originalOptions, reconOwners) {
 }
 
 // ---- Schema (drives the frontend forms) ----
-app.get('/api/schema', async (_req, res, next) => {
+app.get('/api/schema', async (req, res, next) => {
   try {
     const recon = await listRows('salesforce_recon');
     const owners = [...new Set(recon.map((r) => String(r.account_owner ?? '').trim()).filter(Boolean))];
@@ -124,15 +125,23 @@ app.get('/api/schema', async (_req, res, next) => {
     const products = await listProducts();
     const productNames = products.map((p) => String(p.name || '').trim()).filter(Boolean);
     const productCategories = Object.fromEntries(products.map((p) => [p.name, p.bpr_category]));
-    const bookingFields = BOOKING_FIELDS.map((f) => {
-      if (f.key === 'sales_rep') return { ...f, options: ownerOptions(f.options, owners) };
-      if (f.key === 'product' && productNames.length) return { ...f, options: productNames };
-      return f;
-    });
+    // Convert bookings use their own field set (category-tagged rows, different columns). The
+    // other datasets are Multifamily-only, so we serve the Multifamily definitions regardless
+    // (the Convert client ignores them).
+    const bookingFields = reqInstance(req) === 'convert'
+      ? CONVERT_BOOKING_FIELDS
+      : BOOKING_FIELDS.map((f) => {
+        if (f.key === 'sales_rep') return { ...f, options: ownerOptions(f.options, owners) };
+        if (f.key === 'product' && productNames.length) return { ...f, options: productNames };
+        return f;
+      });
+    const bookingsSchema = reqInstance(req) === 'convert'
+      ? { editable: bookingFields, computed: CONVERT_BOOKING_COMPUTED, billing: [] }
+      : { editable: bookingFields, computed: BOOKING_COMPUTED, billing: BOOKING_BILLING_KEYS };
     const ssFields = SALES_SUPPORT_FIELDS.map((f) =>
       f.key === 'account_owner' ? { ...f, options: ownerOptions(f.options, owners) } : f);
     res.json({
-      bookings: { editable: bookingFields, computed: BOOKING_COMPUTED, billing: BOOKING_BILLING_KEYS },
+      bookings: bookingsSchema,
       churn: { editable: CHURN_FIELDS, computed: CHURN_COMPUTED, billing: CHURN_BILLING_KEYS },
       sales_support: { editable: ssFields },
       salesforce_recon: { editable: SALESFORCE_RECON_FIELDS },
@@ -523,7 +532,10 @@ async function maybeConvertExisting(body) {
   }
   return updateRow('bookings', target.id, merged);
 }
-crud('bookings', computeBooking, onBookingCreated, maybeConvertExisting, true); // instance-scoped
+// Convert bookings have no computed columns (all manual for now) and don't share the
+// Multifamily booking-type math — return them unchanged so compute.js never runs on them.
+const computeBookingScoped = (r) => ((r.instance || 'multifamily') === 'convert' ? {} : computeBooking(r));
+crud('bookings', computeBookingScoped, onBookingCreated, maybeConvertExisting, true); // instance-scoped
 // "Date Added" is system-generated: stamp it on creation (manual add / upload) when not provided.
 const todayStr = () => new Date().toISOString().slice(0, 10);
 function churnDefaults(body) {
@@ -1297,6 +1309,7 @@ app.get('/api/export', async (req, res, next) => {
     // Which tabs to include: 'both' (default), 'bookings', or 'churn'.
     const sheets = ['bookings', 'churn'].includes(req.query.sheets) ? req.query.sheets : 'both';
     opts.sheets = sheets;
+    opts.instance = instance; // Convert exports its own single Bookings sheet (no churn)
     const buf = buildWorkbook(bookings, churn, opts);
     const stamp = new Date().toISOString().slice(0, 10);
     const namePart = sheets === 'churn' ? 'Churn_Tracker' : (sheets === 'bookings' ? 'Bookings' : 'Export');

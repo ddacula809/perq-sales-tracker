@@ -4,6 +4,7 @@ const MONEY = new Set([
   'mrr', 'rerate_old_mrr', 'one_time_fee', 'month1', 'month2', 'month3',
   'offset_amount', 'annual_value', 'company_total_booking', 'commissionable_bookings',
   'google_search_budget', 'ar_final_invoice_amount', 'prorated_churn_amount', 'final_churn_amount',
+  'implementation_fee', // Convert bookings
 ]);
 
 const state = {
@@ -93,8 +94,12 @@ function isSales() { return role() === 'sales'; }                 // salesperson
 function salesOwner() { return state.user ? (state.user.account_owner || '') : ''; }
 // Access to the Convert instance: admins always; others only when granted (users.convert_access).
 function canConvert() { return isAdmin() || !!(state.user && state.user.convert_access); }
-// In the Convert instance, only the Bookings (+ New Booking) sections exist for now.
-const CONVERT_TABS = new Set(['bookings', 'newbooking']);
+// Are we currently viewing the Convert instance? Convert's Bookings diverge from Multifamily
+// (category-tagged rows, different columns, none of the churn/booking-type enhancements).
+function isConvert() { return state.instance === 'convert'; }
+// In the Convert instance, only the Bookings section exists for now. (The Multifamily New Booking
+// entry form is property/pilot-specific; Convert rows are added inline via "+ Add row".)
+const CONVERT_TABS = new Set(['bookings']);
 function tabAvailable(tab) { return state.instance === 'convert' ? CONVERT_TABS.has(tab) : true; }
 function isSalesRole() { return role() === 'sales_admin' || role() === 'sales'; }
 function canAddDelete() { return role() === 'admin' || role() === 'standard'; } // bookings/churn + imports
@@ -252,7 +257,8 @@ function fieldsForTab() {
   }
   // Bookings: a synthetic, read-only "Status" column (Active / Churned / Never went live),
   // derived by cross-referencing the Churn Tracker. Sits right after the property name.
-  if (state.tab === 'bookings') {
+  // Convert has no Churn Tracker, so this column doesn't apply there.
+  if (state.tab === 'bookings' && !isConvert()) {
     const idx = cols.findIndex((c) => c.key === 'property_name');
     const statusCol = { key: 'churn_status', label: 'Status', type: 'text', synthetic: true };
     if (idx >= 0) cols.splice(idx + 1, 0, statusCol); else cols.push(statusCol);
@@ -412,9 +418,11 @@ const TOTALS_FIELDS = {
   bookings: [['MRR', 'mrr'], ['One-Time Fee', 'one_time_fee'], ['Offset Amount', 'offset_amount'], ['Annual Value', 'annual_value'], ['Company Total Booking', 'company_total_booking'], ['Commissionable', 'commissionable_bookings'], ['Commissionable + OTF', commissionablePlusOtf]],
   churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
 };
+// Convert bookings have no booking-type math — total the plain money columns instead.
+const CONVERT_TOTALS_FIELDS = [['MRR', 'mrr'], ['Implementation Fee', 'implementation_fee']];
 function renderBookingTotals(allRows) {
   const el = $('#bookingTotals');
-  const fields = TOTALS_FIELDS[state.tab];
+  const fields = (isConvert() && state.tab === 'bookings') ? CONVERT_TOTALS_FIELDS : TOTALS_FIELDS[state.tab];
   if (!fields) { el.hidden = true; return; }
   // Churn Credits are a positive accounting adjustment recognized in the dashboard, not a raw
   // churn drop — exclude them from the raw Churn grid totals (their computed amounts are negative).
@@ -758,8 +766,12 @@ function renderSummary() {
   let cols = tab === 'churn'
     ? [...state.schema.churn.editable, ...state.schema.churn.computed]
     : [...state.schema.bookings.editable, ...state.schema.bookings.computed];
+  // The synthetic filters below are all Multifamily concepts (Booking Month/Year, GoLive, the
+  // Professional-Services grouping). Convert bookings don't have those fields — skip them so the
+  // Convert filter list is just its own columns (Category, Customer Name, Sales Rep, …).
+  const mfSynthetic = !isConvert();
   // Bookings + Dashboard: offer a single combined "Booking Month/Year" filter instead of separate ones.
-  if (tab !== 'churn') {
+  if (tab !== 'churn' && mfSynthetic) {
     cols = cols.filter((c) => c.key !== 'booking_month' && c.key !== 'booking_year');
     cols.unshift({ key: 'booking_my', label: 'Booking Month/Year', type: 'text' });
   }
@@ -770,17 +782,17 @@ function renderSummary() {
   }
   // Bookings + Dashboard: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from
   // Booking Month/Year.
-  if (tab === 'bookings' || tab === 'dashboard') {
+  if ((tab === 'bookings' || tab === 'dashboard') && mfSynthetic) {
     cols.unshift({ key: 'booking_quarter', label: 'Quarter', type: 'text' });
   }
   // Bookings + Churn: a synthetic "Main Category" filter — Professional Services (Digital
   // Advertising products) vs Software (everything else). Matches the Dashboard's macro grouping.
-  if (tab === 'bookings' || tab === 'churn') {
+  if ((tab === 'bookings' || tab === 'churn') && mfSynthetic) {
     cols.unshift({ key: 'main_category', label: 'Main Category', type: 'text' });
   }
   // Bookings only: a "GoLive Added" recency filter by when the GoLive Date was set in the system
   // (golive_set_date — stamped on GoLives upload and manual edits). Mirrors churn's "Added".
-  if (tab === 'bookings') {
+  if (tab === 'bookings' && mfSynthetic) {
     cols.unshift({ key: 'golive_added_recent', label: 'GoLive Added (recent)', type: 'text' });
   }
   const monthOrder = (state.schema.bookings.editable.find((x) => x.key === 'booking_month') || {}).options || [];
@@ -835,7 +847,9 @@ function renderSummary() {
     dashboard: ['booking_quarter', 'booking_my', 'pmc', 'sales_rep', 'bpr_prod_category'],
   };
   if (tab === 'churn' && !state.activeFilters.churn) state.activeFilters.churn = ['churn_quarter'];
-  if (tab === 'bookings' && !state.activeFilters.bookings) state.activeFilters.bookings = ['booking_quarter'];
+  if (tab === 'bookings' && !state.activeFilters.bookings) {
+    state.activeFilters.bookings = isConvert() ? ['category'] : ['booking_quarter'];
+  }
   const adjustable = tab === 'bookings' || tab === 'churn';
   const lockRep = isSales() && salesOwner();
   let active = adjustable
@@ -1568,8 +1582,19 @@ function wireLegacy() {
 function applyInstanceTheme() { document.documentElement.dataset.instance = state.instance || 'multifamily'; }
 // Switch instances: persist, re-theme, and reload the (instance-scoped) data.
 function setInstance(instance, opts = {}) {
+  const prev = state.instance;
   state.instance = (instance === 'convert' && canConvert()) ? 'convert' : 'multifamily';
   localStorage.setItem('perqInstance', state.instance);
+  // Convert and Multifamily bookings have different columns, so any active bookings filter/sort/
+  // quick-search from the other instance would reference columns that don't exist here (and could
+  // hide every row). Reset the bookings view-state on a real switch so each instance starts clean.
+  if (prev !== state.instance) {
+    state.filters.bookings = {};
+    state.quickFilter.bookings = { col: '', text: '' };
+    state.sort.bookings = { key: null, dir: 0 };
+    delete state.activeFilters.bookings; // let the instance-appropriate default filter re-apply
+    saveActiveFilters();
+  }
   applyInstanceTheme();
   if (opts.reload === false) return;
   if (!tabAvailable(state.tab)) state.tab = 'bookings';
@@ -1694,8 +1719,10 @@ function renderAll() {
   $('#userWrap').hidden = !state.user;
   $('#userChip').innerHTML = state.user
     ? `${escapeHtml(state.user.username)} · <span class="role">${escapeHtml(state.user.role)}</span>` : '';
-  // Quick "+ Add row" is only used on the Churn grid now (Bookings uses the New Booking tab).
-  $('#addRowBtn').style.display = (state.tab === 'churn' && canAddDelete()) ? '' : 'none';
+  // Quick "+ Add row": the Churn grid, and the Convert Bookings grid (Convert has no New Booking
+  // entry form — rows are added inline and filled in the grid). Multifamily Bookings uses the form.
+  const canQuickAdd = canAddDelete() && (state.tab === 'churn' || (state.tab === 'bookings' && isConvert()));
+  $('#addRowBtn').style.display = canQuickAdd ? '' : 'none';
   $('#addRowBtn').textContent = '+ Add row';
   // Sections: grid for Bookings/Churn, the entry form for New Booking, neither on Dashboard.
   $('#gridwrap').style.display = isGrid ? '' : 'none';
@@ -1916,7 +1943,19 @@ function wireActions() {
 
   // Quick blank-row add — only used on the Churn grid (Bookings uses the New Booking tab).
   $('#addRowBtn').onclick = async () => {
-    if (state.tab !== 'churn' || !canAddDelete()) return;
+    if (!canAddDelete()) return;
+    // Convert Bookings: add a blank booking (defaulting Category to MRR) to fill in inline.
+    if (state.tab === 'bookings' && isConvert()) {
+      try {
+        const row = await api('/api/bookings', { method: 'POST', body: JSON.stringify({ category: 'MRR' }) });
+        state.rows.bookings.push(row);
+        renderBody(); renderSummary();
+        $('#scroller').scrollTop = $('#scroller').scrollHeight;
+        toast('Row added');
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
+    if (state.tab !== 'churn') return;
     try {
       const row = await api('/api/churn', { method: 'POST', body: JSON.stringify({}) });
       state.rows.churn.push(row);
@@ -3991,12 +4030,18 @@ function wireView() {
 // Default pinned (frozen-left) columns per tab. Users can change these via the Columns menu;
 // their choice is stored in state.pinnedCols and overrides these defaults.
 const BOOKING_FREEZE = ['property_name', 'product', 'mrr'];
+const CONVERT_BOOKING_FREEZE = ['category', 'customer_name'];
 const CHURN_FREEZE = ['property_id', 'pmc_buying_center', 'property', 'product', 'mrr', 'last_date_under_contract'];
 const GRID_FREEZE = { bookings: BOOKING_FREEZE, churn: CHURN_FREEZE };
+// The default frozen columns for the active tab (instance-aware for Convert bookings).
+function defaultFreeze(tab) {
+  if (tab === 'bookings' && isConvert()) return CONVERT_BOOKING_FREEZE;
+  return GRID_FREEZE[tab] || [];
+}
 // The pinned columns for a tab: the user's saved set if any, else the default freeze.
 function pinnedFor(tab) {
   const saved = state.pinnedCols[tab];
-  return Array.isArray(saved) ? saved : (GRID_FREEZE[tab] || []);
+  return Array.isArray(saved) ? saved : defaultFreeze(tab);
 }
 function savePinnedCols() { localStorage.setItem('perqPinnedCols', JSON.stringify(state.pinnedCols)); }
 function applyGridFreeze() {
