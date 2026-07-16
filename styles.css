@@ -20,6 +20,22 @@
   --ok: #15803d;             /* positive/ok (kept green for meaning) */
   --shadow: 0 1px 0 rgba(0,0,0,.04), 0 8px 24px -16px rgba(0,0,0,.35);
 }
+/* Convert instance re-themes the warm coral accent to a cool teal so it's obvious which
+   Revenue Desk instance you're in. Only the accent family changes; everything else stays. */
+:root[data-instance="convert"] {
+  --accent: #0f9488;         /* Teal 600 */
+  --accent-deep: #0b6d64;    /* Teal 800 */
+  --accent-soft: #d6efec;    /* teal tint */
+}
+/* Instance switcher in the header */
+.instance-switcher {
+  align-self: center; margin-left: 14px; font: inherit; font-size: 13px; font-weight: 600;
+  padding: 5px 12px; border-radius: 999px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent-deep); cursor: pointer;
+}
+.instance-switcher[hidden] { display: none; }
+.user-convert { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; }
+.user-convert.muted { color: var(--ink-soft); }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 /* Impersonation banner (admin "log in as") — a flex child at the top of the page. */

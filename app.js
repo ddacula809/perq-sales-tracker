@@ -69,11 +69,12 @@ const state = {
   pendingBookings: [], // new-booking payloads awaiting confirmation
   pendingOffsets: [],  // per-line License Transfer offsets: array of {churnId, amount} per line
   notifications: [],   // billing notifications (e.g. GoLive changes)
+  instance: localStorage.getItem('perqInstance') || 'multifamily', // active Revenue Desk instance
 };
 
 const $ = (s) => document.querySelector(s);
 const api = async (url, opts = {}) => {
-  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  const headers = { 'Content-Type': 'application/json', 'x-instance': state.instance || 'multifamily', ...(opts.headers || {}) };
   if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
   const res = await fetch(url, { ...opts, headers });
   if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
@@ -90,6 +91,11 @@ function role() { return state.user ? state.user.role : null; }
 function isAdmin() { return role() === 'admin'; }
 function isSales() { return role() === 'sales'; }                 // salesperson tagged to one owner
 function salesOwner() { return state.user ? (state.user.account_owner || '') : ''; }
+// Access to the Convert instance: admins always; others only when granted (users.convert_access).
+function canConvert() { return isAdmin() || !!(state.user && state.user.convert_access); }
+// In the Convert instance, only the Bookings (+ New Booking) sections exist for now.
+const CONVERT_TABS = new Set(['bookings', 'newbooking']);
+function tabAvailable(tab) { return state.instance === 'convert' ? CONVERT_TABS.has(tab) : true; }
 function isSalesRole() { return role() === 'sales_admin' || role() === 'sales'; }
 function canAddDelete() { return role() === 'admin' || role() === 'standard'; } // bookings/churn + imports
 function canImport() { return role() === 'admin'; }
@@ -1558,9 +1564,36 @@ function wireLegacy() {
 }
 
 // ---------- Data ops ----------
+// Reflect the active instance on the root element so the theme (accent color) can switch via CSS.
+function applyInstanceTheme() { document.documentElement.dataset.instance = state.instance || 'multifamily'; }
+// Switch instances: persist, re-theme, and reload the (instance-scoped) data.
+function setInstance(instance, opts = {}) {
+  state.instance = (instance === 'convert' && canConvert()) ? 'convert' : 'multifamily';
+  localStorage.setItem('perqInstance', state.instance);
+  applyInstanceTheme();
+  if (opts.reload === false) return;
+  if (!tabAvailable(state.tab)) state.tab = 'bookings';
+  loadAll();
+}
+
 async function loadAll() {
+  // A user without Convert access can't be in the Convert instance.
+  if (state.instance === 'convert' && !canConvert()) setInstance('multifamily', { reload: false });
+  applyInstanceTheme();
   state.schema = await api('/api/schema');
-  state.rows.bookings = await api('/api/bookings');
+  state.rows.bookings = await api('/api/bookings'); // server scopes to state.instance
+  // Convert has only a Bookings section for now — the other datasets are Multifamily-only.
+  if (state.instance === 'convert') {
+    state.rows.churn = []; state.rows.sales_support = []; state.salesPeriods = [];
+    state.rows.salesforce_recon = []; state.sfPmcs = [];
+    state.rows.legacy_golives = []; state.rows.legacy_churn = [];
+    state.notifications = [];
+    state.closedMonths = state.closedMonths || [];
+    if (!tabAvailable(state.tab)) state.tab = 'bookings';
+    renderAll();
+    $('#status').textContent = `${state.rows.bookings.length} bookings`;
+    return;
+  }
   state.rows.churn = await api('/api/churn');
   state.rows.sales_support = await api('/api/sales_support');
   state.salesPeriods = await api('/api/sales_periods');
@@ -1596,6 +1629,10 @@ async function loadAll() {
 }
 
 function renderAll() {
+  // Instance switcher + theme (the switcher shows only for users who can access Convert).
+  applyInstanceTheme();
+  const sw = $('#instanceSwitcher');
+  if (sw) { sw.hidden = !canConvert(); sw.value = state.instance; }
   // The New Booking tab is admin-only.
   document.querySelector('[data-tab="newbooking"]').hidden = !isAdmin();
   if (state.tab === 'newbooking' && !isAdmin()) state.tab = 'dashboard';
@@ -1614,6 +1651,18 @@ function renderAll() {
   document.querySelector('[data-tab="saas"]').hidden = !canSaas;
   if (state.tab === 'saas' && !canSaas) state.tab = 'dashboard';
   // (Sales roles see Churn read-only — canEditField returns false for them.)
+  // The tabs with no role gate are visible in Multifamily; reset them each render so returning
+  // from Convert restores them.
+  ['dashboard', 'bookings', 'churn', 'salessupport'].forEach((t) => {
+    const el = document.querySelector(`[data-tab="${t}"]`); if (el) el.hidden = false;
+  });
+  // Convert instance: only Bookings (+ New Booking) exist for now — hide every other tab and the
+  // Multifamily-only data operations (import/upload/reconcile/offsets act on Multifamily datasets).
+  const inConvert = state.instance === 'convert';
+  if (inConvert) {
+    document.querySelectorAll('[data-tab]').forEach((el) => { if (!CONVERT_TABS.has(el.dataset.tab)) el.hidden = true; });
+    if (!tabAvailable(state.tab)) state.tab = 'bookings';
+  }
 
   const isEntry = state.tab === 'newbooking';
   const isSales = state.tab === 'salessupport';
@@ -1624,17 +1673,19 @@ function renderAll() {
   const isGrid = state.tab === 'bookings' || state.tab === 'churn';
   // SaaS Financials shows its own title in its header row, so don't duplicate it up here.
   $('#currentTab').textContent = isSaas ? '' : (TAB_LABELS[state.tab] || '');
-  // Account / role-based controls.
-  $('#importBtn').style.display = canImport() ? '' : 'none';
-  $('#priorBookingsBtn').hidden = !canImport();
+  // Account / role-based controls. The Multifamily-only data operations are hidden in Convert
+  // (they import/upload/reconcile against the Multifamily datasets).
+  const mfOps = !inConvert; // available only in the Multifamily instance
+  $('#importBtn').style.display = (canImport() && mfOps) ? '' : 'none';
+  $('#priorBookingsBtn').hidden = !(canImport() && mfOps);
   // In the More PERQs menu these are role-gated only (work from any tab).
-  $('#churnUploadBtn').hidden = !canAddDelete();
-  $('#reconcileBtn').hidden = !canAddDelete();
-  $('#golivesBtn').hidden = !canAddDelete();
-  $('#offsetReviewBtn').hidden = !canAddDelete();
+  $('#churnUploadBtn').hidden = !(canAddDelete() && mfOps);
+  $('#reconcileBtn').hidden = !(canAddDelete() && mfOps);
+  $('#golivesBtn').hidden = !(canAddDelete() && mfOps);
+  $('#offsetReviewBtn').hidden = !(canAddDelete() && mfOps);
   $('#usersBtn').hidden = !isAdmin();
-  $('#productsBtn').hidden = !isAdmin();
-  $('#closeMonthBtn').hidden = !isAdmin();
+  $('#productsBtn').hidden = !(isAdmin() && mfOps);
+  $('#closeMonthBtn').hidden = !(isAdmin() && mfOps);
   $('#notifWrap').hidden = !canBilling;
   updateBell();
   // "Ask Claude" assistant: shown only when configured (API key set) and for full-data roles.
@@ -1857,6 +1908,8 @@ function wireTabs() {
 }
 
 function wireActions() {
+  // Revenue Desk instance switcher (Multifamily / Convert).
+  $('#instanceSwitcher').onchange = (e) => { setInstance(e.target.value); };
   // "More PERQs" dropdown holding the file actions.
   $('#moreBtn').onclick = () => { $('#moreMenu').hidden = !$('#moreMenu').hidden; };
   document.addEventListener('click', (e) => { if (!e.target.closest('.more-wrap')) $('#moreMenu').hidden = true; });
@@ -2000,7 +2053,7 @@ async function doExport() {
   if (sheets !== 'churn' && year && year !== 'All') params.set('year', year);
   if (scope === 'commission') params.set('scope', 'commission');
   try {
-    const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+    const headers = { 'x-instance': state.instance || 'multifamily', ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) };
     const res = await fetch(`/api/export?${params.toString()}`, { headers });
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();
@@ -4356,10 +4409,15 @@ async function renderUsersList() {
       // "Log in as" for everyone except yourself.
       const impBtn = (state.user && u.id === state.user.id) ? ''
         : `<button type="button" class="view-btn" data-imp-user="${u.id}" data-imp-name="${escapeAttr(u.username)}">Log in as</button>`;
+      // Convert-instance access (admins always have it, so the toggle is only meaningful for others).
+      const convChk = u.role === 'admin'
+        ? '<label class="user-convert muted" title="Admins always have Convert access"><input type="checkbox" checked disabled /> Convert</label>'
+        : `<label class="user-convert" title="Grant access to the Convert instance"><input type="checkbox" data-convert-for="${u.id}"${u.convert_access ? ' checked' : ''} /> Convert</label>`;
       return `<div class="user-row">
         <span class="user-name">${escapeHtml(u.username)}</span>
         <select data-role-for="${u.id}">${opts}</select>
         ${ownerSel}
+        ${convChk}
         ${impBtn}
         <button type="button" class="view-btn" data-pw-user="${u.id}">Reset password</button>
         <button type="button" class="view-btn danger" data-del-user="${u.id}">Delete</button>
@@ -4545,6 +4603,14 @@ function wireUsers() {
         await api(`/api/users/${own.dataset.ownerFor}`, { method: 'PATCH', body: JSON.stringify({ account_owner: own.value }) });
         toast('Account Owner updated');
       } catch (err) { toast(err.message, true); }
+      return;
+    }
+    const conv = e.target.closest('[data-convert-for]');
+    if (conv) {
+      try {
+        await api(`/api/users/${conv.dataset.convertFor}`, { method: 'PATCH', body: JSON.stringify({ convert_access: conv.checked }) });
+        toast(conv.checked ? 'Convert access granted' : 'Convert access removed');
+      } catch (err) { toast(err.message, true); conv.checked = !conv.checked; }
     }
   });
 

@@ -254,6 +254,11 @@ export async function initDb() {
   await ensureColumns('legacy_churn', LEGACY_CHURN_FIELDS);
   // Link from a License Transfer booking to the churn it offset (kept out of the schema/grid).
   await pool.query('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS offset_churn_id integer');
+  // Revenue Desk instance a booking belongs to ('multifamily' = the original app; 'convert' = the
+  // second instance). Kept out of the schema/grid; existing rows default to multifamily.
+  await pool.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS instance TEXT NOT NULL DEFAULT 'multifamily'");
+  // Per-user access to the Convert instance (admins always have access).
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS convert_access BOOLEAN NOT NULL DEFAULT false');
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
   await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);
@@ -431,36 +436,37 @@ export async function getUserByUsername(username) {
   return rows[0];
 }
 export async function listUsers() {
-  const { rows } = await pool.query('SELECT id, username, role, account_owner, created_at FROM users ORDER BY username ASC');
+  const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, created_at FROM users ORDER BY username ASC');
   return rows;
 }
-export async function createUser({ username, password, role, account_owner }) {
+export async function createUser({ username, password, role, account_owner, convert_access }) {
   const { rows } = await pool.query(
-    'INSERT INTO users (username, password_hash, role, account_owner) VALUES ($1, $2, $3, $4) RETURNING id, username, role, account_owner, created_at',
-    [username, hashPassword(password), role, account_owner || null]
+    'INSERT INTO users (username, password_hash, role, account_owner, convert_access) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, role, account_owner, convert_access, created_at',
+    [username, hashPassword(password), role, account_owner || null, !!convert_access]
   );
   return rows[0];
 }
-export async function updateUser(id, { role, password, account_owner }) {
+export async function updateUser(id, { role, password, account_owner, convert_access }) {
   const sets = [];
   const vals = [];
   if (role) { vals.push(role); sets.push(`role=$${vals.length}`); }
   if (password) { vals.push(hashPassword(password)); sets.push(`password_hash=$${vals.length}`); }
   if (account_owner !== undefined) { vals.push(account_owner || null); sets.push(`account_owner=$${vals.length}`); }
+  if (convert_access !== undefined) { vals.push(!!convert_access); sets.push(`convert_access=$${vals.length}`); }
   if (!sets.length) {
-    const { rows } = await pool.query('SELECT id, username, role, account_owner, created_at FROM users WHERE id=$1', [id]);
+    const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, created_at FROM users WHERE id=$1', [id]);
     return rows[0];
   }
   vals.push(id);
   const { rows } = await pool.query(
-    `UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING id, username, role, account_owner, created_at`,
+    `UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING id, username, role, account_owner, convert_access, created_at`,
     vals
   );
   return rows[0];
 }
 export async function deleteUser(id) { await pool.query('DELETE FROM users WHERE id=$1', [id]); }
 export async function getUserById(id) {
-  const { rows } = await pool.query('SELECT id, username, role, account_owner, created_at FROM users WHERE id=$1', [id]);
+  const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, created_at FROM users WHERE id=$1', [id]);
   return rows[0];
 }
 export async function countAdmins() {

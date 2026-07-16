@@ -47,7 +47,7 @@ app.post('/api/login', async (req, res, next) => {
     if (!user || !verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
-    const safe = { id: user.id, username: user.username, role: user.role, account_owner: user.account_owner || null };
+    const safe = { id: user.id, username: user.username, role: user.role, account_owner: user.account_owner || null, convert_access: !!user.convert_access };
     res.json({ token: signToken(safe), user: safe });
   } catch (e) { next(e); }
 });
@@ -59,9 +59,18 @@ app.use('/api', (req, res, next) => {
   const token = header.startsWith('Bearer ') ? header.slice(7) : (req.get('x-app-key') || '');
   const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
-  req.user = { id: payload.id, username: payload.username, role: payload.role, account_owner: payload.account_owner || null };
+  req.user = { id: payload.id, username: payload.username, role: payload.role, account_owner: payload.account_owner || null, convert_access: !!payload.convert_access };
   next();
 });
+// The Revenue Desk instance a request targets (client sends x-instance). Access to 'convert' is
+// admin-only unless the user has been granted convert_access (checked fresh from the DB so a
+// newly granted user doesn't need to re-login).
+function reqInstance(req) { return req.get('x-instance') === 'convert' ? 'convert' : 'multifamily'; }
+async function canAccessInstance(req, instance) {
+  if (instance !== 'convert') return true;
+  if (req.user.role === 'admin') return true;
+  try { const u = await getUserById(req.user.id); return !!(u && u.convert_access); } catch { return false; }
+}
 
 // Read the user fresh from the DB so role/account_owner changes apply without re-login
 // (and so older tokens that predate the account_owner field still resolve it).
@@ -69,7 +78,7 @@ app.get('/api/me', async (req, res, next) => {
   try {
     const u = await getUserById(req.user.id);
     if (!u) return res.status(401).json({ error: 'Unauthorized' });
-    res.json({ user: { id: u.id, username: u.username, role: u.role, account_owner: u.account_owner || null } });
+    res.json({ user: { id: u.id, username: u.username, role: u.role, account_owner: u.account_owner || null, convert_access: !!u.convert_access } });
   } catch (e) { next(e); }
 });
 
@@ -290,11 +299,14 @@ async function attachChurnOwners(rows) {
   }));
 }
 
-function crud(table, computeFn, afterInsert, beforeInsert) {
+function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
   // Read: any authenticated user. Churn rows are enriched with their Account Owner (from Recon).
-  app.get(`/api/${table}`, async (_req, res, next) => {
+  app.get(`/api/${table}`, async (req, res, next) => {
     try {
+      const instance = instanceScoped ? reqInstance(req) : null;
+      if (instance && !(await canAccessInstance(req, instance))) return res.status(403).json({ error: 'No access to that instance.' });
       let out = (await listRows(table)).map((r) => withComputed(r, computeFn));
+      if (instanceScoped) out = out.filter((r) => (r.instance || 'multifamily') === instance);
       if (table === 'churn') out = await attachChurnOwners(out);
       res.json(out);
     } catch (e) { next(e); }
@@ -303,6 +315,11 @@ function crud(table, computeFn, afterInsert, beforeInsert) {
   app.post(`/api/${table}`, requireRole('admin', 'standard'), async (req, res, next) => {
     try {
       const body = req.body || {};
+      if (instanceScoped) {
+        const instance = reqInstance(req);
+        if (!(await canAccessInstance(req, instance))) return res.status(403).json({ error: 'No access to that instance.' });
+        body.instance = instance; // stamp the active instance on the new row
+      }
       // beforeInsert may handle this as an update of an existing row (e.g. a Conversion that
       // overrides its pilot booking) and return that row — then no new row is inserted.
       if (beforeInsert) {
@@ -310,6 +327,12 @@ function crud(table, computeFn, afterInsert, beforeInsert) {
         if (replaced) return res.json(withComputed(replaced, computeFn));
       }
       const row = await insertRow(table, body);
+      // `instance` isn't a schema/grid field, so insertRow doesn't write it — stamp it explicitly
+      // when creating in a non-default instance.
+      if (instanceScoped && body.instance && body.instance !== (row.instance || 'multifamily')) {
+        await pool.query('UPDATE bookings SET instance=$1 WHERE id=$2', [body.instance, row.id]);
+        row.instance = body.instance;
+      }
       const computed = withComputed(row, computeFn);
       // Optional side-effect after insert (e.g. auto-track a new booking in Sales Support).
       if (afterInsert) { try { await afterInsert(computed); } catch (e) { console.error('[afterInsert]', e.message); } }
@@ -448,17 +471,19 @@ async function noteConversionBilling(b) {
 // After a booking is created: auto-track it in Sales Support and (if a conversion) note it.
 // Each is best-effort so one failing never blocks the booking or the other.
 async function onBookingCreated(b) {
+  // Sales Support / conversion-billing are Multifamily concepts — skip them for other instances.
+  if ((b.instance || 'multifamily') !== 'multifamily') return;
   try { await autoTrackBookingInSalesSupport(b); } catch (e) { console.error('[autoTrack]', e.message); }
   try { await noteConversionBilling(b); } catch (e) { console.error('[conversionNote]', e.message); }
 }
-// The Sage ID already on file for a property (any of its bookings), or '' if none.
-async function sageIdForProperty(propertyId, excludeId) {
+// The Sage ID already on file for a property (any of its bookings in the same instance), or ''.
+async function sageIdForProperty(propertyId, excludeId, instance = 'multifamily') {
   const pid = String(propertyId || '').trim();
   if (!pid) return '';
-  const params = [pid];
+  const params = [pid, instance];
   let sql = "SELECT sage_id FROM bookings WHERE lower(trim(property_id)) = lower(trim($1))"
-    + " AND sage_id IS NOT NULL AND trim(sage_id) <> ''";
-  if (excludeId) { params.push(excludeId); sql += ' AND id <> $2'; }
+    + " AND COALESCE(instance,'multifamily') = $2 AND sage_id IS NOT NULL AND trim(sage_id) <> ''";
+  if (excludeId) { params.push(excludeId); sql += ` AND id <> $${params.length}`; }
   sql += ' ORDER BY id DESC LIMIT 1';
   const q = await pool.query(sql, params);
   return q.rows[0] ? q.rows[0].sage_id : '';
@@ -468,9 +493,10 @@ async function sageIdForProperty(propertyId, excludeId) {
 // GoLive (cleared here; set it when the property actually converts/goes live). Returns the
 // updated row, or null if there's no matching pilot to convert (then it inserts normally).
 async function maybeConvertExisting(body) {
+  const instance = body.instance || 'multifamily';
   // Sage ID is per-property: a new order for a property that already has one inherits it.
   if (body && String(body.property_id || '').trim() && !String(body.sage_id || '').trim()) {
-    const s = await sageIdForProperty(body.property_id);
+    const s = await sageIdForProperty(body.property_id, null, instance);
     if (s) body.sage_id = s;
   }
   if (String(body.pilot_type || '').trim() !== 'Conversion') return null;
@@ -478,9 +504,10 @@ async function maybeConvertExisting(body) {
   const pid = norm(body.property_id);
   const prod = norm(body.product);
   if (!pid || !prod) return null;
-  // Match purely on Property ID + Product (any existing line item for it), so a conversion
-  // always updates the existing record instead of creating a duplicate.
-  const matches = (await listRows('bookings')).filter((b) => norm(b.property_id) === pid && norm(b.product) === prod);
+  // Match purely on Property ID + Product within the same instance, so a conversion updates the
+  // existing record instead of creating a duplicate (and never crosses instances).
+  const matches = (await listRows('bookings')).filter((b) => (b.instance || 'multifamily') === instance
+    && norm(b.property_id) === pid && norm(b.product) === prod);
   if (!matches.length) return null;
   const target = matches[matches.length - 1]; // the most recent line item for this property + product
   const merged = { ...body, golive_date: null }; // recognized only once the conversion goes live
@@ -496,7 +523,7 @@ async function maybeConvertExisting(body) {
   }
   return updateRow('bookings', target.id, merged);
 }
-crud('bookings', computeBooking, onBookingCreated, maybeConvertExisting);
+crud('bookings', computeBooking, onBookingCreated, maybeConvertExisting, true); // instance-scoped
 // "Date Added" is system-generated: stamp it on creation (manual add / upload) when not provided.
 const todayStr = () => new Date().toISOString().slice(0, 10);
 function churnDefaults(body) {
@@ -930,6 +957,7 @@ app.post('/api/sales_support/sync', requireRole('admin', 'sales_admin'), async (
       .map((r) => propKey(r.period, r.property_id)));
     let created = 0;
     for (const raw of await listRows('bookings')) {
+      if ((raw.instance || 'multifamily') !== 'multifamily') continue; // Sales Support is Multifamily-only
       const b = withComputed(raw, computeBooking);
       const month = String(b.booking_month || '').trim();
       const year = b.booking_year;
@@ -984,12 +1012,12 @@ app.get('/api/users', requireRole('admin'), async (_req, res, next) => {
 });
 app.post('/api/users', requireRole('admin'), async (req, res, next) => {
   try {
-    const { username, password, role, account_owner } = req.body || {};
+    const { username, password, role, account_owner, convert_access } = req.body || {};
     const u = String(username || '').trim();
     if (!u || !password) return res.status(400).json({ error: 'Username and password are required.' });
     if (!USER_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role.' });
     const owner = role === 'sales' ? String(account_owner || '').trim() : null;
-    res.status(201).json(await createUser({ username: u, password, role, account_owner: owner }));
+    res.status(201).json(await createUser({ username: u, password, role, account_owner: owner, convert_access: !!convert_access }));
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That username already exists.' });
     next(e);
@@ -998,7 +1026,7 @@ app.post('/api/users', requireRole('admin'), async (req, res, next) => {
 app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { role, password, account_owner } = req.body || {};
+    const { role, password, account_owner, convert_access } = req.body || {};
     if (role && !USER_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role.' });
     // Never leave the system with zero admins.
     if (role && role !== 'admin') {
@@ -1007,7 +1035,7 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
         return res.status(400).json({ error: 'Cannot change the role of the last admin.' });
       }
     }
-    const updated = await updateUser(id, { role, password, account_owner });
+    const updated = await updateUser(id, { role, password, account_owner, convert_access });
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(updated);
   } catch (e) { next(e); }
@@ -1030,7 +1058,7 @@ app.post('/api/impersonate/:id', requireRole('admin'), async (req, res, next) =>
   try {
     const target = await getUserById(Number(req.params.id));
     if (!target) return res.status(404).json({ error: 'User not found.' });
-    const safe = { id: target.id, username: target.username, role: target.role, account_owner: target.account_owner || null };
+    const safe = { id: target.id, username: target.username, role: target.role, account_owner: target.account_owner || null, convert_access: !!target.convert_access };
     res.json({ token: signToken({ ...safe, imp_by: req.user.username }), user: safe });
   } catch (e) { next(e); }
 });
@@ -1254,11 +1282,14 @@ app.post('/api/bookings/import-prior', requireRole('admin'), upload.single('file
 // ---- Export: download current data as .xlsx ----
 app.get('/api/export', async (req, res, next) => {
   try {
-    let bookings = await listRows('bookings');
+    const instance = reqInstance(req);
+    if (!(await canAccessInstance(req, instance))) return res.status(403).json({ error: 'No access to that instance.' });
+    let bookings = (await listRows('bookings')).filter((r) => (r.instance || 'multifamily') === instance);
     const { month, year } = req.query;
     if (month) bookings = bookings.filter((r) => r.booking_month === month);
     if (year) bookings = bookings.filter((r) => String(r.booking_year) === String(year));
-    const churn = await listRows('churn');
+    // Churn is Multifamily-only for now; a Convert export carries no churn.
+    const churn = instance === 'convert' ? [] : await listRows('churn');
     // "For Sales Commission" export drops the billing (blue) columns from both tabs.
     const opts = req.query.scope === 'commission'
       ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set(CHURN_BILLING_KEYS) }
