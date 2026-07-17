@@ -45,6 +45,8 @@ const state = {
   saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
+  convertQuarter: '',    // Convert dashboard: selected quarter (set to current/latest on first render)
+  convertDetailMonth: null, // Convert dashboard: month whose booking-detail table is open
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
   pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
   page: { bookings: 1, churn: 1 },
@@ -122,9 +124,9 @@ function canConvert() { return isAdmin() || !!(state.user && state.user.convert_
 // Are we currently viewing the Convert instance? Convert's Bookings diverge from Multifamily
 // (category-tagged rows, different columns, none of the churn/booking-type enhancements).
 function isConvert() { return state.instance === 'convert'; }
-// In the Convert instance, only the Bookings section exists for now. (The Multifamily New Booking
+// In the Convert instance, the Dashboard + Bookings sections exist. (The Multifamily New Booking
 // entry form is property/pilot-specific; Convert rows are added inline via "+ Add row".)
-const CONVERT_TABS = new Set(['bookings']);
+const CONVERT_TABS = new Set(['dashboard', 'bookings']);
 function tabAvailable(tab) { return state.instance === 'convert' ? CONVERT_TABS.has(tab) : true; }
 function isSalesRole() { return role() === 'sales_admin' || role() === 'sales'; }
 function canAddDelete() { return role() === 'admin' || role() === 'standard'; } // bookings/churn + imports
@@ -769,6 +771,8 @@ function onFilterChange() {
 function renderSummary() {
   const el = $('#summary');
   const tab = state.tab;
+  // Convert has its own Bookings dashboard (quarterly Total Bookings, clickable month tiles).
+  if (isConvert() && tab === 'dashboard') { renderConvertDashboard(el); return; }
   const rows = tab === 'churn' ? state.rows.churn : state.rows.bookings;
   const f = state.filters[tab];
   if (!f) { el.className = 'summary hidden'; el.innerHTML = ''; return; }
@@ -1079,6 +1083,93 @@ function renderSummary() {
   });
   applyChurnDetailWidths(); // re-apply any saved Churn Details column widths to the new tables
 }
+
+// ---- Convert instance: Bookings Dashboard ----
+// Quarterly view of Total Bookings (sum of Company Total Booking). One tile per month of the
+// selected quarter (a 3-month view) plus a quarter-total tile; a Quarter filter picks the quarter.
+// Clicking a month tile opens a detail table of that month's bookings.
+const CONVERT_QUARTER_MONTHS = { 1: [0, 1, 2], 2: [3, 4, 5], 3: [6, 7, 8], 4: [9, 10, 11] };
+function renderConvertDashboard(el) {
+  const rows = state.rows.bookings || [];
+  const bookingMY = (r) => ((r.booking_month && r.booking_year != null && r.booking_year !== '')
+    ? monthYearQuarter(`${r.booking_month} ${r.booking_year}`) : null);
+  // Quarters present in the data.
+  const qMap = new Map();
+  for (const r of rows) { const info = bookingMY(r); if (info) qMap.set(info.label, info); }
+  const quarters = [...qMap.values()].sort((a, b) => (a.year - b.year) || (a.q - b.q));
+  el.className = 'summary';
+  if (!quarters.length) {
+    el.innerHTML = '<div class="metrics-title">Total Bookings</div>'
+      + '<div class="metrics-row"><span class="muted">No bookings yet. Import the EDIT tab to get started.</span></div>';
+    return;
+  }
+  // Default the selected quarter to the current quarter if present, else the latest.
+  const labels = quarters.map((q) => q.label);
+  if (!labels.includes(state.convertQuarter)) {
+    state.convertQuarter = labels.includes(currentQuarterLabel()) ? currentQuarterLabel() : labels[labels.length - 1];
+  }
+  const sel = qMap.get(state.convertQuarter);
+  const monthIdxs = CONVERT_QUARTER_MONTHS[sel.q];
+  // Total Company Total Booking for a given month name in the selected quarter's year.
+  const totalFor = (mName) => rows.reduce((a, r) =>
+    (r.booking_month === mName && Number(r.booking_year) === sel.year ? a + (Number(r.company_total_booking) || 0) : a), 0);
+  const quarterTotal = monthIdxs.reduce((a, i) => a + totalFor(MONTHS[i]), 0);
+
+  // Close an open detail month that isn't in the selected quarter.
+  const monthLabels = monthIdxs.map((i) => `${MONTHS[i]} ${sel.year}`);
+  if (state.convertDetailMonth && !monthLabels.includes(state.convertDetailMonth)) state.convertDetailMonth = null;
+
+  const quarterSel = '<select id="convertQuarter" class="churn-quarter">'
+    + labels.map((q) => `<option${q === state.convertQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
+
+  let html = `<div class="metrics-title metrics-title-row"><span>Total Bookings</span>${quarterSel}</div>`;
+  html += `<div class="metrics-row">${metric(`${state.convertQuarter} total`, quarterTotal, true)}</div>`;
+  const tiles = monthIdxs.map((i) => {
+    const label = `${MONTHS[i]} ${sel.year}`;
+    const active = state.convertDetailMonth === label ? ' active' : '';
+    return `<div class="metric clickable${active}" data-convert-month="${escapeAttr(label)}">`
+      + `<span class="k">${MONTHS[i]}</span><span class="v">${fmtMoney(totalFor(MONTHS[i]))}</span></div>`;
+  }).join('');
+  html += `<div class="metrics-row">${tiles}</div>`;
+  if (state.convertDetailMonth) html += renderConvertMonthDetail(state.convertDetailMonth, sel.year);
+
+  el.innerHTML = html;
+
+  const qs = $('#convertQuarter');
+  if (qs) qs.onchange = (e) => { state.convertQuarter = e.target.value; state.convertDetailMonth = null; renderSummary(); };
+  el.querySelectorAll('[data-convert-month]').forEach((tile) => {
+    tile.onclick = () => {
+      const label = tile.dataset.convertMonth;
+      state.convertDetailMonth = state.convertDetailMonth === label ? null : label;
+      renderSummary();
+    };
+  });
+}
+
+// Detail table of the bookings that fall under a given month (Convert dashboard drill-down).
+function renderConvertMonthDetail(monthLabel, year) {
+  const mName = String(monthLabel).split(' ')[0];
+  const list = (state.rows.bookings || [])
+    .filter((r) => r.booking_month === mName && Number(r.booking_year) === year && (Number(r.company_total_booking) || 0) !== 0)
+    .sort((a, b) => (Number(b.company_total_booking) || 0) - (Number(a.company_total_booking) || 0));
+  const th = '<tr><th>Customer</th><th>Division</th><th>Channel</th><th>Product Type</th><th>Status</th>'
+    + '<th class="num">Company Total Booking</th><th class="num">MRR</th><th>Sage Customer ID</th></tr>';
+  const body = list.map((r) => '<tr>'
+    + `<td>${escapeHtml(r.customer_name ?? '')}</td>`
+    + `<td>${escapeHtml(r.division ?? '')}</td>`
+    + `<td>${escapeHtml(r.channel ?? '')}</td>`
+    + `<td>${escapeHtml(r.product_type ?? '')}</td>`
+    + `<td>${escapeHtml(r.status ?? '')}</td>`
+    + `<td class="num">${fmtMoney(r.company_total_booking)}</td>`
+    + `<td class="num">${fmtMoney(r.mrr)}</td>`
+    + `<td>${escapeHtml(r.sage_customer_id ?? '')}</td>`
+    + '</tr>').join('');
+  return `<div class="metrics-title">${escapeHtml(monthLabel)} — Bookings (${list.length})</div>`
+    + '<div class="churn-detail"><table><thead>' + th + '</thead><tbody>'
+    + (body || `<tr><td class="muted" colspan="8" style="padding:12px">No bookings for ${escapeHtml(monthLabel)}.</td></tr>`)
+    + '</tbody></table></div>';
+}
+
 function saveActiveFilters() { localStorage.setItem('perqActiveFilters', JSON.stringify(state.activeFilters)); }
 function metric(k, v, accent = false) {
   return `<div class="metric${accent ? ' accent' : ''}"><span class="k">${k}</span><span class="v">${fmtMoney(v)}</span></div>`;
@@ -1760,7 +1851,8 @@ function renderAll() {
   $('#legacyView').hidden = !isLegacy;
   $('#saasView').hidden = !isSaas;
   // View tools: filters where there's a summary; columns/zoom only where a grid shows.
-  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon || isLegacy || isSaas) ? 'none' : '';
+  const isConvertDash = isConvert() && state.tab === 'dashboard'; // Convert dashboard has no Multiple-Filters system
+  $('#toggleFilters').style.display = (isEntry || isSales || isBillingTab || isSfrecon || isLegacy || isSaas || isConvertDash) ? 'none' : '';
   $('#toggleFilters').textContent = state.filtersHidden ? 'Multiple Filters' : 'Hide Multiple Filters';
   $('#quickFilter').style.display = isGrid ? '' : 'none'; // quick search on Bookings/Churn only
   $('#zoomGroup').style.display = (isGrid || isSales) ? '' : 'none';
