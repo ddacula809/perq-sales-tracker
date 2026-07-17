@@ -71,6 +71,9 @@ const state = {
   pendingOffsets: [],  // per-line License Transfer offsets: array of {churnId, amount} per line
   notifications: [],   // billing notifications (e.g. GoLive changes)
   instance: localStorage.getItem('perqInstance') || 'multifamily', // active Revenue Desk instance
+  appVersion: null,       // deploy version this tab loaded with (set on first version check)
+  pendingVersion: null,   // a newer deploy version detected while open
+  updateDismissed: null,  // a newer version the user chose "Later" on (don't nag again)
 };
 
 const $ = (s) => document.querySelector(s);
@@ -85,6 +88,28 @@ const api = async (url, opts = {}) => {
 
 function escapeHtml(v) {
   return String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// ---------- New-version detection: prompt a refresh after a deploy ----------
+// The server's version token changes on every deploy; when the token we loaded with no longer
+// matches, a new build is live and this tab is running stale code.
+async function fetchVersion() {
+  try { const r = await fetch('/api/version', { cache: 'no-store' }); return r.ok ? ((await r.json()).version || null) : null; }
+  catch { return null; }
+}
+async function checkAppVersion() {
+  const v = await fetchVersion();
+  if (!v) return;
+  if (!state.appVersion) { state.appVersion = v; return; } // first check — establish the baseline
+  if (v !== state.appVersion && v !== state.updateDismissed) { state.pendingVersion = v; $('#updateModal').hidden = false; }
+}
+function wireUpdateCheck() {
+  $('#updateRefresh').onclick = () => { window.location.reload(); }; // reload revalidates index.html + app.js
+  $('#updateLater').onclick = () => { $('#updateModal').hidden = true; state.updateDismissed = state.pendingVersion; };
+  checkAppVersion(); // baseline
+  setInterval(checkAppVersion, 90000); // poll every 90s
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkAppVersion(); });
+  window.addEventListener('focus', checkAppVersion);
 }
 
 // ---------- Roles / permissions (UX mirror of server enforcement) ----------
@@ -5198,6 +5223,7 @@ function wireSaas() {
 async function boot() {
   wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireCloseMonth(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireChurnEntry(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
   applyZoom();
+  wireUpdateCheck();
   $('#returnAdminBtn').onclick = returnToAdmin;
   if (state.token) {
     try {

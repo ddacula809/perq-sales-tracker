@@ -35,6 +35,9 @@ async function notifyEmails() {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// A version token that changes on every deploy (Railway restarts the process): the git commit
+// SHA when available, else the boot timestamp. Clients poll it to detect a new deploy.
+const APP_VERSION = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RAILWAY_DEPLOYMENT_ID || String(Date.now());
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 
@@ -55,7 +58,7 @@ app.post('/api/login', async (req, res, next) => {
 
 // Every other /api route requires a valid token.
 app.use('/api', (req, res, next) => {
-  if (req.path === '/login' || req.path === '/health') return next();
+  if (req.path === '/login' || req.path === '/health' || req.path === '/version') return next();
   const header = req.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : (req.get('x-app-key') || '');
   const payload = verifyToken(token);
@@ -1345,6 +1348,8 @@ app.get('/api/health', async (_req, res) => {
   try { await pool.query('SELECT 1'); res.json({ ok: true }); }
   catch { res.status(500).json({ ok: false }); }
 });
+// Current deploy version — clients poll this and prompt a refresh when it changes.
+app.get('/api/version', (_req, res) => res.json({ version: APP_VERSION }));
 
 // ---- Static frontend (served explicitly so backend source files aren't exposed) ----
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));

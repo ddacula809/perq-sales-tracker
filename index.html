@@ -21,6 +21,18 @@
     <span>👁 Viewing as <strong id="impUser"></strong></span>
     <button type="button" id="returnAdminBtn">Return to admin</button>
   </div>
+
+  <!-- Shown when a new deploy is detected while the app is open. -->
+  <div class="modal" id="updateModal" hidden>
+    <div class="modal-card update-card">
+      <h2>🔄 A New Version is Available</h2>
+      <p>The Revenue Desk was just updated. Refresh to load the latest version.</p>
+      <div class="update-actions">
+        <button type="button" class="btn ghost" id="updateLater">Later</button>
+        <button type="button" class="btn solid" id="updateRefresh">Refresh now</button>
+      </div>
+    </div>
+  </div>
   <header class="topbar">
     <div class="brand">
       <button class="menu-btn" id="menuBtn" aria-label="Menu" title="Menu">☰</button>

@@ -36,6 +36,11 @@
 .instance-switcher[hidden] { display: none; }
 .user-convert { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; }
 .user-convert.muted { color: var(--ink-soft); }
+/* "New version available" modal */
+.update-card { max-width: 420px; text-align: center; }
+.update-card h2 { margin: 0 0 8px; }
+.update-card p { color: var(--ink-soft); margin: 0 0 16px; }
+.update-actions { display: flex; justify-content: center; gap: 10px; }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 /* Impersonation banner (admin "log in as") — a flex child at the top of the page. */
