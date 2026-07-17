@@ -277,6 +277,12 @@ export async function initDb() {
   await pool.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS instance TEXT NOT NULL DEFAULT 'multifamily'");
   // Per-user access to the Convert instance (admins always have access).
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS convert_access BOOLEAN NOT NULL DEFAULT false');
+  // Normalize Convert Division/Channel casing so variants collapse (auto/Auto -> Auto). initcap()
+  // capitalizes the first letter of each word and lowercases the rest, matching the importer.
+  await runOnce('convert_division_channel_case_v1', async () => {
+    await pool.query("UPDATE bookings SET division = initcap(division) WHERE COALESCE(instance,'multifamily')='convert' AND division IS NOT NULL AND division <> initcap(division)");
+    await pool.query("UPDATE bookings SET channel = initcap(channel) WHERE COALESCE(instance,'multifamily')='convert' AND channel IS NOT NULL AND channel <> initcap(channel)");
+  });
   await runOnce('offset_amount_backfill_v1', backfillOffsetAmount);
   await runOnce('booking_period_backfill_v1', backfillBookingPeriod);
   await runOnce('fix_lead_capture_typo_v1', fixLeadCaptureTypo);

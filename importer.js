@@ -447,6 +447,13 @@ function monthFromHeader(cell) {
   return { serial, month: CONVERT_MONTHS[dt.getUTCMonth()], year: dt.getUTCFullYear() };
 }
 
+// Title-case a categorical value so casing variants collapse to one (e.g. "auto"/"Auto" -> "Auto",
+// "home"/"Home" -> "Home"). Used for Division / Channel, which the source enters inconsistently.
+function titleCase(s) {
+  if (s == null || s === '') return s;
+  return String(s).replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
+
 // Opt-out expiration is free text ("never", "n/a") but sometimes a real date serial — render
 // serials as YYYY-MM-DD, keep everything else as text.
 function optOutText(v) {
@@ -509,8 +516,8 @@ export function parseConvertEdit(buffer) {
     const base = {
       category: 'MRR',
       status: CONVERT_STATUS[statusRaw] || null,
-      division: coerce(row[col.division], 'text'),
-      channel: coerce(row[col.channel], 'text'),
+      division: titleCase(coerce(row[col.division], 'text')), // normalize casing (auto/Auto -> Auto)
+      channel: titleCase(coerce(row[col.channel], 'text')),
       customer_name: name,
       location: null, // not present in the EDIT tab
       sage_customer_id: coerce(row[col.sage_customer_id], 'text'),
