@@ -33,6 +33,17 @@
       </div>
     </div>
   </div>
+  <!-- Full-screen overlay shown while switching Revenue Desk instances (data reload). -->
+  <div class="instance-loader" id="instanceLoader" hidden aria-hidden="true" role="status" aria-live="polite">
+    <div class="instance-loader-card">
+      <div class="il-spinner" aria-hidden="true"></div>
+      <div class="il-title">Switching to <span id="ilInstance"></span>…</div>
+      <div class="il-bar"><div class="il-fill" id="ilFill"></div></div>
+      <div class="il-pct" id="ilPct">0%</div>
+      <div class="il-sub">Loading data — please wait</div>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <button class="menu-btn" id="menuBtn" aria-label="Menu" title="Menu">☰</button>

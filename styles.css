@@ -27,6 +27,34 @@
   --accent-deep: #0b6d64;    /* Teal 800 */
   --accent-soft: #d6efec;    /* teal tint */
 }
+/* Full-screen loading overlay shown while switching instances (data reload). Themed by the
+   active instance's accent (data-instance is set to the target before the reload starts). */
+.instance-loader {
+  position: fixed; inset: 0; z-index: 3000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(14, 12, 18, 0.55); backdrop-filter: blur(3px);
+  animation: il-fade 0.15s ease;
+}
+.instance-loader[hidden] { display: none; }
+@keyframes il-fade { from { opacity: 0; } to { opacity: 1; } }
+.instance-loader-card {
+  width: min(90vw, 360px); background: var(--panel);
+  border: 1px solid var(--line-strong); border-radius: 16px;
+  padding: 30px 30px 26px; text-align: center; box-shadow: 0 24px 70px -20px rgba(0,0,0,.5);
+}
+.il-spinner {
+  width: 34px; height: 34px; margin: 0 auto 16px; border-radius: 50%;
+  border: 3px solid var(--accent-soft); border-top-color: var(--accent);
+  animation: il-spin 0.8s linear infinite;
+}
+@keyframes il-spin { to { transform: rotate(360deg); } }
+.il-title { font-weight: 600; font-size: 15px; color: var(--ink); margin-bottom: 16px; }
+.il-title span { color: var(--accent); font-weight: 700; }
+.il-bar { height: 10px; border-radius: 999px; background: var(--accent-soft); overflow: hidden; }
+.il-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width 0.2s ease; }
+.il-pct { margin-top: 12px; font-weight: 700; font-size: 22px; color: var(--accent-deep); font-variant-numeric: tabular-nums; }
+.il-sub { margin-top: 4px; font-size: 12px; color: var(--ink-soft); }
+
 /* Instance switcher in the header */
 .instance-switcher {
   align-self: center; margin-left: 14px; font: inherit; font-size: 13px; font-weight: 600;

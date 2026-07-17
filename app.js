@@ -1753,6 +1753,40 @@ function wireLegacy() {
 // ---------- Data ops ----------
 // Reflect the active instance on the root element so the theme (accent color) can switch via CSS.
 function applyInstanceTheme() { document.documentElement.dataset.instance = state.instance || 'multifamily'; }
+
+// ---- Instance-switch loading overlay (progress %) ----
+// Shown while switching instances so users see the data reload is in progress. The bar eases
+// toward 90% on a timer and jumps to 100% when loadAll finishes; a failsafe hides it if a load
+// stalls so the overlay can never get stuck.
+let _ilTimer = null;
+let _ilActive = false;
+function setInstanceLoaderProgress(pct) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  const fill = $('#ilFill'); if (fill) fill.style.width = `${p}%`;
+  const t = $('#ilPct'); if (t) t.textContent = `${p}%`;
+}
+function showInstanceLoader(instance) {
+  const el = $('#instanceLoader'); if (!el) return;
+  _ilActive = true;
+  const lbl = $('#ilInstance'); if (lbl) lbl.textContent = instance === 'convert' ? 'Convert' : 'Multifamily';
+  let pct = 0;
+  setInstanceLoaderProgress(0);
+  el.hidden = false; el.setAttribute('aria-hidden', 'false');
+  clearInterval(_ilTimer);
+  _ilTimer = setInterval(() => { pct += Math.max(0.6, (90 - pct) * 0.12); if (pct > 90) pct = 90; setInstanceLoaderProgress(pct); }, 100);
+  clearTimeout(el._failsafe);
+  el._failsafe = setTimeout(hideInstanceLoader, 20000); // never let it get stuck
+}
+function hideInstanceLoader() {
+  if (!_ilActive) return;
+  _ilActive = false;
+  clearInterval(_ilTimer);
+  const el = $('#instanceLoader'); if (!el) return;
+  clearTimeout(el._failsafe);
+  setInstanceLoaderProgress(100);
+  setTimeout(() => { el.hidden = true; el.setAttribute('aria-hidden', 'true'); }, 300); // let 100% flash
+}
+
 // Switch instances: persist, re-theme, and reload the (instance-scoped) data.
 function setInstance(instance, opts = {}) {
   const prev = state.instance;
@@ -1771,6 +1805,7 @@ function setInstance(instance, opts = {}) {
   applyInstanceTheme();
   if (opts.reload === false) return;
   if (!tabAvailable(state.tab)) state.tab = 'bookings';
+  if (prev !== state.instance) showInstanceLoader(state.instance); // only on a real switch
   loadAll();
 }
 
@@ -1790,6 +1825,7 @@ async function loadAll() {
     if (!tabAvailable(state.tab)) state.tab = 'bookings';
     renderAll();
     $('#status').textContent = `${state.rows.bookings.length} bookings`;
+    hideInstanceLoader();
     return;
   }
   state.rows.churn = await api('/api/churn');
@@ -1824,6 +1860,7 @@ async function loadAll() {
   renderAll();
   $('#status').textContent =
     `${state.rows.bookings.length} bookings · ${state.rows.churn.length} churn rows`;
+  hideInstanceLoader();
 }
 
 function renderAll() {
