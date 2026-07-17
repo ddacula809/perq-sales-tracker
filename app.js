@@ -1703,6 +1703,8 @@ function renderAll() {
   const mfOps = !inConvert; // available only in the Multifamily instance
   $('#importBtn').style.display = (canImport() && mfOps) ? '' : 'none';
   $('#priorBookingsBtn').hidden = !(canImport() && mfOps);
+  // Convert-only: import the "Retail SaaS Financials" EDIT tab into Convert bookings (admin).
+  $('#convertImportBtn').hidden = !(isAdmin() && inConvert);
   // In the More PERQs menu these are role-gated only (work from any tab).
   $('#churnUploadBtn').hidden = !(canAddDelete() && mfOps);
   $('#reconcileBtn').hidden = !(canAddDelete() && mfOps);
@@ -1980,6 +1982,27 @@ function wireActions() {
       const data = await res.json();
       await loadAll();
       toast(`Imported ${data.imported.bookings} bookings, ${data.imported.churn} churn rows`);
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+
+  // Convert instance: import the EDIT tab into Convert bookings (replaces all Convert bookings).
+  $('#convertImportFile').onchange = async (e) => {
+    $('#moreMenu').hidden = true;
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('Import the EDIT tab? This REPLACES all current Convert bookings.')) { e.target.value = ''; return; }
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Importing EDIT tab…');
+      const headers = { 'x-instance': state.instance || 'multifamily', ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) };
+      const res = await fetch('/api/bookings/import-edit', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Import failed');
+      const data = await res.json();
+      state.rows.bookings = await api('/api/bookings');
+      renderAll();
+      toast(`Imported ${data.imported} bookings from ${data.customers} customers`);
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };

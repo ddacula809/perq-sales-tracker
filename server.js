@@ -13,7 +13,7 @@ import {
   listClosedMonths, closeMonth, reopenMonth,
 } from './db.js';
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear, monthYear } from './compute.js';
-import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings } from './importer.js';
+import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings, parseConvertEdit } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
@@ -1288,6 +1288,28 @@ app.post('/api/bookings/import-prior', requireRole('admin'), upload.single('file
     }
     if (added) await reconcileOwnerNames(); // bring Sales Rep names in line with Salesforce Recon
     res.json({ added, skipped, filledIds, total: rows.length });
+  } catch (e) { next(e); }
+});
+
+// Convert instance: import the "Retail SaaS Financials" EDIT tab into Convert bookings.
+// One booking per populated W..ES month cell (Booking Month/Year from the column header,
+// MRR = the cell value). Replaces ALL Convert bookings (full reseed) — Multifamily is untouched.
+app.post('/api/bookings/import-edit', requireRole('admin'), upload.single('file'), async (req, res, next) => {
+  try {
+    const instance = reqInstance(req);
+    if (instance !== 'convert') return res.status(400).json({ error: 'The EDIT import is only for the Convert instance.' });
+    if (!(await canAccessInstance(req, instance))) return res.status(403).json({ error: 'No access to that instance.' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const { rows, customers } = parseConvertEdit(req.file.buffer);
+    // Full reseed of Convert bookings only (never touch Multifamily rows).
+    await pool.query("DELETE FROM bookings WHERE COALESCE(instance, 'multifamily') = 'convert'");
+    let imported = 0;
+    for (const r of rows) {
+      const row = await insertRow('bookings', r);
+      await pool.query('UPDATE bookings SET instance = $1 WHERE id = $2', ['convert', row.id]);
+      imported += 1;
+    }
+    res.json({ imported, customers });
   } catch (e) { next(e); }
 });
 

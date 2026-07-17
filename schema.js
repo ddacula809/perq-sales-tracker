@@ -115,24 +115,34 @@ export const CHURN_SHEET = 'Churn Tracker';
 // `sales_rep` and `mrr` reuse the existing Multifamily columns (same meaning). `excel` is the
 // 0-based column position used by the Convert export sheet.
 export const CONVERT_BOOKING_CATEGORIES = ['MRR', 'Spend + Billable', 'One Time Fees'];
+// Customer status (from the EDIT tab's column A flag: a / n / c).
+export const CONVERT_STATUS_OPTIONS = ['', 'Active', 'Never went live', 'Churned'];
+// Full month names, matching the Multifamily Booking Month options.
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export const CONVERT_BOOKING_FIELDS = [
   { key: 'category',             label: 'Category',             excel: 0,  type: 'select', options: CONVERT_BOOKING_CATEGORIES },
+  // A booking "falls under" a Booking Month + Year (like Multifamily). On import these come from
+  // the month-column header the booking's value sat under in the EDIT tab.
+  { key: 'booking_month',        label: 'Booking Month',        excel: 1,  type: 'select', options: MONTH_NAMES },
+  { key: 'booking_year',         label: 'Booking Year',         excel: 2,  type: 'number' },
+  { key: 'status',               label: 'Status',               excel: 3,  type: 'select', options: CONVERT_STATUS_OPTIONS },
   // --- MRR category fields ---
-  { key: 'division',             label: 'Division',             excel: 1,  type: 'text' },
-  { key: 'channel',              label: 'Channel',              excel: 2,  type: 'text' },
-  { key: 'customer_name',        label: 'Customer Name',        excel: 3,  type: 'text' },
-  { key: 'location',             label: 'Location',             excel: 4,  type: 'text' }, // new field (not in the source sheet)
-  { key: 'contract_signed_date', label: 'Contract Signed Date', excel: 5,  type: 'date' },
-  { key: 'term_length',          label: 'Term Length',          excel: 6,  type: 'text' }, // e.g. "Month-to-Month" or a number of months
-  { key: 'sales_rep',            label: 'Sales Rep',            excel: 7,  type: 'text' }, // reuses the shared `sales_rep` column
-  { key: 'product_type',         label: 'Product Type',         excel: 8,  type: 'text' },
-  { key: 'term_start_date',      label: 'Term Start Date',      excel: 9,  type: 'date' },
-  { key: 'opt_out_period',       label: 'Opt Out Period',       excel: 10, type: 'text' },
-  { key: 'opt_out_expiration',   label: 'Opt Out Expiration',   excel: 11, type: 'text' }, // e.g. "never"
-  { key: 'term_end_date',        label: 'Term End Date',        excel: 12, type: 'date' },
-  { key: 'implementation_fee',   label: 'Implementation Fee',   excel: 13, type: 'number' },
-  { key: 'mrr',                  label: 'MRR',                  excel: 14, type: 'number' }, // reuses the shared `mrr` column
+  { key: 'division',             label: 'Division',             excel: 4,  type: 'text' },
+  { key: 'channel',              label: 'Channel',              excel: 5,  type: 'text' },
+  { key: 'customer_name',        label: 'Customer Name',        excel: 6,  type: 'text' },
+  { key: 'location',             label: 'Location',             excel: 7,  type: 'text' }, // new field (not in the source sheet)
+  { key: 'sage_customer_id',     label: 'Sage Customer ID',     excel: 8,  type: 'text' },
+  { key: 'contract_signed_date', label: 'Contract Signed Date', excel: 9,  type: 'date' },
+  { key: 'term_length',          label: 'Term Length',          excel: 10, type: 'text' }, // e.g. "Month-to-Month" or a number of months
+  { key: 'sales_rep',            label: 'Sales Rep',            excel: 11, type: 'text' }, // reuses the shared `sales_rep` column
+  { key: 'product_type',         label: 'Product Type',         excel: 12, type: 'text' },
+  { key: 'term_start_date',      label: 'Term Start Date',      excel: 13, type: 'date' },
+  { key: 'opt_out_period',       label: 'Opt Out Period',       excel: 14, type: 'text' },
+  { key: 'opt_out_expiration',   label: 'Opt Out Expiration',   excel: 15, type: 'text' }, // e.g. "never"
+  { key: 'term_end_date',        label: 'Term End Date',        excel: 16, type: 'date' },
+  { key: 'implementation_fee',   label: 'Implementation Fee',   excel: 17, type: 'number' },
+  { key: 'mrr',                  label: 'MRR',                  excel: 18, type: 'number' }, // reuses the shared `mrr` column
 ];
 
 // No computed columns for Convert bookings yet (all fields are manual for now).

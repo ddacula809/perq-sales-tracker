@@ -425,6 +425,117 @@ export function parseLegacyTracker(buffer) {
   return { golives, churn: [...sw, ...ppc] };
 }
 
+// ---- Convert instance: the "Retail SaaS Financials" EDIT tab ----
+// Each row is a customer. Columns W..ES form a sparse month matrix: a value under a month's
+// header is a booking that "falls under" that Booking Month/Year, with MRR = the cell value.
+// The identity columns (Division, Channel, Customer Name, Sales Rep, Product Type, dates, opt-out,
+// Implementation Fee, Sage Customer ID) are shared across that customer's bookings. Column A holds
+// the status flag (a=Active, n=Never went live, c=Churned). One booking is produced per populated
+// month cell (so a customer with an upsell in a later month yields multiple bookings).
+const CONVERT_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const CONVERT_STATUS = { a: 'Active', n: 'Never went live', c: 'Churned' };
+
+// Read a header cell as a month {serial, month name, year}, or null if it isn't a date. Cells may
+// arrive as JS Dates (cellDates) or Excel date serials.
+function monthFromHeader(cell) {
+  let serial = null;
+  let dt = null;
+  if (cell instanceof Date) { dt = cell; serial = Math.round(cell.getTime() / 86400000) + 25569; }
+  else if (typeof cell === 'number' && cell >= 40000 && cell <= 60000) { serial = cell; dt = new Date(Math.round((cell - 25569) * 86400000)); }
+  else return null;
+  if (!dt || isNaN(dt)) return null;
+  return { serial, month: CONVERT_MONTHS[dt.getUTCMonth()], year: dt.getUTCFullYear() };
+}
+
+// Opt-out expiration is free text ("never", "n/a") but sometimes a real date serial — render
+// serials as YYYY-MM-DD, keep everything else as text.
+function optOutText(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) return coerceExcelDate(v);
+  if (typeof v === 'number' && v >= 40000 && v <= 60000) return coerceExcelDate(v);
+  return String(v).trim();
+}
+
+export function parseConvertEdit(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const ws = wb.Sheets['EDIT'];
+  if (!ws) throw new Error('The uploaded file has no "EDIT" sheet.');
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+  if (aoa.length < 2) throw new Error('The EDIT sheet has no data rows.');
+  const header = aoa[0] || [];
+
+  // Identity columns: locate by header label, falling back to the known EDIT position (0-based).
+  const find = (label, fallback) => {
+    const i = header.findIndex((h) => normHeader(h) === normHeader(label));
+    return i >= 0 ? i : fallback;
+  };
+  const col = {
+    status: 0, // column A (header "F"): a / n / c
+    division: find('Division', 1),
+    channel: find('Channel', 2),
+    customer_name: find('Customer Name', 4),
+    contract_signed: find('Contract Signed', 6),
+    term_length: find('Term Length', 7),
+    sales_rep: find('Sales Rep', 8),
+    product_type: find('Product Type', 12),
+    opt_out_period: find('Opt Out Period', 16),
+    opt_out_expiration: find('Opt Out Expiration', 17),
+    term_end_date: find('Term End Date', 18),
+    implementation_fee: find('Implementation Fee', 19),
+    sage_customer_id: find('Sage Customer ID', 316),
+  };
+
+  // The month block (W..ES) is the ascending run of date-headed columns. The sheet has a SECOND
+  // month block after ES that restarts at an earlier month — stop as soon as the month goes down.
+  const monthCols = [];
+  let lastSerial = 0;
+  for (let i = 0; i < header.length; i++) {
+    const m = monthFromHeader(header[i]);
+    if (!m) continue;
+    if (monthCols.length && m.serial <= lastSerial) break; // second block started
+    monthCols.push({ index: i, month: m.month, year: m.year });
+    lastSerial = m.serial;
+  }
+  if (!monthCols.length) throw new Error('Could not find the monthly booking columns (W..ES) in the EDIT sheet.');
+
+  const out = [];
+  let customers = 0;
+  for (let r = 1; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    const name = coerce(row[col.customer_name], 'text');
+    if (!name) continue; // skip spacer / footer rows
+    const statusRaw = String(row[col.status] == null ? '' : row[col.status]).trim().toLowerCase();
+    const base = {
+      category: 'MRR',
+      status: CONVERT_STATUS[statusRaw] || null,
+      division: coerce(row[col.division], 'text'),
+      channel: coerce(row[col.channel], 'text'),
+      customer_name: name,
+      location: null, // not present in the EDIT tab
+      sage_customer_id: coerce(row[col.sage_customer_id], 'text'),
+      contract_signed_date: coerceExcelDate(row[col.contract_signed]),
+      term_length: coerce(row[col.term_length], 'text'),
+      sales_rep: coerce(row[col.sales_rep], 'text'),
+      product_type: coerce(row[col.product_type], 'text'),
+      term_start_date: null, // no clean source column in the EDIT tab
+      opt_out_period: coerce(row[col.opt_out_period], 'text'),
+      opt_out_expiration: optOutText(row[col.opt_out_expiration]),
+      term_end_date: coerceExcelDate(row[col.term_end_date]),
+      implementation_fee: coerce(row[col.implementation_fee], 'number'),
+    };
+    let produced = 0;
+    for (const mc of monthCols) {
+      const mrr = coerce(row[mc.index], 'number');
+      if (mrr === null || mrr === 0) continue; // only populated month cells are bookings
+      out.push({ ...base, booking_month: mc.month, booking_year: mc.year, mrr });
+      produced += 1;
+    }
+    if (produced) customers += 1;
+  }
+  if (!out.length) throw new Error('No bookings found — the W..ES month columns had no values.');
+  return { rows: out, customers };
+}
+
 export function parseWorkbook(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const result = { bookings: [], churn: [] };
