@@ -45,7 +45,8 @@ const state = {
   saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
-  convertQuarter: '',    // Convert dashboard: selected quarter (set to current/latest on first render)
+  convertYear: null,     // Convert dashboard: selected year (defaults to current/most-recent with data)
+  convertQuarter: '',    // Convert dashboard: selected quarter tile (defaults to current/most-recent)
   convertDetailMonth: null, // Convert dashboard: month whose booking-detail table is open
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
   pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
@@ -1085,58 +1086,81 @@ function renderSummary() {
 }
 
 // ---- Convert instance: Bookings Dashboard ----
-// Quarterly view of Total Bookings (sum of Company Total Booking). One tile per month of the
-// selected quarter (a 3-month view) plus a quarter-total tile; a Quarter filter picks the quarter.
-// Clicking a month tile opens a detail table of that month's bookings.
+// Total Bookings (sum of Company Total Booking), viewed by quarter. A year's quarters show as
+// clickable tiles; clicking one reveals that quarter's three month tiles. Defaults to the current
+// year + current quarter (else the most recent quarter with data). Clicking a month tile opens a
+// detail table of that month's bookings.
 const CONVERT_QUARTER_MONTHS = { 1: [0, 1, 2], 2: [3, 4, 5], 3: [6, 7, 8], 4: [9, 10, 11] };
 function renderConvertDashboard(el) {
   const rows = state.rows.bookings || [];
   const bookingMY = (r) => ((r.booking_month && r.booking_year != null && r.booking_year !== '')
     ? monthYearQuarter(`${r.booking_month} ${r.booking_year}`) : null);
-  // Quarters present in the data.
-  const qMap = new Map();
-  for (const r of rows) { const info = bookingMY(r); if (info) qMap.set(info.label, info); }
-  const quarters = [...qMap.values()].sort((a, b) => (a.year - b.year) || (a.q - b.q));
+  // Quarters + years present in the data.
+  const qMap = new Map(); // label -> {q, year, label}
+  const yearsSet = new Set();
+  for (const r of rows) { const info = bookingMY(r); if (info) { qMap.set(info.label, info); yearsSet.add(info.year); } }
   el.className = 'summary';
-  if (!quarters.length) {
+  if (!qMap.size) {
     el.innerHTML = '<div class="metrics-title">Total Bookings</div>'
       + '<div class="metrics-row"><span class="muted">No bookings yet. Import the EDIT tab to get started.</span></div>';
     return;
   }
-  // Default the selected quarter to the current quarter if present, else the latest.
-  const labels = quarters.map((q) => q.label);
-  if (!labels.includes(state.convertQuarter)) {
-    state.convertQuarter = labels.includes(currentQuarterLabel()) ? currentQuarterLabel() : labels[labels.length - 1];
+  const years = [...yearsSet].sort((a, b) => a - b);
+  // Default year: the current year if it has data, else the most recent year with data.
+  if (!years.includes(state.convertYear)) {
+    const curYear = new Date().getFullYear();
+    state.convertYear = years.includes(curYear) ? curYear : years[years.length - 1];
+  }
+  // The selected year's quarters that have data, ascending (Q1 → Q4).
+  const yearQuarters = [...qMap.values()].filter((x) => x.year === state.convertYear).sort((a, b) => a.q - b.q);
+  const availLabels = yearQuarters.map((x) => x.label);
+  // Default quarter: the current quarter if it's in this year's data, else the most recent one.
+  if (!availLabels.includes(state.convertQuarter)) {
+    const cur = currentQuarterLabel();
+    state.convertQuarter = availLabels.includes(cur) ? cur : availLabels[availLabels.length - 1];
   }
   const sel = qMap.get(state.convertQuarter);
-  const monthIdxs = CONVERT_QUARTER_MONTHS[sel.q];
-  // Total Company Total Booking for a given month name in the selected quarter's year.
-  const totalFor = (mName) => rows.reduce((a, r) =>
-    (r.booking_month === mName && Number(r.booking_year) === sel.year ? a + (Number(r.company_total_booking) || 0) : a), 0);
-  const quarterTotal = monthIdxs.reduce((a, i) => a + totalFor(MONTHS[i]), 0);
 
-  // Close an open detail month that isn't in the selected quarter.
+  const totalForMonth = (mName, yr) => rows.reduce((a, r) =>
+    (r.booking_month === mName && Number(r.booking_year) === yr ? a + (Number(r.company_total_booking) || 0) : a), 0);
+  const totalForQuarter = (qi) => CONVERT_QUARTER_MONTHS[qi.q].reduce((a, i) => a + totalForMonth(MONTHS[i], qi.year), 0);
+
+  // Year selector (only when more than one year has data), next to the title.
+  const yearSel = years.length > 1
+    ? '<select id="convertYear" class="churn-quarter">'
+      + years.slice().reverse().map((y) => `<option${y === state.convertYear ? ' selected' : ''}>${y}</option>`).join('') + '</select>'
+    : '';
+
+  let html = `<div class="metrics-title metrics-title-row"><span>Total Bookings</span>${yearSel}</div>`;
+  // Quarter tiles (clickable) for the selected year — the selected one is highlighted.
+  const qTiles = yearQuarters.map((x) => {
+    const active = x.label === state.convertQuarter ? ' active' : '';
+    return `<div class="metric accent clickable${active}" data-convert-quarter="${escapeAttr(x.label)}">`
+      + `<span class="k">${x.label}</span><span class="v">${fmtMoney(totalForQuarter(x))}</span></div>`;
+  }).join('');
+  html += `<div class="metrics-row">${qTiles}</div>`;
+
+  // Month tiles for the selected quarter (always shown).
+  const monthIdxs = CONVERT_QUARTER_MONTHS[sel.q];
   const monthLabels = monthIdxs.map((i) => `${MONTHS[i]} ${sel.year}`);
   if (state.convertDetailMonth && !monthLabels.includes(state.convertDetailMonth)) state.convertDetailMonth = null;
-
-  const quarterSel = '<select id="convertQuarter" class="churn-quarter">'
-    + labels.map((q) => `<option${q === state.convertQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
-
-  let html = `<div class="metrics-title metrics-title-row"><span>Total Bookings</span>${quarterSel}</div>`;
-  html += `<div class="metrics-row">${metric(`${state.convertQuarter} total`, quarterTotal, true)}</div>`;
-  const tiles = monthIdxs.map((i) => {
+  const mTiles = monthIdxs.map((i) => {
     const label = `${MONTHS[i]} ${sel.year}`;
     const active = state.convertDetailMonth === label ? ' active' : '';
     return `<div class="metric clickable${active}" data-convert-month="${escapeAttr(label)}">`
-      + `<span class="k">${MONTHS[i]}</span><span class="v">${fmtMoney(totalFor(MONTHS[i]))}</span></div>`;
+      + `<span class="k">${MONTHS[i]}</span><span class="v">${fmtMoney(totalForMonth(MONTHS[i], sel.year))}</span></div>`;
   }).join('');
-  html += `<div class="metrics-row">${tiles}</div>`;
+  html += `<div class="metrics-subtitle">${escapeHtml(state.convertQuarter)} — by month</div>`;
+  html += `<div class="metrics-row">${mTiles}</div>`;
   if (state.convertDetailMonth) html += renderConvertMonthDetail(state.convertDetailMonth, sel.year);
 
   el.innerHTML = html;
 
-  const qs = $('#convertQuarter');
-  if (qs) qs.onchange = (e) => { state.convertQuarter = e.target.value; state.convertDetailMonth = null; renderSummary(); };
+  const ys = $('#convertYear');
+  if (ys) ys.onchange = (e) => { state.convertYear = Number(e.target.value); state.convertQuarter = ''; state.convertDetailMonth = null; renderSummary(); };
+  el.querySelectorAll('[data-convert-quarter]').forEach((tile) => {
+    tile.onclick = () => { state.convertQuarter = tile.dataset.convertQuarter; state.convertDetailMonth = null; renderSummary(); };
+  });
   el.querySelectorAll('[data-convert-month]').forEach((tile) => {
     tile.onclick = () => {
       const label = tile.dataset.convertMonth;
