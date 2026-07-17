@@ -810,8 +810,8 @@ function renderSummary() {
     cols.unshift({ key: 'added_recent', label: 'Added', type: 'text' });
   }
   // Bookings + Dashboard: a synthetic "Quarter" filter (Q1 2026, Q2 2026, …) derived from
-  // Booking Month/Year.
-  if ((tab === 'bookings' || tab === 'dashboard') && mfSynthetic) {
+  // Booking Month/Year. Convert Bookings also carry Booking Month/Year, so offer it there too.
+  if (((tab === 'bookings' || tab === 'dashboard') && mfSynthetic) || (tab === 'bookings' && isConvert())) {
     cols.unshift({ key: 'booking_quarter', label: 'Quarter', type: 'text' });
   }
   // Bookings + Churn: a synthetic "Main Category" filter — Professional Services (Digital
@@ -877,7 +877,7 @@ function renderSummary() {
   };
   if (tab === 'churn' && !state.activeFilters.churn) state.activeFilters.churn = ['churn_quarter'];
   if (tab === 'bookings' && !state.activeFilters.bookings) {
-    state.activeFilters.bookings = isConvert() ? ['category'] : ['booking_quarter'];
+    state.activeFilters.bookings = isConvert() ? ['booking_quarter', 'category'] : ['booking_quarter'];
   }
   const adjustable = tab === 'bookings' || tab === 'churn';
   const lockRep = isSales() && salesOwner();
