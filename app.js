@@ -69,6 +69,7 @@ const state = {
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
   bdAction: null,     // active "For Immediate Action" drill-down: 'golive' | 'churn'
   bdMonth: 'All',     // Billing Dashboard Booking Month/Year filter
+  bdArMonth: 'All',   // Billing Dashboard AR Final Invoice Month filter (churn tiles)
   bdFilters: {},      // Billing Dashboard drill-down column filters { colKey: value }
   aiHistory: [],      // "Ask Claude" conversation [{role, content}]
   aiBusy: false,      // a chat request is in flight
@@ -1353,6 +1354,18 @@ function renderBillingDashboard() {
   const live = (r) => !!r.golive_date;
   const noSage = (r) => !String(r.sage_id || '').trim();
 
+  // AR Final Invoice (from the Churn Tracker): churn rows that have an AR final invoice, split by
+  // whether the billing "Completed" column is filled. Has its own Final Invoice Month filter.
+  const arHas = (c) => String(c.final_invoice_month || '').trim() !== '' && c.ar_final_invoice_amount != null;
+  const arMonthOptions = ['All', ...sortMonthYear([...new Set((state.rows.churn || []).filter(arHas).map((c) => String(c.final_invoice_month).trim()))])];
+  if (!arMonthOptions.includes(state.bdArMonth)) state.bdArMonth = 'All';
+  const arRows = (state.rows.churn || []).filter(arHas)
+    .filter((c) => state.bdArMonth === 'All' || String(c.final_invoice_month).trim() === state.bdArMonth);
+  const arDone = (c) => String(c.completed || '').trim() !== '';
+  const arNotList = arRows.filter((c) => !arDone(c));
+  const arDoneList = arRows.filter(arDone);
+  const arSum = (list) => list.reduce((a, c) => a + (Number(c.ar_final_invoice_amount) || 0), 0);
+
   const BD_PREDS = {
     implFee: { label: 'Properties with Implementation Fees', pred: hasImplFee },
     implBilled: { label: 'Implementation Fees — Billed (Completed)', pred: (r) => hasImplFee(r) && implCompleted(r) },
@@ -1397,6 +1410,15 @@ function renderBillingDashboard() {
     + '</div>'
     + '<div class="metrics-title">Data Quality</div><div class="metrics-row">'
     + card('Properties without Sage ID', String(distinctProps(noSage)), 'noSage', true)
+    + '</div>'
+    + `<div class="metrics-title metrics-title-row"><span>AR Final Invoice (Churn)</span>`
+    + '<select id="bdArMonth" class="churn-quarter">'
+    + arMonthOptions.map((o) => `<option${o === state.bdArMonth ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')
+    + '</select></div><div class="metrics-row">'
+    + card('Not Completed', String(arNotList.length), 'arNotCompleted', true)
+    + card('Not Completed AR', fmtMoney(arSum(arNotList)), 'arNotCompleted')
+    + card('Completed', String(arDoneList.length), 'arCompleted')
+    + card('Completed AR', fmtMoney(arSum(arDoneList)), 'arCompleted')
     + '</div>';
 
   // Drill-down: editable detail table for the selected tile (edits write back to bookings).
@@ -1416,10 +1438,39 @@ function renderBillingDashboard() {
       + '<div class="bd-detail"><table><thead><tr>' + headRow + '</tr></thead><tbody>'
       + (bodyRows || `<tr><td class="muted" colspan="${defs.length || 1}" style="padding:12px">No matching properties.</td></tr>`)
       + '</tbody></table></div>';
+  } else if (state.bdDetail === 'arNotCompleted' || state.bdDetail === 'arCompleted') {
+    html += renderArDrillDown(state.bdDetail === 'arCompleted' ? arDoneList : arNotList, state.bdDetail);
   }
   $('#billingInner').classList.toggle('bd-collapsed', state.bdCollapsed);
   $('#billingInner').innerHTML = html;
   applyBillingDetailWidths(); // re-apply any saved drill-down column widths
+}
+
+// Drill-down for the AR Final Invoice tiles: churn rows with Property / Product / MRR / AR month
+// + amount (read-only) and an editable Completed column (saves to churn via the billing handler).
+function renderArDrillDown(list, key) {
+  const label = key === 'arCompleted' ? 'AR Final Invoice — Completed' : 'AR Final Invoice — Not Completed';
+  const completedDef = state.schema.churn.editable.find((f) => f.key === 'completed');
+  const head = ['Property', 'Product', 'MRR', 'AR Final Invoice Month', 'AR Final Invoice Amt', 'Completed']
+    .map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+  const body = list.slice()
+    .sort((a, b) => String(a.property || a.pmc_buying_center || '').localeCompare(String(b.property || b.pmc_buying_center || '')))
+    .map((c) => {
+      const completedCell = (completedDef && churnCanEdit('completed')) ? editCell(completedDef, c) : readonlyCell(completedDef || { key: 'completed', type: 'text' }, c);
+      return `<tr data-id="${c.id}">`
+        + `<td class="ro">${escapeHtml(c.property || c.pmc_buying_center || '—')}</td>`
+        + `<td class="ro">${escapeHtml(c.product || '—')}</td>`
+        + `<td class="ro num">${fmtMoney(c.mrr)}</td>`
+        + `<td class="ro">${escapeHtml(c.final_invoice_month || '—')}</td>`
+        + `<td class="ro num">${fmtMoney(c.ar_final_invoice_amount)}</td>`
+        + completedCell
+        + '</tr>';
+    }).join('');
+  const total = list.reduce((a, c) => a + (Number(c.ar_final_invoice_amount) || 0), 0);
+  return `<div class="metrics-title">${escapeHtml(label)} (${list.length}) — ${fmtMoney(total)}</div>`
+    + '<div class="bd-detail" data-action-tab="churn"><table><thead><tr>' + head + '</tr></thead><tbody>'
+    + (body || '<tr><td class="muted" colspan="6" style="padding:12px">No matching churn rows.</td></tr>')
+    + '</tbody></table></div>';
 }
 
 // Does a row pass the Billing Dashboard drill-down filters?
@@ -1542,6 +1593,7 @@ function wireBilling() {
   // Edit a cell in the drill-down -> save to bookings and refresh.
   $('#billingInner').addEventListener('change', async (e) => {
     if (e.target.id === 'bdMonth') { state.bdMonth = e.target.value; renderBillingDashboard(); return; }
+    if (e.target.id === 'bdArMonth') { state.bdArMonth = e.target.value; renderBillingDashboard(); return; }
     // Drill-down multi-filter controls.
     if (e.target.id === 'bdAddFilter') { const k = e.target.value; if (k) state.bdFilters[k] = 'All'; renderBillingDashboard(); return; }
     const bf = e.target.closest('[data-bd-filter]');
