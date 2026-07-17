@@ -48,6 +48,7 @@ const state = {
   convertYear: null,     // Convert dashboard: selected year (defaults to current/most-recent with data)
   convertQuarter: '',    // Convert dashboard: selected quarter tile (defaults to current/most-recent)
   convertDetailMonth: null, // Convert dashboard: month whose booking-detail table is open
+  convertDivision: 'All', // Convert dashboard: Division filter
   reconcile: { uploaded: [], result: null }, // bookings reconciliation upload + diff
   pageSize: localStorage.getItem('perqPageSize') || '100', // rows per page ('all' = no paging)
   page: { bookings: 1, churn: 1 },
@@ -1092,17 +1093,32 @@ function renderSummary() {
 // detail table of that month's bookings.
 const CONVERT_QUARTER_MONTHS = { 1: [0, 1, 2], 2: [3, 4, 5], 3: [6, 7, 8], 4: [9, 10, 11] };
 function renderConvertDashboard(el) {
-  const rows = state.rows.bookings || [];
+  const allRows = state.rows.bookings || [];
   const bookingMY = (r) => ((r.booking_month && r.booking_year != null && r.booking_year !== '')
     ? monthYearQuarter(`${r.booking_month} ${r.booking_year}`) : null);
-  // Quarters + years present in the data.
+  // Division filter — options come from ALL bookings (so the list stays complete when a division
+  // is selected); the tiles/detail below use the division-filtered set.
+  const divisions = [...new Set(allRows.map((r) => String(r.division ?? '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  if (state.convertDivision !== 'All' && !divisions.includes(state.convertDivision)) state.convertDivision = 'All';
+  const rows = state.convertDivision === 'All'
+    ? allRows
+    : allRows.filter((r) => String(r.division ?? '').trim() === state.convertDivision);
+  const divSel = '<select id="convertDivision" class="churn-quarter">'
+    + ['All', ...divisions].map((d) => `<option${d === state.convertDivision ? ' selected' : ''}>${escapeHtml(d)}</option>`).join('') + '</select>';
+  // Quarters + years present in the (division-filtered) data.
   const qMap = new Map(); // label -> {q, year, label}
   const yearsSet = new Set();
   for (const r of rows) { const info = bookingMY(r); if (info) { qMap.set(info.label, info); yearsSet.add(info.year); } }
   el.className = 'summary';
   if (!qMap.size) {
-    el.innerHTML = '<div class="metrics-title">Total Bookings</div>'
-      + '<div class="metrics-row"><span class="muted">No bookings yet. Import the EDIT tab to get started.</span></div>';
+    const msg = state.convertDivision === 'All'
+      ? 'No bookings yet. Import the EDIT tab to get started.'
+      : `No bookings for ${escapeHtml(state.convertDivision)}.`;
+    el.innerHTML = `<div class="metrics-title metrics-title-row"><span>Total Bookings</span><label class="churn-filter-lbl">Division ${divSel}</label></div>`
+      + `<div class="metrics-row"><span class="muted">${msg}</span></div>`;
+    const d0 = $('#convertDivision');
+    if (d0) d0.onchange = (e) => { state.convertDivision = e.target.value; state.convertDetailMonth = null; renderSummary(); };
     return;
   }
   const years = [...yearsSet].sort((a, b) => a - b);
@@ -1131,7 +1147,7 @@ function renderConvertDashboard(el) {
       + years.slice().reverse().map((y) => `<option${y === state.convertYear ? ' selected' : ''}>${y}</option>`).join('') + '</select>'
     : '';
 
-  let html = `<div class="metrics-title metrics-title-row"><span>Total Bookings</span>${yearSel}</div>`;
+  let html = `<div class="metrics-title metrics-title-row"><span>Total Bookings</span><label class="churn-filter-lbl">Division ${divSel}</label>${yearSel}</div>`;
   // Quarter tiles (clickable) for the selected year — the selected one is highlighted.
   const qTiles = yearQuarters.map((x) => {
     const active = x.label === state.convertQuarter ? ' active' : '';
@@ -1156,6 +1172,8 @@ function renderConvertDashboard(el) {
 
   el.innerHTML = html;
 
+  const ds = $('#convertDivision');
+  if (ds) ds.onchange = (e) => { state.convertDivision = e.target.value; state.convertDetailMonth = null; renderSummary(); };
   const ys = $('#convertYear');
   if (ys) ys.onchange = (e) => { state.convertYear = Number(e.target.value); state.convertQuarter = ''; state.convertDetailMonth = null; renderSummary(); };
   el.querySelectorAll('[data-convert-quarter]').forEach((tile) => {
@@ -1173,8 +1191,10 @@ function renderConvertDashboard(el) {
 // Detail table of the bookings that fall under a given month (Convert dashboard drill-down).
 function renderConvertMonthDetail(monthLabel, year) {
   const mName = String(monthLabel).split(' ')[0];
+  const div = state.convertDivision;
   const list = (state.rows.bookings || [])
-    .filter((r) => r.booking_month === mName && Number(r.booking_year) === year && (Number(r.company_total_booking) || 0) !== 0)
+    .filter((r) => r.booking_month === mName && Number(r.booking_year) === year && (Number(r.company_total_booking) || 0) !== 0
+      && (div === 'All' || String(r.division ?? '').trim() === div))
     .sort((a, b) => (Number(b.company_total_booking) || 0) - (Number(a.company_total_booking) || 0));
   const th = '<tr><th>Customer</th><th>Division</th><th>Channel</th><th>Product Type</th><th>Status</th>'
     + '<th class="num">Company Total Booking</th><th class="num">MRR</th><th>Sage Customer ID</th></tr>';
