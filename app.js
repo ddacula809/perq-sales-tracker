@@ -1450,26 +1450,29 @@ function renderBillingDashboard() {
 // + amount (read-only) and an editable Completed column (saves to churn via the billing handler).
 function renderArDrillDown(list, key) {
   const label = key === 'arCompleted' ? 'AR Final Invoice — Completed' : 'AR Final Invoice — Not Completed';
-  const completedDef = state.schema.churn.editable.find((f) => f.key === 'completed');
-  const head = ['Property', 'Product', 'MRR', 'AR Final Invoice Month', 'AR Final Invoice Amt', 'Completed']
+  // The three editable billing columns on a churn row: Completed, Template Deleted, Notes.
+  const editDefs = ['completed', 'template_deleted', 'notes']
+    .map((k) => state.schema.churn.editable.find((f) => f.key === k)).filter(Boolean);
+  const head = ['Property', 'Product', 'MRR', 'AR Final Invoice Month', 'AR Final Invoice Amt', ...editDefs.map((f) => f.label)]
     .map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+  const colCount = 5 + editDefs.length;
   const body = list.slice()
     .sort((a, b) => String(a.property || a.pmc_buying_center || '').localeCompare(String(b.property || b.pmc_buying_center || '')))
     .map((c) => {
-      const completedCell = (completedDef && churnCanEdit('completed')) ? editCell(completedDef, c) : readonlyCell(completedDef || { key: 'completed', type: 'text' }, c);
+      const editCells = editDefs.map((f) => (churnCanEdit(f.key) ? editCell(f, c) : readonlyCell(f, c))).join('');
       return `<tr data-id="${c.id}">`
         + `<td class="ro">${escapeHtml(c.property || c.pmc_buying_center || '—')}</td>`
         + `<td class="ro">${escapeHtml(c.product || '—')}</td>`
         + `<td class="ro num">${fmtMoney(c.mrr)}</td>`
         + `<td class="ro">${escapeHtml(c.final_invoice_month || '—')}</td>`
         + `<td class="ro num">${fmtMoney(c.ar_final_invoice_amount)}</td>`
-        + completedCell
+        + editCells
         + '</tr>';
     }).join('');
   const total = list.reduce((a, c) => a + (Number(c.ar_final_invoice_amount) || 0), 0);
   return `<div class="metrics-title">${escapeHtml(label)} (${list.length}) — ${fmtMoney(total)}</div>`
     + '<div class="bd-detail" data-action-tab="churn"><table><thead><tr>' + head + '</tr></thead><tbody>'
-    + (body || '<tr><td class="muted" colspan="6" style="padding:12px">No matching churn rows.</td></tr>')
+    + (body || `<tr><td class="muted" colspan="${colCount}" style="padding:12px">No matching churn rows.</td></tr>`)
     + '</tbody></table></div>';
 }
 
