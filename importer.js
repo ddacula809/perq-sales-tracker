@@ -482,6 +482,7 @@ export function parseConvertEdit(buffer) {
     opt_out_expiration: find('Opt Out Expiration', 17),
     term_end_date: find('Term End Date', 18),
     implementation_fee: find('Implementation Fee', 19),
+    monthly_fee: find('Monthly Fee', 20), // column U -> MRR
     sage_customer_id: find('Sage Customer ID', 316),
   };
 
@@ -522,12 +523,14 @@ export function parseConvertEdit(buffer) {
       opt_out_expiration: optOutText(row[col.opt_out_expiration]),
       term_end_date: coerceExcelDate(row[col.term_end_date]),
       implementation_fee: coerce(row[col.implementation_fee], 'number'),
+      mrr: coerce(row[col.monthly_fee], 'number'), // MRR = Monthly Fee (col U), shared across the customer's bookings
     };
     let produced = 0;
     for (const mc of monthCols) {
-      const mrr = coerce(row[mc.index], 'number');
-      if (mrr === null || mrr === 0) continue; // only populated month cells are bookings
-      out.push({ ...base, booking_month: mc.month, booking_year: mc.year, mrr });
+      const total = coerce(row[mc.index], 'number');
+      if (total === null || total === 0) continue; // only populated month cells are bookings
+      // The month-cell amount is the Company Total Booking for the month it falls under.
+      out.push({ ...base, booking_month: mc.month, booking_year: mc.year, company_total_booking: total });
       produced += 1;
     }
     if (produced) customers += 1;

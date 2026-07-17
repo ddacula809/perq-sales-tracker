@@ -444,7 +444,7 @@ const TOTALS_FIELDS = {
   churn: [['AR Final Invoice Amt', 'ar_final_invoice_amount'], ['Prorated Churn Amt', 'prorated_churn_amount'], ['Final Churn Amt', 'final_churn_amount']],
 };
 // Convert bookings have no booking-type math — total the plain money columns instead.
-const CONVERT_TOTALS_FIELDS = [['MRR', 'mrr'], ['Implementation Fee', 'implementation_fee']];
+const CONVERT_TOTALS_FIELDS = [['MRR', 'mrr'], ['Company Total Booking', 'company_total_booking'], ['Implementation Fee', 'implementation_fee']];
 function renderBookingTotals(allRows) {
   const el = $('#bookingTotals');
   const fields = (isConvert() && state.tab === 'bookings') ? CONVERT_TOTALS_FIELDS : TOTALS_FIELDS[state.tab];

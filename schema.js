@@ -142,7 +142,10 @@ export const CONVERT_BOOKING_FIELDS = [
   { key: 'opt_out_expiration',   label: 'Opt Out Expiration',   excel: 15, type: 'text' }, // e.g. "never"
   { key: 'term_end_date',        label: 'Term End Date',        excel: 16, type: 'date' },
   { key: 'implementation_fee',   label: 'Implementation Fee',   excel: 17, type: 'number' },
-  { key: 'mrr',                  label: 'MRR',                  excel: 18, type: 'number' }, // reuses the shared `mrr` column
+  // Company Total Booking = the amount that sat under the month header in the EDIT tab (W..ES).
+  // Editable/stored here (unlike Multifamily, where it's a computed field).
+  { key: 'company_total_booking', label: 'Company Total Booking', excel: 18, type: 'number' },
+  { key: 'mrr',                  label: 'MRR',                  excel: 19, type: 'number' }, // Monthly Fee (col U); reuses the shared `mrr` column
 ];
 
 // No computed columns for Convert bookings yet (all fields are manual for now).
