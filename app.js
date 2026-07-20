@@ -45,6 +45,7 @@ const state = {
   saasSub: 'data',       // SaaS Financials sub-tab: 'data' (MRR table) | 'dashboard' (tiles)
   saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
+  churnComOpen: false,      // dashboard: whether the COM (Property Sold/PMC Change) detail is open
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
   convertYear: null,     // Convert dashboard: selected year (defaults to current/most-recent with data)
   convertQuarter: '',    // Convert dashboard: selected quarter tile (defaults to current/most-recent)
@@ -1036,7 +1037,7 @@ function renderSummary() {
       .join('');
     // COM Total = churn tagged "Property Sold/PMC Change" (Lost MRR Reason), over the shown months.
     const comTotal = churnMonths.reduce((a, m) => a + (comByMonth[m] || 0), 0);
-    const comCard = `<div class="metric accent" title="Churn with Lost MRR Reason = Property Sold/PMC Change">`
+    const comCard = `<div class="metric accent clickable${state.churnComOpen ? ' active' : ''}" data-churn-com="1" title="Churn with Lost MRR Reason = Property Sold/PMC Change">`
       + `<span class="k">COM Total</span><span class="v">${fmtMoney(comTotal)}</span></div>`;
     const quarterSel = '<select id="churnQuarter" class="churn-quarter">' +
       quarterVals.map((q) => `<option${q === state.churnQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
@@ -1050,6 +1051,8 @@ function renderSummary() {
     metricsHtml += `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
     // Churn Details: one table per month of the selected quarter (property / MRR dropped / last date).
     if (state.churnDetailQuarter) metricsHtml += renderChurnDetail(state.churnDetailQuarter);
+    // COM detail: the churn rows tagged Property Sold/PMC Change (same Owner + Quarter scope).
+    if (state.churnComOpen) metricsHtml += renderComDetail();
   }
 
   // Nothing to show (filters hidden and not the dashboard) — collapse the whole bar.
@@ -1096,6 +1099,9 @@ function renderSummary() {
       renderSummary();
     };
   });
+  // Click the COM Total tile -> toggle the COM (Property Sold/PMC Change) detail table.
+  const comTile = el.querySelector('[data-churn-com]');
+  if (comTile) comTile.onclick = () => { state.churnComOpen = !state.churnComOpen; renderSummary(); };
   applyChurnDetailWidths(); // re-apply any saved Churn Details column widths to the new tables
 }
 
@@ -1248,6 +1254,51 @@ function metric(k, v, accent = false) {
 //   1. Real churn (classification != Contraction): Property / MRR dropped / Last Date Under Contract.
 //   2. Contracted churn — churn used to offset a License Transfer booking: Property / MRR dropped /
 //      Notes (truncated, full text on hover). Sums reconcile with the quarter's month tiles above.
+// Detail table for the COM Total tile: churn rows tagged "Property Sold/PMC Change", scoped by the
+// Churn section's Owner + Quarter filters (carry-over aware, matching the tile's number).
+function renderComDetail() {
+  const inScope = (monthLabel) => {
+    if (state.churnQuarter === 'All') return true;
+    const i = monthYearQuarter(monthLabel);
+    return !!(i && i.label === state.churnQuarter);
+  };
+  const rows = [];
+  for (const r of state.rows.churn) {
+    if (String(r.classification || '') === 'Contraction') continue;
+    if (String(r.lost_mrr_reason || '').trim() !== 'Property Sold/PMC Change') continue;
+    if (state.churnOwner !== 'All' && String(r.account_owner || '').trim() !== state.churnOwner) continue;
+    let amt = 0; let month = '';
+    const consider = (m0, a0, credit) => {
+      const a = credit ? Math.abs(Number(a0) || 0) : Number(a0);
+      const mm = effectiveChurnMonth(String(m0 || '').trim(), r.date_added).month;
+      if (!mm || mm === '-' || !Number.isFinite(a) || a === 0 || !inScope(mm)) return;
+      amt += a; if (!month) month = mm;
+    };
+    if (String(r.classification || '') === 'Churn Credit') consider(r.final_churn_month, r.mrr, true);
+    else { consider(r.prorated_churn_month, r.prorated_churn_amount); consider(r.final_churn_month, r.final_churn_amount); }
+    if (amt === 0) continue;
+    rows.push({ pmc: r.pmc_buying_center || '', prop: r.property || r.property_id || '—', product: r.product || '—', mrr: Number(r.mrr) || 0, month, amt, last: r.last_date_under_contract || '' });
+  }
+  rows.sort((a, b) => (a.pmc || '').localeCompare(b.pmc || '') || (a.prop || '').localeCompare(b.prop || ''));
+  const total = rows.reduce((a, r) => a + r.amt, 0);
+  const scope = state.churnQuarter === 'All' ? 'all quarters' : state.churnQuarter;
+  const body = rows.map((x) => `<tr>
+      <td>${escapeHtml(x.pmc || '—')}</td>
+      <td>${escapeHtml(x.prop)}</td>
+      <td>${escapeHtml(x.product)}</td>
+      <td class="num">${fmtMoney(x.mrr)}</td>
+      <td>${escapeHtml(x.month)}</td>
+      <td class="num">${fmtMoney(x.amt)}</td>
+      <td>${escapeHtml(x.last || '—')}</td>
+    </tr>`).join('');
+  return `<div class="metrics-title">COM — Property Sold/PMC Change · ${escapeHtml(scope)} · ${rows.length} · ${fmtMoney(total)}</div>`
+    + '<div class="result-detail"><table class="recon-table"><thead><tr>'
+    + '<th>PMC</th><th>Property</th><th>Product</th><th class="num">MRR</th><th>Month</th><th class="num">Churn</th><th>Last Date</th>'
+    + '</tr></thead><tbody>'
+    + (body || '<tr><td class="muted" colspan="7" style="padding:12px">No COM churn for this scope.</td></tr>')
+    + '</tbody></table></div>';
+}
+
 function renderChurnDetail(quarterLabel) {
   const m = String(quarterLabel).match(/Q(\d)\s+(\d{4})/);
   if (!m) return '';
