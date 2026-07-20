@@ -980,23 +980,29 @@ function renderSummary() {
     // Churn by month: prorated churn + final churn amounts landing in each month. A late-added
     // churn whose month is closed carries over to the next open month (effectiveChurnMonth).
     const churnByMonth = {};
-    const addChurn = (month, amt, dateAdded) => {
+    const comByMonth = {}; // "COM" = Change of Management (Lost MRR Reason = Property Sold/PMC Change)
+    const addTo = (bucket, month, amt, dateAdded) => {
       const m0 = String(month || '').trim();
       const a = Number(amt);
       if (!m0 || m0 === '-' || !Number.isFinite(a)) return;
       const m = effectiveChurnMonth(m0, dateAdded).month;
-      churnByMonth[m] = (churnByMonth[m] || 0) + a;
+      bucket[m] = (bucket[m] || 0) + a;
     };
     for (const r of state.rows.churn) {
       if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
       if (!churnOwnerMatch(r)) continue;
+      const isCom = String(r.lost_mrr_reason || '').trim() === 'Property Sold/PMC Change';
+      const add = (month, amt, dateAdded) => {
+        addTo(churnByMonth, month, amt, dateAdded);
+        if (isCom) addTo(comByMonth, month, amt, dateAdded);
+      };
       if (String(r.classification || '') === 'Churn Credit') {
         // A positive credit (cancels a locked closed-month drop), recognized in its open month.
-        addChurn(r.final_churn_month, Math.abs(Number(r.mrr) || 0), r.date_added);
+        add(r.final_churn_month, Math.abs(Number(r.mrr) || 0), r.date_added);
         continue;
       }
-      addChurn(r.prorated_churn_month, r.prorated_churn_amount, r.date_added);
-      addChurn(r.final_churn_month, r.final_churn_amount, r.date_added);
+      add(r.prorated_churn_month, r.prorated_churn_amount, r.date_added);
+      add(r.final_churn_month, r.final_churn_amount, r.date_added);
     }
     // Quarter options derived from the months present; reset selection if it no longer exists.
     const quarterMap = new Map();
@@ -1028,6 +1034,10 @@ function renderSummary() {
       .map((label) => `<div class="metric accent clickable${state.churnDetailQuarter === label ? ' active' : ''}" data-churn-quarter="${escapeAttr(label)}">`
         + `<span class="k">${label} total</span><span class="v">${fmtMoney(qTotals.get(label))}</span></div>`)
       .join('');
+    // COM Total = churn tagged "Property Sold/PMC Change" (Lost MRR Reason), over the shown months.
+    const comTotal = churnMonths.reduce((a, m) => a + (comByMonth[m] || 0), 0);
+    const comCard = `<div class="metric accent" title="Churn with Lost MRR Reason = Property Sold/PMC Change">`
+      + `<span class="k">COM Total</span><span class="v">${fmtMoney(comTotal)}</span></div>`;
     const quarterSel = '<select id="churnQuarter" class="churn-quarter">' +
       quarterVals.map((q) => `<option${q === state.churnQuarter ? ' selected' : ''}>${q}</option>`).join('') + '</select>';
     // Account Owner filter (locked to their own name for sales users).
@@ -1036,7 +1046,7 @@ function renderSummary() {
       ownerVals.map((o) => `<option${o === state.churnOwner ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') + '</select>';
     metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>`
       + `<label class="churn-filter-lbl">Owner ${churnOwnerSel}</label>${quarterSel}</div>`;
-    if (qTotalCards) metricsHtml += `<div class="metrics-row">${qTotalCards}</div>`;
+    if (qTotalCards) metricsHtml += `<div class="metrics-row">${qTotalCards}${comCard}</div>`;
     metricsHtml += `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
     // Churn Details: one table per month of the selected quarter (property / MRR dropped / last date).
     if (state.churnDetailQuarter) metricsHtml += renderChurnDetail(state.churnDetailQuarter);
