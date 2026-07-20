@@ -41,6 +41,7 @@ const state = {
   churnOwner: 'All',     // dashboard churn Account Owner filter (sales users default to their name)
   saasCategory: 'Multifamily', // SaaS Financials: Multifamily | Digital Advertising
   saasQuarter: '',       // SaaS Financials quarter label, e.g. 'Q1 2026' (defaults to current)
+  saasTypeMonth: '',     // SaaS Dashboard "Bookings per Type" Month/Year filter (defaults to current)
   saasSub: 'data',       // SaaS Financials sub-tab: 'data' (MRR table) | 'dashboard' (tiles)
   saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
@@ -5378,19 +5379,35 @@ function renderSaasDashboard(idxs, category, churnOf) {
   const mrrTiles = idxs.map((idx, j) => tile(monthLabel(idx), mrrByMonth[j])).join('') + tile(`${state.saasQuarter} Total`, sum(mrrByMonth), true);
   const churnTiles = idxs.map((idx, j) => tile(monthLabel(idx), churnByMonth[j])).join('') + tile(`${state.saasQuarter} Total`, sum(churnByMonth), true);
 
-  // Multifamily Bookings per CTAM Type — Company Total Booking summed per type, with the distinct
-  // PMC count under each. Covers all bookings (independent of the category/quarter selectors above).
+  // Multifamily Bookings per Type — Company Total Booking summed per type (New Logo + each CTAM
+  // Type), with the distinct PMC count under each. Has its OWN Month/Year filter (booking_month +
+  // booking_year), defaulting to the current month/year.
+  const bookingMY = (b) => (b.booking_month && b.booking_year != null && b.booking_year !== '') ? `${b.booking_month} ${b.booking_year}` : '';
+  const now = new Date();
+  const curMY = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+  if (!state.saasTypeMonth) state.saasTypeMonth = curMY;
+  const monthsPresent = [...new Set(state.rows.bookings.map(bookingMY).filter(Boolean))];
+  if (!monthsPresent.includes(curMY)) monthsPresent.push(curMY); // keep the current month selectable
+  const typeMonthOpts = ['All', ...sortMonthYear(monthsPresent)];
+  if (!typeMonthOpts.includes(state.saasTypeMonth)) state.saasTypeMonth = curMY;
+  const typeBookings = state.saasTypeMonth === 'All'
+    ? state.rows.bookings
+    : state.rows.bookings.filter((b) => bookingMY(b) === state.saasTypeMonth);
   const byType = new Map();
-  for (const b of state.rows.bookings) {
-    const t = String(b.ctam_type || '').trim();
-    if (!t) continue; // Pilot bookings have no CTAM Type
+  const addTo = (t, b) => {
     if (!byType.has(t)) byType.set(t, { total: 0, pmcs: new Set() });
     const g = byType.get(t);
     g.total += Number(b.company_total_booking) || 0;
     const pmc = String(b.pmc || '').trim().toLowerCase();
     if (pmc) g.pmcs.add(pmc);
+  };
+  for (const b of typeBookings) {
+    const ctam = String(b.ctam_type || '').trim();
+    const pt = String(b.pilot_type || '').trim();
+    if (ctam) addTo(ctam, b);
+    else if (pt === 'New - Paid' || pt === 'New - Free') addTo('New Logo', b); // brand-new PMC pilots
   }
-  const typeOrder = (state.schema.bookings.editable.find((f) => f.key === 'ctam_type')?.options || []).filter(Boolean);
+  const typeOrder = ['New Logo', ...(state.schema.bookings.editable.find((f) => f.key === 'ctam_type')?.options || []).filter(Boolean)];
   const types = [...byType.keys()].sort((a, b) => {
     const ia = typeOrder.indexOf(a); const ib = typeOrder.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
@@ -5400,12 +5417,14 @@ function renderSaasDashboard(idxs, category, churnOf) {
     return `<div class="metric"><span class="k">${escapeHtml(t)}</span><span class="v">${fmtMoney(g.total)}</span>`
       + `<span class="saas-type-count">${g.pmcs.size} PMC${g.pmcs.size === 1 ? '' : 's'}</span></div>`;
   }).join('');
+  const typeMonthSel = '<select id="saasTypeMonth" class="churn-quarter">'
+    + typeMonthOpts.map((o) => `<option${o === state.saasTypeMonth ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') + '</select>';
 
   $('#saasDashboard').innerHTML =
     `<div class="metrics-title">${escapeHtml(category)} — Recognized MRR by Month</div><div class="metrics-row">${mrrTiles}</div>`
     + `<div class="metrics-title">${escapeHtml(category)} — Churn by Month</div><div class="metrics-row">${churnTiles}</div>`
-    + '<div class="metrics-title">Multifamily Bookings per Type</div>'
-    + `<div class="metrics-row">${typeTiles || '<span class="muted">No CTAM-type bookings.</span>'}</div>`;
+    + `<div class="metrics-title metrics-title-row"><span>Multifamily Bookings per Type</span>${typeMonthSel}</div>`
+    + `<div class="metrics-row">${typeTiles || '<span class="muted">No bookings for this month.</span>'}</div>`;
   $('#saasCount').textContent = `${category} · ${state.saasQuarter}`;
 }
 
@@ -5478,6 +5497,11 @@ function renderSaasUnit(idxs, category, h) {
 function wireSaas() {
   $('#saasCategory').onchange = (e) => { state.saasCategory = e.target.value; renderSaas(); };
   $('#saasQuarter').onchange = (e) => { state.saasQuarter = e.target.value; renderSaas(); };
+  // The "Bookings per Type" Month/Year filter lives inside the (re-rendered) dashboard, so bind
+  // it with a delegated listener on the container.
+  $('#saasDashboard').addEventListener('change', (e) => {
+    if (e.target.id === 'saasTypeMonth') { state.saasTypeMonth = e.target.value; renderSaas(); }
+  });
   document.querySelectorAll('[data-saas-sub]').forEach((b) => {
     b.onclick = () => { state.saasSub = b.dataset.saasSub; renderSaas(); };
   });
