@@ -5401,13 +5401,17 @@ function renderSaasDashboard(idxs, category, churnOf) {
     const pmc = String(b.pmc || '').trim().toLowerCase();
     if (pmc) g.pmcs.add(pmc);
   };
+  // "Renewal Rate Increase" and "Re-rate" are reported together as one bucket.
+  const RATE_BUCKET = 'Renewal Rate Increase / Re-rate';
+  const typeLabel = (t) => (t === 'Renewal Rate Increase' || t === 'Re-rate') ? RATE_BUCKET : t;
   for (const b of typeBookings) {
     const ctam = String(b.ctam_type || '').trim();
     const pt = String(b.pilot_type || '').trim();
-    if (ctam) addTo(ctam, b);
+    if (ctam) addTo(typeLabel(ctam), b);
     else if (pt === 'New - Paid' || pt === 'New - Free') addTo('New Logo', b); // brand-new PMC pilots
   }
-  const typeOrder = ['New Logo', ...(state.schema.bookings.editable.find((f) => f.key === 'ctam_type')?.options || []).filter(Boolean)];
+  const ctamOpts = (state.schema.bookings.editable.find((f) => f.key === 'ctam_type')?.options || []).filter(Boolean);
+  const typeOrder = ['New Logo', ...new Set(ctamOpts.map(typeLabel))];
   const types = [...byType.keys()].sort((a, b) => {
     const ia = typeOrder.indexOf(a); const ib = typeOrder.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
