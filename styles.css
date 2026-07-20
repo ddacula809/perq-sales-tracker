@@ -371,6 +371,8 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 }
 .filter select { font: inherit; padding: 5px 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; min-width: 150px; }
 .metric .v { font-family: 'Fira Mono', monospace; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+/* PMC count under the $ on the SaaS "Bookings per Type" tiles */
+.saas-type-count { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; color: var(--ink-soft); }
 .metric.accent { background: var(--accent-soft); border-color: #f2c9b6; }
 .metric.accent .v { color: var(--accent); }
 

@@ -5377,9 +5377,35 @@ function renderSaasDashboard(idxs, category, churnOf) {
   const sum = (arr) => arr.reduce((a, v) => a + v, 0);
   const mrrTiles = idxs.map((idx, j) => tile(monthLabel(idx), mrrByMonth[j])).join('') + tile(`${state.saasQuarter} Total`, sum(mrrByMonth), true);
   const churnTiles = idxs.map((idx, j) => tile(monthLabel(idx), churnByMonth[j])).join('') + tile(`${state.saasQuarter} Total`, sum(churnByMonth), true);
+
+  // Multifamily Bookings per CTAM Type — Company Total Booking summed per type, with the distinct
+  // PMC count under each. Covers all bookings (independent of the category/quarter selectors above).
+  const byType = new Map();
+  for (const b of state.rows.bookings) {
+    const t = String(b.ctam_type || '').trim();
+    if (!t) continue; // Pilot bookings have no CTAM Type
+    if (!byType.has(t)) byType.set(t, { total: 0, pmcs: new Set() });
+    const g = byType.get(t);
+    g.total += Number(b.company_total_booking) || 0;
+    const pmc = String(b.pmc || '').trim().toLowerCase();
+    if (pmc) g.pmcs.add(pmc);
+  }
+  const typeOrder = (state.schema.bookings.editable.find((f) => f.key === 'ctam_type')?.options || []).filter(Boolean);
+  const types = [...byType.keys()].sort((a, b) => {
+    const ia = typeOrder.indexOf(a); const ib = typeOrder.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+  });
+  const typeTiles = types.map((t) => {
+    const g = byType.get(t);
+    return `<div class="metric"><span class="k">${escapeHtml(t)}</span><span class="v">${fmtMoney(g.total)}</span>`
+      + `<span class="saas-type-count">${g.pmcs.size} PMC${g.pmcs.size === 1 ? '' : 's'}</span></div>`;
+  }).join('');
+
   $('#saasDashboard').innerHTML =
     `<div class="metrics-title">${escapeHtml(category)} — Recognized MRR by Month</div><div class="metrics-row">${mrrTiles}</div>`
-    + `<div class="metrics-title">${escapeHtml(category)} — Churn by Month</div><div class="metrics-row">${churnTiles}</div>`;
+    + `<div class="metrics-title">${escapeHtml(category)} — Churn by Month</div><div class="metrics-row">${churnTiles}</div>`
+    + '<div class="metrics-title">Multifamily Bookings per Type</div>'
+    + `<div class="metrics-row">${typeTiles || '<span class="muted">No CTAM-type bookings.</span>'}</div>`;
   $('#saasCount').textContent = `${category} · ${state.saasQuarter}`;
 }
 
