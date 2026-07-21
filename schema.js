@@ -29,6 +29,10 @@ export const BOOKING_FIELDS = [
   { key: 'mrr',                             label: 'MRR',                    excel: 18, type: 'number' },
   { key: 'offset_amount',                   label: 'Offset Amount',          excel: 19, type: 'number' },
   { key: 'one_time_fee',                    label: 'One-Time Fee',           excel: 21, type: 'number' },
+  // Admin-only tag. When set to Booking Clawback / Booking Correction, the auto-calc of Annual
+  // Value, Company Total Booking, and Commissionable is disabled and those are entered manually
+  // (stored in the *_override columns below, which are hidden from the grid and edited in-cell).
+  { key: 'booking_adjustment',              label: 'Adjustment',             excel: 46, type: 'select', options: ['', 'Booking Clawback', 'Booking Correction'] },
   { key: 'notes',                           label: 'Notes',                  excel: 24, type: 'text' },
   { key: 'discuss_in_review',               label: 'To Discuss',             excel: 25, type: 'text' },
   { key: 'salesforce_oppty',                label: 'SF Oppty',               excel: 26, type: 'select', options: ['', 'YES', 'NO'] },
@@ -49,6 +53,11 @@ export const BOOKING_FIELDS = [
   { key: 'completed_date',                  label: 'Completed Date',         excel: 38, type: 'date' },
   { key: 'sage_id',                         label: 'Sage ID',                excel: 39, type: 'text' },
   { key: 'billing_notes',                   label: 'Billing Notes',          excel: 43, type: 'text' },
+  // Manual override values used only when booking_adjustment is set. Hidden from the grid — edited
+  // inline through the Company Total Booking / Commissionable / Annual Value cells.
+  { key: 'company_total_override',          label: 'Company Total (manual)', excel: 47, type: 'number' },
+  { key: 'commissionable_override',         label: 'Commissionable (manual)', excel: 48, type: 'number' },
+  { key: 'annual_value_override',           label: 'Annual Value (manual)',  excel: 49, type: 'number' },
 ];
 
 // Computed booking fields (read-only). `excel` = column index for export.

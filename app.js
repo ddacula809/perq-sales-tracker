@@ -141,7 +141,12 @@ function canEditSalesSupport() { return ['admin', 'standard', 'sales_admin', 'sa
 function canManageQuarters() { return ['admin', 'sales_admin'].includes(role()); } // open/close quarter
 // System-generated fields: read-only for everyone EXCEPT admins, who may correct them
 // (e.g. Date Added / GoLive Set Date, which drive the closed-month carry-over recognition).
-const ADMIN_EDIT_FIELDS = new Set(['date_added', 'golive_set_date']);
+const ADMIN_EDIT_FIELDS = new Set(['date_added', 'golive_set_date', 'booking_adjustment']);
+// Booking Clawback / Correction: computed field -> the stored manual-override field it maps to.
+// When a booking is tagged (booking_adjustment), admins enter these three values by hand.
+const BOOKING_OVERRIDE = { annual_value: 'annual_value_override', company_total_booking: 'company_total_override', commissionable_bookings: 'commissionable_override' };
+const BOOKING_OVERRIDE_KEYS = new Set(Object.values(BOOKING_OVERRIDE));
+const isBookingAdjusted = (row) => { const a = String(row.booking_adjustment || '').trim(); return a === 'Booking Clawback' || a === 'Booking Correction'; };
 function canEditField(f) {
   if (ADMIN_EDIT_FIELDS.has(f.key)) return isAdmin();
   const r = role();
@@ -280,9 +285,10 @@ function isBilling(key) { return !!(BILLING_KEYS[state.tab] && BILLING_KEYS[stat
 function fieldsForTab() {
   const s = state.schema[state.tab];
   const computedKeys = new Set(s.computed.map((f) => f.key));
-  // ar_override has no column of its own — it's edited inline through the "AR Final Invoice Amt"
-  // computed cell (see arOverrideCell). Drop it from the displayed column list.
-  let cols = [...s.editable, ...s.computed].filter((c) => c.key !== 'ar_override');
+  // Some stored fields have no column of their own — they're edited inline through a computed
+  // cell: ar_override (AR Final Invoice Amt) and the Booking Clawback/Correction overrides.
+  const inlineOnly = new Set(['ar_override', ...BOOKING_OVERRIDE_KEYS]);
+  let cols = [...s.editable, ...s.computed].filter((c) => !inlineOnly.has(c.key));
   // Move this tab's billing fields to the very end, after the computed columns.
   const billing = BILLING_KEYS[state.tab];
   if (billing) {
@@ -361,6 +367,7 @@ function rowInnerHtml(row, i, fields) {
   for (const f of cols) {
     if (f.key === 'churn_status') html += churnStatusCell(row);
     else if (f.key === 'ar_final_invoice_amount' && state.tab === 'churn' && isAdmin()) html += arOverrideCell(row);
+    else if (state.tab === 'bookings' && BOOKING_OVERRIDE[f.key] && isAdmin() && isBookingAdjusted(row)) html += bookingOverrideCell(f.key, row);
     else if (computedKeys.has(f.key)) html += computedCell(f, row);
     else if (canEditField(f)) html += editCell(f, row);
     else html += readonlyCell(f, row);
@@ -552,6 +559,16 @@ function arOverrideCell(row) {
     : 'Auto-calculated. Type a value to override the AR Final Invoice Amount.';
   return `<td class="num computed ar-override${hasOv ? ' ar-overridden' : ''}" data-col="ar_final_invoice_amount" title="${escapeAttr(title)}">`
     + `<input type="text" inputmode="decimal" data-key="ar_override" value="${escapeAttr(hasOv ? ov : '')}" placeholder="${escapeAttr(auto)}" /></td>`;
+}
+
+// Manual-entry cell for a Booking Clawback / Correction line: the computed column (Annual Value /
+// Company Total Booking / Commissionable) becomes an editable input bound to its *_override field.
+function bookingOverrideCell(computedKey, row) {
+  const overrideKey = BOOKING_OVERRIDE[computedKey];
+  const ov = row[overrideKey];
+  const hasOv = ov !== null && ov !== undefined && ov !== '';
+  return `<td class="num computed ar-override ar-overridden" data-col="${computedKey}" title="${escapeAttr(row.booking_adjustment + ' — enter the value manually')}">`
+    + `<input type="text" inputmode="decimal" data-key="${overrideKey}" value="${escapeAttr(hasOv ? ov : '')}" placeholder="$0" /></td>`;
 }
 
 // A field the current user can see but not edit: render the value as static text.
@@ -2136,8 +2153,11 @@ function wireGrid() {
       // Date Under Contract re-stamps the read-only Date Added. On churn, MRR / Last Date also
       // drive the admin-editable AR Final Invoice Amt cell (an input, not a data-comp cell, so
       // refreshComputedCells can't update it) — rebuild the row so its placeholder recomputes.
+      // Tagging a booking Clawback/Correction flips its three computed cells to manual inputs (and
+      // back); editing an override changes the stored value the computed cell now reflects.
+      const bookingAdjChange = state.tab === 'bookings' && (key === 'booking_adjustment' || BOOKING_OVERRIDE_KEYS.has(key));
       if (key === 'ctam_type' || (state.tab === 'churn' && (key === 'last_date_under_contract' || key === 'ar_override' || key === 'mrr'))
-        || (state.tab === 'bookings' && key === 'sage_id')) {
+        || (state.tab === 'bookings' && key === 'sage_id') || bookingAdjChange) {
         renderBody(); // Sage ID may have propagated to the property's other orders
       } else {
         refreshComputedCells(tr, updated);

@@ -112,6 +112,15 @@ export function computeBooking(r) {
     }
   }
 
+  // Booking Clawback / Booking Correction: an admin tags the line item and enters the three
+  // figures by hand — disable the auto-calc and use the stored manual overrides.
+  const adj = (r.booking_adjustment || '').trim();
+  if (adj === 'Booking Clawback' || adj === 'Booking Correction') {
+    annual = num(r.annual_value_override);
+    companyTotal = num(r.company_total_override);
+    commissionable = num(r.commissionable_override);
+  }
+
   // Implementation billing default (only when not explicitly set):
   //   no one-time fee (blank or 0) -> Not Applicable;  has a one-time fee -> Pending.
   let implStatus = r.implementation_billing_status;
