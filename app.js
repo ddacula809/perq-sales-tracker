@@ -558,7 +558,7 @@ function arOverrideCell(row) {
     ? 'Manual override — clear the box to use the auto-calculated AR.'
     : 'Auto-calculated. Type a value to override the AR Final Invoice Amount.';
   return `<td class="num computed ar-override${hasOv ? ' ar-overridden' : ''}" data-col="ar_final_invoice_amount" title="${escapeAttr(title)}">`
-    + `<input type="text" inputmode="decimal" data-key="ar_override" value="${escapeAttr(hasOv ? ov : '')}" placeholder="${escapeAttr(auto)}" /></td>`;
+    + `<input type="text" inputmode="decimal" data-key="ar_override" value="${escapeAttr(hasOv ? fmtMoney(ov) : '')}" placeholder="${escapeAttr(auto)}" /></td>`;
 }
 
 // Manual-entry cell for a Booking Clawback / Correction line: the computed column (Annual Value /
@@ -568,7 +568,7 @@ function bookingOverrideCell(computedKey, row) {
   const ov = row[overrideKey];
   const hasOv = ov !== null && ov !== undefined && ov !== '';
   return `<td class="num computed ar-override ar-overridden" data-col="${computedKey}" title="${escapeAttr(row.booking_adjustment + ' — enter the value manually')}">`
-    + `<input type="text" inputmode="decimal" data-key="${overrideKey}" value="${escapeAttr(hasOv ? ov : '')}" placeholder="$0" /></td>`;
+    + `<input type="text" inputmode="decimal" data-key="${overrideKey}" value="${escapeAttr(hasOv ? fmtMoney(ov) : '')}" placeholder="$0" /></td>`;
 }
 
 // A field the current user can see but not edit: render the value as static text.
@@ -2135,9 +2135,12 @@ function wireGrid() {
     const tr = ctl.closest('tr');
     const id = Number(tr.dataset.id);
     const key = ctl.dataset.key;
+    // The manual-override cells (AR / Booking Clawback-Correction) show a formatted $ value; parse
+    // it back (handles $, commas, and (parentheses) as negative) so negatives round-trip cleanly.
+    const rawVal = (key === 'ar_override' || BOOKING_OVERRIDE_KEYS.has(key)) ? parseMoney(ctl.value) : ctl.value;
     try {
       let updated = await api(`/api/${state.tab}/${id}`, {
-        method: 'PATCH', body: JSON.stringify({ [key]: ctl.value }),
+        method: 'PATCH', body: JSON.stringify({ [key]: rawVal }),
       });
       // Leaving License Transfer? Clear any stale Offset Amount so it can't linger unused.
       if (key === 'ctam_type' && ctl.value.trim() !== 'License Transfer' && updated.offset_amount != null) {
