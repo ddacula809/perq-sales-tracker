@@ -517,6 +517,7 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 .cell-tip .tip-amt { font-family: 'Fira Mono', monospace; white-space: nowrap; }
 .cell-tip .tip-total { margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.22); font-weight: 700; }
 .cell-tip .tip-lt { font-size: 10px; font-weight: 700; background: var(--accent); color: #fff; border-radius: 4px; padding: 1px 5px; margin-left: 4px; white-space: nowrap; }
+.cell-tip .tip-adj { font-size: 10px; font-weight: 700; background: #8b8681; color: #fff; border-radius: 4px; padding: 1px 5px; margin-left: 4px; white-space: nowrap; }
 .cell-tip .tip-note { font-size: 11px; opacity: .8; white-space: normal; margin: 1px 0 4px; padding-left: 2px; }
 #ssTable td.ss-actual { cursor: help; }
 
@@ -586,6 +587,8 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 }
 /* $0 actual that's really a License Transfer (offset to $0) — flag it, don't read as "nothing". */
 #ssTable td.ss-actual.ss-lt-zero { background: #fbe6dc !important; color: var(--accent-deep) !important; font-weight: 700; }
+/* An actual cell that includes a Booking Clawback / Correction — highlight grey (note on hover). */
+#ssTable td.ss-actual.ss-adj { background: #e7e4e0 !important; color: #5b5760 !important; }
 #ssTable td.num { text-align: right; }
 /* Zebra striping for legibility (Linen stripe; computed cyan cells keep their tint). */
 #ssTable tbody tr.ss-alt td:not(.ss-actual) { background: var(--paper); }

@@ -3416,12 +3416,14 @@ function ssActualTipHtml(row, key) {
   const total = list.reduce((a, b) => a + (Number(b.company_total_booking) || 0), 0);
   const items = list.map((b) => {
     const isLT = String(b.ctam_type || '').trim() === 'License Transfer' || b.offset_churn_id;
+    const adj = isBookingAdjusted(b) ? String(b.booking_adjustment || '').trim() : '';
     const note = String(b.notes || '').trim();
     return `<div class="tip-row"><span class="tip-prop">${escapeHtml(b.property_name || b.property_id || '—')}`
       + `${b.product ? ` <em>${escapeHtml(b.product)}</em>` : ''}`
-      + `${isLT ? ' <span class="tip-lt">License Transfer</span>' : ''}</span>`
+      + `${isLT ? ' <span class="tip-lt">License Transfer</span>' : ''}`
+      + `${adj ? ` <span class="tip-adj">${escapeHtml(adj)}</span>` : ''}</span>`
       + `<span class="tip-amt">${escapeHtml(fmtMoney(b.company_total_booking))}</span></div>`
-      + (isLT && note ? `<div class="tip-note">${escapeHtml(note)}</div>` : '');
+      + ((isLT || adj) && note ? `<div class="tip-note">${escapeHtml(note)}</div>` : '');
   }).join('');
   const head = `${escapeHtml(row.pmc || '—')} · ${escapeHtml(row.product_category || '')} · ${list.length} booking${list.length === 1 ? '' : 's'}`;
   return `<div class="tip-head">${head}</div>${items}`
@@ -3481,7 +3483,8 @@ function ssCell(row, key) {
     // $0 actual but real bookings came in that were offset to $0 by a License Transfer:
     // flag it so it's not mistaken for "no activity" (details + notes show on hover).
     const ltZero = value === 0 && bd.some((b) => String(b.ctam_type || '').trim() === 'License Transfer' || b.offset_churn_id);
-    return `<td class="ss-actual${ltZero ? ' ss-lt-zero' : ''}" data-col="${key}">${fmtMoney(value)}</td>`;
+    const adjusted = bd.some(isBookingAdjusted); // includes a Booking Clawback / Correction
+    return `<td class="ss-actual${ltZero ? ' ss-lt-zero' : ''}${adjusted ? ' ss-adj' : ''}" data-col="${key}">${fmtMoney(value)}</td>`;
   }
   const f = ssFieldDef(key);
   const val = row[key] ?? '';
@@ -3702,25 +3705,38 @@ function ssPropertyBookingsIn(propId, months, year) {
 // Sum a set of bookings' Company Total + the License Transfer bookings among them (for the $0
 // flag and the hover note).
 function ssSumLT(bookings) {
-  let value = 0; const lt = [];
-  for (const b of bookings) { value += Number(b.company_total_booking) || 0; if (isBookingLT(b)) lt.push(b); }
-  return { value, hasLT: lt.length > 0, ltBookings: lt };
+  let value = 0; const lt = []; const adj = [];
+  for (const b of bookings) {
+    value += Number(b.company_total_booking) || 0;
+    if (isBookingLT(b)) lt.push(b);
+    if (isBookingAdjusted(b)) adj.push(b);
+  }
+  return { value, ltBookings: lt, adjBookings: adj };
 }
 // A hover title summarizing the License Transfer(s) behind a cell (property · product · note).
 function ssLtTitle(ltBookings) {
-  if (!ltBookings || !ltBookings.length) return '';
-  return ltBookings.map((b) => {
+  return (ltBookings || []).map((b) => {
     const who = b.property_name || b.property_id || 'property';
     const note = String(b.notes || '').trim() || String(b.billing_notes || '').trim();
     return `License Transfer — ${who}${b.product ? ` (${b.product})` : ''}${note ? `: ${note}` : ''}`;
   }).join('\n');
 }
-// Render an Actual cell; flag a $0 that's really a License Transfer (offset to $0), same as the
-// Product view, and show the License Transfer note(s) on hover.
-function ssActualCellHtml(key, value, hasLT, ltBookings) {
-  const ltZero = value === 0 && hasLT;
-  const title = hasLT ? ssLtTitle(ltBookings) : '';
-  return `<td class="ss-actual${ltZero ? ' ss-lt-zero' : ''}"${title ? ` title="${escapeAttr(title)}"` : ''} data-col="${key}">${fmtMoney(value)}</td>`;
+// A hover title summarizing the Booking Clawback / Correction line(s) behind a cell.
+function ssAdjTitle(adjBookings) {
+  return (adjBookings || []).map((b) => {
+    const who = b.property_name || b.property_id || 'property';
+    const note = String(b.notes || '').trim();
+    return `${b.booking_adjustment} — ${who}${b.product ? ` (${b.product})` : ''}${note ? `: ${note}` : ''}`;
+  }).join('\n');
+}
+// Render an Actual cell. Flags: a $0 that's really a License Transfer (coral), and any Booking
+// Clawback/Correction included (grey). Notes for both show on hover.
+function ssActualCellHtml(key, value, ltBookings, adjBookings) {
+  const lt = ltBookings || []; const adj = adjBookings || [];
+  const ltZero = value === 0 && lt.length > 0;
+  const title = [lt.length ? ssLtTitle(lt) : '', adj.length ? ssAdjTitle(adj) : ''].filter(Boolean).join('\n');
+  const cls = `ss-actual${ltZero ? ' ss-lt-zero' : ''}${adj.length ? ' ss-adj' : ''}`;
+  return `<td class="${cls}"${title ? ` title="${escapeAttr(title)}"` : ''} data-col="${key}">${fmtMoney(value)}</td>`;
 }
 const ssMonthsForKey = (key, qm) => (key === 'q_actual' ? qm : [qm[SS_PROP_MONTHS[key]]]);
 // A non-name, non-actual cell on a property row: editable target / owner / notes (or read-only).
@@ -3761,8 +3777,8 @@ function ssPmcMainRow(pmc, props, cols, editCol) {
     }
     if (SS_COMPUTED.has(k)) {
       const months = ssMonthsForKey(k, qm);
-      const { value, hasLT, ltBookings } = ssSumLT(props.flatMap((r) => ssPropertyBookingsIn(r.property_id, months, year)));
-      return ssActualCellHtml(k, value, hasLT, ltBookings);
+      const { value, ltBookings, adjBookings } = ssSumLT(props.flatMap((r) => ssPropertyBookingsIn(r.property_id, months, year)));
+      return ssActualCellHtml(k, value, ltBookings, adjBookings);
     }
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(props.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     return `<td data-col="${k}"></td>`;
@@ -3781,8 +3797,8 @@ function ssPropertyRow(row, cols, editCol) {
     }
     if (SS_PMC_MANUAL.has(k)) return `<td data-col="${k}"></td>`; // PMC-only columns are blank here
     if (SS_COMPUTED.has(k)) {
-      const { value, hasLT, ltBookings } = ssSumLT(ssPropertyBookingsIn(row.property_id, ssMonthsForKey(k, qm), year));
-      return ssActualCellHtml(k, value, hasLT, ltBookings);
+      const { value, ltBookings, adjBookings } = ssSumLT(ssPropertyBookingsIn(row.property_id, ssMonthsForKey(k, qm), year));
+      return ssActualCellHtml(k, value, ltBookings, adjBookings);
     }
     return ssPropEditCell(row, k);
   }).join('');
@@ -3804,10 +3820,11 @@ function ssOrderDetailRows(row, cols, editCol) {
     const product = String(b.product || '').trim() || '—';
     const section = ssIsPilot(b) ? 'Pilot' : 'CTAM';
     const k = `${product}||${section}`;
-    if (!groups.has(k)) groups.set(k, { product, section, m: [0, 0, 0], ltb: [[], [], []] });
+    if (!groups.has(k)) groups.set(k, { product, section, m: [0, 0, 0], ltb: [[], [], []], adjb: [[], [], []] });
     const g = groups.get(k);
     g.m[mi] += Number(b.company_total_booking) || 0;
     if (isBookingLT(b)) g.ltb[mi].push(b);
+    if (isBookingAdjusted(b)) g.adjb[mi].push(b);
   }
   const list = [...groups.values()].sort((a, b) =>
     a.product.localeCompare(b.product) || a.section.localeCompare(b.section));
@@ -3817,10 +3834,10 @@ function ssOrderDetailRows(row, cols, editCol) {
   }
   return list.map((g) => {
     const vals = { m1_actual: g.m[0], m2_actual: g.m[1], m3_actual: g.m[2], q_actual: g.m[0] + g.m[1] + g.m[2] };
-    const ltbFor = (k) => (k === 'q_actual' ? [...g.ltb[0], ...g.ltb[1], ...g.ltb[2]] : g.ltb[SS_PROP_MONTHS[k]]);
+    const listFor = (arr, k) => (k === 'q_actual' ? [...arr[0], ...arr[1], ...arr[2]] : arr[SS_PROP_MONTHS[k]]);
     const cells = cols.map(([k]) => {
       if (k === 'name') return `<td class="ss-detail-name ss-lvl3" data-col="name"><span class="ss-detail-indent">↳↳</span> ${escapeHtml(g.product)} <span class="ss-tag ss-tag-${g.section.toLowerCase()}">${g.section}</span></td>`;
-      if (Object.prototype.hasOwnProperty.call(vals, k)) { const lb = ltbFor(k); return ssActualCellHtml(k, vals[k], lb.length > 0, lb); }
+      if (Object.prototype.hasOwnProperty.call(vals, k)) return ssActualCellHtml(k, vals[k], listFor(g.ltb, k), listFor(g.adjb, k));
       return `<td data-col="${k}"></td>`;
     }).join('');
     return `<tr class="ss-detail-row"><td class="rownum"></td>${cells}${editCol ? '<td></td>' : ''}</tr>`;
@@ -3836,8 +3853,8 @@ function ssPmcGrandTotal(cols, rows, editCol) {
     if (SS_PMC_MANUAL.has(k)) { const s = pmcRows.reduce((a, r) => a + (Number(r[k]) || 0), 0); return `<td class="num" data-col="${k}">${s ? fmtNum(s) : ''}</td>`; }
     if (SS_COMPUTED.has(k)) {
       const months = ssMonthsForKey(k, qm);
-      const { value, hasLT, ltBookings } = ssSumLT(rows.flatMap((r) => ssPropertyBookingsIn(r.property_id, months, year)));
-      return ssActualCellHtml(k, value, hasLT, ltBookings);
+      const { value, ltBookings, adjBookings } = ssSumLT(rows.flatMap((r) => ssPropertyBookingsIn(r.property_id, months, year)));
+      return ssActualCellHtml(k, value, ltBookings, adjBookings);
     }
     if (SS_MONEY.has(k)) return `<td class="num" data-col="${k}">${fmtMoney(rows.reduce((a, r) => a + (Number(r[k]) || 0), 0))}</td>`;
     if (i === 0) return `<td data-col="${k}">Grand Total</td>`;
