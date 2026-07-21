@@ -5502,17 +5502,24 @@ function renderSaasDashboard(idxs, category, churnOf) {
     const pmc = String(b.pmc || '').trim().toLowerCase();
     if (pmc) g.pmcs.add(pmc);
   };
-  // "Renewal Rate Increase" and "Re-rate" are reported together as one bucket.
+  // Bucket EVERY booking so the per-type tiles reconcile with the total (and with the Main
+  // Dashboard's Total Company Booking for the same month): CTAM types (Renewal Rate Increase +
+  // Re-rate combined), New Logo (New-Paid/Free pilots), the other pilot types by name, else Other.
   const RATE_BUCKET = 'Renewal Rate Increase / Re-rate';
   const typeLabel = (t) => (t === 'Renewal Rate Increase' || t === 'Re-rate') ? RATE_BUCKET : t;
-  for (const b of typeBookings) {
+  const typeBucketOf = (b) => {
     const ctam = String(b.ctam_type || '').trim();
+    if (ctam) return typeLabel(ctam);
     const pt = String(b.pilot_type || '').trim();
-    if (ctam) addTo(typeLabel(ctam), b);
-    else if (pt === 'New - Paid' || pt === 'New - Free') addTo('New Logo', b); // brand-new PMC pilots
-  }
+    if (pt === 'New - Paid' || pt === 'New - Free') return 'New Logo';
+    return pt || 'Other'; // Conversion / Pilot Expansion / Second Signature, or untyped
+  };
+  let totalBookings = 0;
+  for (const b of typeBookings) { totalBookings += Number(b.company_total_booking) || 0; addTo(typeBucketOf(b), b); }
   const ctamOpts = (state.schema.bookings.editable.find((f) => f.key === 'ctam_type')?.options || []).filter(Boolean);
-  const typeOrder = ['New Logo', ...new Set(ctamOpts.map(typeLabel))];
+  const pilotOpts = (state.schema.bookings.editable.find((f) => f.key === 'pilot_type')?.options || []).filter(Boolean);
+  const pilotExtra = pilotOpts.filter((p) => p !== 'New - Paid' && p !== 'New - Free');
+  const typeOrder = ['New Logo', ...new Set(ctamOpts.map(typeLabel)), ...pilotExtra, 'Other'];
   const types = [...byType.keys()].sort((a, b) => {
     const ia = typeOrder.indexOf(a); const ib = typeOrder.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
@@ -5522,13 +5529,18 @@ function renderSaasDashboard(idxs, category, churnOf) {
     return `<div class="metric"><span class="k">${escapeHtml(t)}</span><span class="v">${fmtMoney(g.total)}</span>`
       + `<span class="saas-type-count">${g.pmcs.size} PMC${g.pmcs.size === 1 ? '' : 's'}</span></div>`;
   }).join('');
+  const totalPmcs = new Set(typeBookings.map((b) => String(b.pmc || '').trim().toLowerCase()).filter(Boolean)).size;
+  const totalTile = `<div class="metric accent"><span class="k">Total Bookings</span><span class="v">${fmtMoney(totalBookings)}</span>`
+    + `<span class="saas-type-count">${totalPmcs} PMC${totalPmcs === 1 ? '' : 's'}</span></div>`;
   const typeMonthSel = '<select id="saasTypeMonth" class="churn-quarter">'
     + typeMonthOpts.map((o) => `<option${o === state.saasTypeMonth ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') + '</select>';
 
   $('#saasDashboard').innerHTML =
     `<div class="metrics-title">${escapeHtml(category)} — Recognized MRR by Month</div><div class="metrics-row">${mrrTiles}</div>`
     + `<div class="metrics-title">${escapeHtml(category)} — Churn by Month</div><div class="metrics-row">${churnTiles}</div>`
-    + `<div class="metrics-title metrics-title-row"><span>Multifamily Bookings per Type</span>${typeMonthSel}</div>`
+    + `<div class="metrics-title metrics-title-row"><span>Multifamily Bookings</span>${typeMonthSel}</div>`
+    + `<div class="metrics-row">${totalTile}</div>`
+    + '<div class="metrics-title">Bookings per Type</div>'
     + `<div class="metrics-row">${typeTiles || '<span class="muted">No bookings for this month.</span>'}</div>`;
   $('#saasCount').textContent = `${category} · ${state.saasQuarter}`;
 }
