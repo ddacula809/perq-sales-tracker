@@ -462,6 +462,8 @@ tbody td.ro.num { text-align: right; font-family: 'Fira Mono', monospace; }
 tbody td.offset-na { text-align: right; }
 /* Bookings "Status" column + row highlighting vs the Churn Tracker.
    !important + later source order so the tint wins over zebra, computed and billing cells. */
+/* Legacy (migrated historical) rows — subtle grey; churned/never-live tints below still win. */
+tbody tr.row-legacy td { background: #ecebe8 !important; color: #6b6770; }
 tbody tr.row-churned td { background: #fbe1e1 !important; }
 tbody tr.row-never-live td { background: #e3ebfb !important; }
 /* Hovering a status-tinted row: a deeper shade of its own tint so the row highlight stays clear

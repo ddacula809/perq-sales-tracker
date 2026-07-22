@@ -354,25 +354,31 @@ function churnStatusCell(row) {
   const s = bookingChurnStatus(row);
   return `<td class="ro booking-status status-${s}" data-col="churn_status">${CHURN_STATUS_LABEL[s]}</td>`;
 }
-// The <tr> class that tints churned (red) / never-live (blue) rows in the Bookings grid.
+// The <tr> class that tints legacy (grey), churned (red) / never-live (blue) rows in Bookings.
 function rowStatusClass(row) {
   if (state.tab !== 'bookings') return '';
+  const cls = [];
+  if (row.legacy) cls.push('row-legacy');
   const s = bookingChurnStatus(row);
-  return (s === 'churned' || s === 'never-live') ? ` class="row-${s}"` : '';
+  if (s === 'churned' || s === 'never-live') cls.push(`row-${s}`);
+  return cls.length ? ` class="${cls.join(' ')}"` : '';
 }
+// Legacy (migrated) bookings are locked for everyone except admins.
+function rowLocked(row) { return !!row.legacy && !isAdmin(); }
 
 function rowInnerHtml(row, i, fields) {
   const { cols, computedKeys } = fields || fieldsForTab();
+  const locked = rowLocked(row);
   let html = `<td class="rownum">${i + 1}</td>`;
   for (const f of cols) {
     if (f.key === 'churn_status') html += churnStatusCell(row);
     else if (f.key === 'ar_final_invoice_amount' && state.tab === 'churn' && isAdmin()) html += arOverrideCell(row);
     else if (state.tab === 'bookings' && BOOKING_OVERRIDE[f.key] && isAdmin() && isBookingAdjusted(row)) html += bookingOverrideCell(f.key, row);
     else if (computedKeys.has(f.key)) html += computedCell(f, row);
-    else if (canEditField(f)) html += editCell(f, row);
+    else if (canEditField(f) && !locked) html += editCell(f, row);
     else html += readonlyCell(f, row);
   }
-  let actions = canAddDelete() ? `<button class="row-del" title="Delete row" data-del="${row.id}">✕</button>` : '';
+  let actions = (canAddDelete() && !locked) ? `<button class="row-del" title="Delete row" data-del="${row.id}">✕</button>` : '';
   // Admin only, on the Bookings & Churn grids: a ▾ reveals Add-below / Duplicate.
   if ((state.tab === 'bookings' || state.tab === 'churn') && isAdmin()) {
     actions += '<div class="row-more">'

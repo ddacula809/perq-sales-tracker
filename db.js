@@ -275,6 +275,9 @@ export async function initDb() {
   // Revenue Desk instance a booking belongs to ('multifamily' = the original app; 'convert' = the
   // second instance). Kept out of the schema/grid; existing rows default to multifamily.
   await pool.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS instance TEXT NOT NULL DEFAULT 'multifamily'");
+  // Historical rows migrated from the old SaaS Financials workbook. Tagged so the UI can mark them
+  // and lock them for non-admins (admins may still correct them after reconciliation).
+  await pool.query('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS legacy BOOLEAN NOT NULL DEFAULT false');
   // Per-user access to the Convert instance (admins always have access).
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS convert_access BOOLEAN NOT NULL DEFAULT false');
   // Normalize Convert Division/Channel casing so variants collapse (auto/Auto -> Auto). initcap()
