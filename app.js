@@ -5703,7 +5703,8 @@ function renderSaasUnit(idxs, category, h) {
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
     const pmcProperty = b.property_name || b.property_id || '—'; // combined "PMC - Property"
     const mrr = Number(b.mrr) || 0;
-    const push = (type, monthIdx) => events.push({ type, pmcProperty, product: b.product || '—', monthIdx, mrr });
+    // Adds default to the booking MRR; churn events pass their own (negative) recognized amount.
+    const push = (type, monthIdx, amt = mrr) => events.push({ type, pmcProperty, product: b.product || '—', monthIdx, mrr: amt });
     // Go-live (add) event — effective month (carries over out of closed go-live months).
     const gi = effectiveGoLiveIdx(b);
     if (gi != null && idxSet.has(gi)) {
@@ -5712,14 +5713,16 @@ function renderSaasUnit(idxs, category, h) {
       else if (String(b.ctam_type || '').trim() === 'Downgrade') push('Downgrade', gi); // goes in the Churn bucket
       else push('Upsell', gi);
     }
-    // Churn (drop) events.
+    // Churn (drop) events — recognized as NEGATIVE amounts, exactly like the Main / SaaS dashboards:
+    // the prorated remainder in the final-invoice month and −AR the month after. Contraction is a
+    // partial reduction and is likewise negative.
     const c = churnOf(b);
     if (c) {
       const isContraction = String(c.classification || '') === 'Contraction';
       const pIdx = monthIdxFromMonthYear(c.final_invoice_month);
-      if (pIdx != null && idxSet.has(pIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, pIdx + 1) === 0 ? 'Churn Prorated Rooftop' : 'Churn prorated product'), pIdx);
+      if (pIdx != null && idxSet.has(pIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, pIdx + 1) === 0 ? 'Churn Prorated Rooftop' : 'Churn prorated product'), pIdx, Number(c.prorated_churn_amount) || 0);
       const fIdx = monthIdxFromMonthYear(c.final_churn_month);
-      if (fIdx != null && idxSet.has(fIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, fIdx) === 0 ? 'Churn Rooftop' : 'Churn Product'), fIdx);
+      if (fIdx != null && idxSet.has(fIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, fIdx) === 0 ? 'Churn Rooftop' : 'Churn Product'), fIdx, Number(c.final_churn_amount) || 0);
     }
   }
   const monthLabel = (idx) => `${MONTHS[idx % 12]} ${Math.floor(idx / 12)}`;
