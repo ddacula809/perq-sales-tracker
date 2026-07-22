@@ -972,6 +972,11 @@ tr.ss-group td {
 .saas-unit-gcount { color: var(--ink-soft); font-size: 11px; margin-left: 8px; }
 .saas-unit-gtotal { float: right; font-family: 'Fira Mono', monospace; font-weight: 700; }
 .churn-detail-card td.saas-unit-prop { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Property-rollup rows in the Unit Economics report */
+.saas-unit-prop-row td { font-weight: 500; }
+.saas-unit-nocaret { display: inline-block; width: 17px; }
+.saas-unit-detail td { color: var(--ink-soft); background: color-mix(in srgb, var(--paper) 45%, transparent); }
+.saas-unit-detail td.saas-unit-prop { padding-left: 6px; }
 .saas-dashboard[hidden] { display: none; }
 .saas-dashboard .metrics-title { margin-top: 14px; }
 .saas-dashboard .metrics-title:first-child { margin-top: 0; }

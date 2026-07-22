@@ -66,6 +66,7 @@ const state = {
   ssView: (localStorage.getItem('perqSsView') === 'property' ? 'pmc' : localStorage.getItem('perqSsView')) || 'product', // 'product' | 'pmc'
   ssExpanded: new Set(),    // property rows whose per-order detail is expanded (by row id)
   ssExpandedPmc: new Set(), // PMCs whose property rows are expanded (by PMC name)
+  saasUnitExpanded: new Set(), // Unit Economics property rows expanded to their products (month|bucket|prop)
   ssBarCollapsed: localStorage.getItem('perqSsBarCollapsed') === '1', // Sales Support toolbar collapsed
   bdDetail: null,     // active Billing Dashboard drill-down key
   bdCollapsed: false, // collapse the Billing Dashboard tiles to focus the detail
@@ -5733,13 +5734,34 @@ function renderSaasUnit(idxs, category, h) {
       const byBucket = new Map();
       for (const e of monthEvents) { const bk = saasBucketOf(e.type); if (!byBucket.has(bk)) byBucket.set(bk, []); byBucket.get(bk).push(e); }
       body = SAAS_BUCKET_ORDER.filter((bk) => byBucket.has(bk)).map((bk) => {
-        const list = byBucket.get(bk).sort((a, b) => String(a.pmcProperty).localeCompare(b.pmcProperty));
+        const list = byBucket.get(bk);
         const total = list.reduce((a, e) => a + e.mrr, 0);
+        // Roll the product-level events up to one row per property (PMC - Property).
+        const byProp = new Map();
+        for (const e of list) { if (!byProp.has(e.pmcProperty)) byProp.set(e.pmcProperty, []); byProp.get(e.pmcProperty).push(e); }
+        const props = [...byProp.entries()].sort((a, b) => String(a[0]).localeCompare(b[0]));
         const head = `<tr class="saas-unit-group"><td colspan="3"><span class="saas-pill ${SAAS_TYPE_CLASS[bk] || ''}">${escapeHtml(bk)}</span>`
-          + `<span class="saas-unit-gcount">${list.length}</span><span class="saas-unit-gtotal">${fmtMoney(total)}</span></td></tr>`;
-        const rows = list.map((e) =>
-          `<tr><td class="saas-unit-prop" title="${escapeAttr(e.pmcProperty)}">${escapeHtml(e.pmcProperty)}</td>`
-          + `<td>${escapeHtml(e.product)}</td><td class="num">${fmtMoney(e.mrr)}</td></tr>`).join('');
+          + `<span class="saas-unit-gcount">${props.length}</span><span class="saas-unit-gtotal">${fmtMoney(total)}</span></td></tr>`;
+        // Each property row shows its rolled-up total; a ▸ arrow expands to the products behind it
+        // (only when there's more than one product to reveal).
+        const rows = props.map(([prop, evs]) => {
+          const pTotal = evs.reduce((a, e) => a + e.mrr, 0);
+          const multi = evs.length > 1;
+          const key = `${mIdx}|${bk}|${prop}`;
+          const open = state.saasUnitExpanded.has(key);
+          const caret = multi
+            ? `<button type="button" class="ss-expand${open ? ' open' : ''}" data-saas-unit-expand="${escapeAttr(key)}" title="Show / hide products">▸</button>`
+            : '<span class="saas-unit-nocaret"></span>';
+          const propRow = `<tr class="saas-unit-prop-row"><td class="saas-unit-prop" title="${escapeAttr(prop)}">${caret}<span>${escapeHtml(prop)}</span>`
+            + `${multi ? ` <span class="ss-count">${evs.length}</span>` : ''}</td>`
+            + `<td>${multi ? '' : escapeHtml(evs[0].product)}</td><td class="num">${fmtMoney(pTotal)}</td></tr>`;
+          const detail = (multi && open)
+            ? evs.slice().sort((a, b) => String(a.product).localeCompare(b.product)).map((e) =>
+              `<tr class="saas-unit-detail"><td class="saas-unit-prop"><span class="ss-detail-indent">↳</span></td>`
+              + `<td>${escapeHtml(e.product)}</td><td class="num">${fmtMoney(e.mrr)}</td></tr>`).join('')
+            : '';
+          return propRow + detail;
+        }).join('');
         return head + rows;
       }).join('');
     }
@@ -5759,6 +5781,14 @@ function wireSaas() {
   // it with a delegated listener on the container.
   $('#saasDashboard').addEventListener('change', (e) => {
     if (e.target.id === 'saasTypeMonth') { state.saasTypeMonth = e.target.value; renderSaas(); }
+  });
+  // Unit Economics: expand / collapse a property row to the products behind its total.
+  $('#saasUnit').addEventListener('click', (e) => {
+    const exp = e.target.closest('[data-saas-unit-expand]');
+    if (!exp) return;
+    const key = exp.dataset.saasUnitExpand;
+    if (state.saasUnitExpanded.has(key)) state.saasUnitExpanded.delete(key); else state.saasUnitExpanded.add(key);
+    renderSaas();
   });
   document.querySelectorAll('[data-saas-sub]').forEach((b) => {
     b.onclick = () => { state.saasSub = b.dataset.saasSub; renderSaas(); };
