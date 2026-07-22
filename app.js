@@ -2502,7 +2502,8 @@ function legacyPreviewHtml(d) {
   const errs = (d.errors || []).map((er) =>
     `<tr><td>${escapeHtml(er.tab)}</td><td>${escapeHtml(er.property || '—')}</td><td>${escapeHtml(er.reason)}</td></tr>`).join('');
   let html = `<p><strong>${fmtNum(d.toAdd)}</strong> booking(s) to add · <strong>${fmtNum(d.churnToAdd || 0)}</strong> churn record(s) to add (churned properties) · `
-    + `<strong>${fmtNum(d.skipped)}</strong> skipped (already present) · <strong>${fmtNum(d.skippedWon || 0)}</strong> WON pilots skipped · <strong>${fmtNum(d.errorCount)}</strong> couldn't map.</p>`;
+    + `<strong>${fmtNum(d.skipped)}</strong> skipped (already in the Desk) · <strong>${fmtNum(d.errorCount)}</strong> couldn't map.</p>`
+    + '<p style="color:var(--ink-soft);font-size:12px">Edit + PS tabs only. Pilots (Trials tab) are not migrated — that tab has no bookings, only MRR movement.</p>';
   // Per-quarter Company Total: already in the Revenue Desk vs. what this adds vs. combined — check
   // "Combined" against the workbook's quarter total before committing.
   if (d.quarters && d.quarters.length) {
