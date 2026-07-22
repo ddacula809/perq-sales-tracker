@@ -281,6 +281,9 @@ export async function initDb() {
   await pool.query('ALTER TABLE churn ADD COLUMN IF NOT EXISTS legacy BOOLEAN NOT NULL DEFAULT false');
   // Per-user access to the Convert instance (admins always have access).
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS convert_access BOOLEAN NOT NULL DEFAULT false');
+  // Per-user explicit allow-list of sidebar sections. NULL/empty = fall back to role defaults;
+  // a non-empty array is the exact set of sections the user may see (admins always see all).
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS section_access TEXT[]');
   // Normalize Convert Division/Channel casing so variants collapse (auto/Auto -> Auto). initcap()
   // capitalizes the first letter of each word and lowercases the rest, matching the importer.
   await runOnce('convert_division_channel_case_v1', async () => {
@@ -464,37 +467,43 @@ export async function getUserByUsername(username) {
   return rows[0];
 }
 export async function listUsers() {
-  const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, created_at FROM users ORDER BY username ASC');
+  const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, section_access, created_at FROM users ORDER BY username ASC');
   return rows;
 }
-export async function createUser({ username, password, role, account_owner, convert_access }) {
+export async function createUser({ username, password, role, account_owner, convert_access, section_access }) {
+  const sa = Array.isArray(section_access) && section_access.length ? section_access : null;
   const { rows } = await pool.query(
-    'INSERT INTO users (username, password_hash, role, account_owner, convert_access) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, role, account_owner, convert_access, created_at',
-    [username, hashPassword(password), role, account_owner || null, !!convert_access]
+    'INSERT INTO users (username, password_hash, role, account_owner, convert_access, section_access) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, username, role, account_owner, convert_access, section_access, created_at',
+    [username, hashPassword(password), role, account_owner || null, !!convert_access, sa]
   );
   return rows[0];
 }
-export async function updateUser(id, { role, password, account_owner, convert_access }) {
+export async function updateUser(id, { role, password, account_owner, convert_access, section_access }) {
   const sets = [];
   const vals = [];
   if (role) { vals.push(role); sets.push(`role=$${vals.length}`); }
   if (password) { vals.push(hashPassword(password)); sets.push(`password_hash=$${vals.length}`); }
   if (account_owner !== undefined) { vals.push(account_owner || null); sets.push(`account_owner=$${vals.length}`); }
   if (convert_access !== undefined) { vals.push(!!convert_access); sets.push(`convert_access=$${vals.length}`); }
+  // Empty array => NULL, which means "fall back to role defaults" for this user.
+  if (section_access !== undefined) {
+    vals.push(Array.isArray(section_access) && section_access.length ? section_access : null);
+    sets.push(`section_access=$${vals.length}`);
+  }
   if (!sets.length) {
-    const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, created_at FROM users WHERE id=$1', [id]);
+    const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, section_access, created_at FROM users WHERE id=$1', [id]);
     return rows[0];
   }
   vals.push(id);
   const { rows } = await pool.query(
-    `UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING id, username, role, account_owner, convert_access, created_at`,
+    `UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING id, username, role, account_owner, convert_access, section_access, created_at`,
     vals
   );
   return rows[0];
 }
 export async function deleteUser(id) { await pool.query('DELETE FROM users WHERE id=$1', [id]); }
 export async function getUserById(id) {
-  const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, created_at FROM users WHERE id=$1', [id]);
+  const { rows } = await pool.query('SELECT id, username, role, account_owner, convert_access, section_access, created_at FROM users WHERE id=$1', [id]);
   return rows[0];
 }
 export async function countAdmins() {

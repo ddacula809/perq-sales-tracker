@@ -853,14 +853,28 @@ tr.ss-group td {
   border-bottom: 1px solid var(--line-strong);
 }
 
-/* Users admin panel */
+/* Products / Close Month modals reuse this card shell */
 .users-card { width: 560px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }
 .users-card input, .users-card select { width: auto; margin-bottom: 0; }
 .users-card .btn { width: auto; }
-.users-list { overflow: auto; margin-bottom: 14px; min-height: 0; }
-.user-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
-.user-row .user-name { flex: 1; font-weight: 600; }
+.users-card .users-list { overflow: auto; min-height: 0; }
+
+/* Users admin — full page */
+.page-view { position: fixed; inset: 0; background: var(--paper); overflow: auto; z-index: 125; }
+.page-view[hidden] { display: none; }
+.page-view-inner { max-width: 1040px; margin: 0 auto; padding: 18px 22px 40px; }
+.users-page input, .users-page select { width: auto; margin-bottom: 0; }
+.users-page .btn { width: auto; }
+.users-hint { margin: 2px 0 14px; color: var(--ink-soft); font-size: 12px; }
+.users-list { margin-bottom: 14px; }
+.user-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 6px; border-bottom: 1px solid var(--line); }
+.user-row .user-name { flex: 1; min-width: 140px; font-weight: 600; }
 .user-row select { font: inherit; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; }
+/* Per-user section-access tickboxes (their own line, full width) */
+.user-sections { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 4px 2px 2px; }
+.user-sections.muted { color: var(--ink-soft); font-size: 12px; }
+.user-sections .sec-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); margin-right: 4px; }
+.sec-chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; white-space: nowrap; }
 .add-user { border-top: 1px solid var(--line); padding-top: 14px; }
 .add-user h3 { margin: 0 0 8px; font-size: 13px; }
 .add-user-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

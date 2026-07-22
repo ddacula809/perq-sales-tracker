@@ -127,6 +127,25 @@ function isSales() { return role() === 'sales'; }                 // salesperson
 function salesOwner() { return state.user ? (state.user.account_owner || '') : ''; }
 // Access to the Convert instance: admins always; others only when granted (users.convert_access).
 function canConvert() { return isAdmin() || !!(state.user && state.user.convert_access); }
+
+// ---- Section access (which sidebar sections a user may see) ----
+// Every grantable sidebar section, in sidebar order. Mirrors server ALL_SECTIONS.
+const ALL_SECTION_KEYS = ['dashboard', 'newbooking', 'bookings', 'salessupport', 'churn', 'saas', 'billing', 'sfrecon', 'legacy'];
+// What each role has always shown, used when a user has no explicit allow-list. Mirrors the server.
+function roleDefaultSections(r) {
+  const base = ['dashboard', 'bookings', 'churn', 'salessupport'];
+  if (r === 'admin') return ALL_SECTION_KEYS.slice();
+  if (r === 'standard') return [...base, 'saas'];
+  if (r === 'billing') return [...base, 'saas', 'billing', 'legacy'];
+  return base; // sales_admin, sales, viewer
+}
+// The sections THIS user can see: admins all; explicit allow-list if set; else role defaults.
+function userSections() {
+  if (isAdmin()) return ALL_SECTION_KEYS.slice();
+  const sa = state.user && state.user.section_access;
+  return (Array.isArray(sa) && sa.length) ? sa : roleDefaultSections(role());
+}
+function canSection(key) { return userSections().includes(key); }
 // Are we currently viewing the Convert instance? Convert's Bookings diverge from Multifamily
 // (category-tagged rows, different columns, none of the churn/booking-type enhancements).
 function isConvert() { return state.instance === 'convert'; }
@@ -1987,13 +2006,14 @@ async function loadAll() {
   const openPeriods = state.salesPeriods.filter((p) => p.status === 'open');
   state.salesPeriod = openPeriods.length ? openPeriods[openPeriods.length - 1].period
     : (state.salesPeriods.length ? state.salesPeriods[state.salesPeriods.length - 1].period : '');
-  state.notifications = (isAdmin() || role() === 'billing') ? await api('/api/notifications') : [];
-  // Salesforce Recon Data (admin-only tab) + its Account Name list for the Sales Support PMC dropdown.
-  state.rows.salesforce_recon = isAdmin() ? await api('/api/salesforce_recon') : [];
+  // Data fetches follow section access (admins + role defaults + any explicit grant).
+  state.notifications = canSection('billing') ? await api('/api/notifications') : [];
+  // Salesforce Recon Data (its own section) + Account Name list for the Sales Support PMC dropdown.
+  state.rows.salesforce_recon = canSection('sfrecon') ? await api('/api/salesforce_recon') : [];
   state.sfPmcs = ['admin', 'standard', 'sales_admin', 'sales'].includes(role())
     ? await api('/api/salesforce_recon/pmcs') : [];
-  // Legacy trackers (admin + billing only).
-  if (isAdmin() || role() === 'billing') {
+  // Legacy trackers.
+  if (canSection('legacy')) {
     state.rows.legacy_golives = await api('/api/legacy_golives');
     state.rows.legacy_churn = await api('/api/legacy_churn');
   } else { state.rows.legacy_golives = []; state.rows.legacy_churn = []; }
@@ -2019,30 +2039,16 @@ function renderAll() {
   applyInstanceTheme();
   const sw = $('#instanceSwitcher');
   if (sw) { sw.hidden = !canConvert(); sw.value = state.instance; }
-  // The New Booking tab is admin-only.
-  document.querySelector('[data-tab="newbooking"]').hidden = !isAdmin();
-  if (state.tab === 'newbooking' && !isAdmin()) state.tab = 'dashboard';
-  // The Billing Dashboard is for admins and billing users.
-  const canBilling = isAdmin() || role() === 'billing';
-  document.querySelector('[data-tab="billing"]').hidden = !canBilling;
-  if (state.tab === 'billing' && !canBilling) state.tab = 'dashboard';
-  // Salesforce Recon Data is admin-only.
-  document.querySelector('[data-tab="sfrecon"]').hidden = !isAdmin();
-  if (state.tab === 'sfrecon' && !isAdmin()) state.tab = 'dashboard';
-  // Legacy trackers are for admins and billing users.
-  document.querySelector('[data-tab="legacy"]').hidden = !canBilling;
-  if (state.tab === 'legacy' && !canBilling) state.tab = 'dashboard';
-  // SaaS Financials (MRR movement view) — admins, standard, and billing.
-  const canSaas = isAdmin() || role() === 'standard' || role() === 'billing';
-  document.querySelector('[data-tab="saas"]').hidden = !canSaas;
-  if (state.tab === 'saas' && !canSaas) state.tab = 'dashboard';
-  // (Sales roles see Churn read-only — canEditField returns false for them.)
-  // The tabs with no role gate are visible in Multifamily; reset them each render so returning
-  // from Convert restores them.
-  ['dashboard', 'bookings', 'churn', 'salessupport'].forEach((t) => {
-    const el = document.querySelector(`[data-tab="${t}"]`); if (el) el.hidden = false;
+  // Sidebar section visibility is per-user: admins see all; a user with an explicit allow-list sees
+  // exactly those; everyone else sees their role defaults. (Sales roles still see Churn read-only —
+  // canEditField gates editing separately.) Reset each render so returning from Convert restores them.
+  const allowed = userSections();
+  ALL_SECTION_KEYS.forEach((t) => {
+    const el = document.querySelector(`[data-tab="${t}"]`); if (el) el.hidden = !allowed.includes(t);
   });
-  // Convert instance: only Bookings (+ New Booking) exist for now — hide every other tab and the
+  // If the current tab isn't allowed, fall back to the first section the user can see.
+  if (!allowed.includes(state.tab)) state.tab = allowed.includes('dashboard') ? 'dashboard' : (allowed[0] || 'dashboard');
+  // Convert instance: only Bookings (+ Dashboard) exist for now — hide every other tab and the
   // Multifamily-only data operations (import/upload/reconcile/offsets act on Multifamily datasets).
   const inConvert = state.instance === 'convert';
   if (inConvert) {
@@ -2076,7 +2082,7 @@ function renderAll() {
   $('#closeMonthBtn').hidden = !(isAdmin() && mfOps);
   $('#legacyImportBtn').hidden = !(isAdmin() && mfOps);
   $('#legacyClearBtn').hidden = !(isAdmin() && mfOps);
-  $('#notifWrap').hidden = !canBilling;
+  $('#notifWrap').hidden = !canSection('billing');
   updateBell();
   // "Ask Claude" assistant: shown only when configured (API key set) and for full-data roles.
   const canAssistant = !!(state.schema && state.schema.assistantEnabled) && ['admin', 'standard', 'billing'].includes(role());
@@ -4941,6 +4947,22 @@ function ownerOptionsHtml(current) {
 
 async function openUsers() { $('#usersModal').hidden = false; await renderUsersList(); }
 
+// The sections a given user currently sees (admins all; explicit allow-list if set; else defaults).
+function effectiveSectionsFor(u) {
+  if (u.role === 'admin') return ALL_SECTION_KEYS.slice();
+  return (Array.isArray(u.section_access) && u.section_access.length) ? u.section_access : roleDefaultSections(u.role);
+}
+// Per-user section-access tickboxes. Admins get a static "all" note; everyone else gets a checkbox
+// per section, pre-checked to what they see today. Toggling switches them to an explicit allow-list.
+function sectionAccessHtml(u) {
+  if (u.role === 'admin') return '<div class="user-sections muted">Section access: <em>all sections (admin)</em></div>';
+  const eff = new Set(effectiveSectionsFor(u));
+  const explicit = Array.isArray(u.section_access) && u.section_access.length;
+  const boxes = ALL_SECTION_KEYS.map((k) =>
+    `<label class="sec-chk"><input type="checkbox" data-section-for="${u.id}" data-section="${k}"${eff.has(k) ? ' checked' : ''} /> ${escapeHtml(TAB_LABELS[k] || k)}</label>`).join('');
+  return `<div class="user-sections"><span class="sec-lbl">Sections${explicit ? '' : ' · role default'}</span>${boxes}</div>`;
+}
+
 async function renderUsersList() {
   try {
     const users = await api('/api/users');
@@ -4964,6 +4986,7 @@ async function renderUsersList() {
         ${impBtn}
         <button type="button" class="view-btn" data-pw-user="${u.id}">Reset password</button>
         <button type="button" class="view-btn danger" data-del-user="${u.id}">Delete</button>
+        ${sectionAccessHtml(u)}
       </div>`;
     }).join('');
   } catch (e) { $('#usersList').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
@@ -5103,7 +5126,6 @@ function wireCloseMonth() {
 function wireUsers() {
   $('#usersBtn').onclick = () => { $('#userMenu').hidden = true; openUsers(); };
   $('#usersClose').onclick = () => { $('#usersModal').hidden = true; };
-  $('#usersModal').addEventListener('click', (e) => { if (e.target.id === 'usersModal') $('#usersModal').hidden = true; });
 
   // Show/populate the Account Owner picker only for the Sales role.
   $('#newUserRole').addEventListener('change', () => {
@@ -5154,6 +5176,19 @@ function wireUsers() {
         await api(`/api/users/${conv.dataset.convertFor}`, { method: 'PATCH', body: JSON.stringify({ convert_access: conv.checked }) });
         toast(conv.checked ? 'Convert access granted' : 'Convert access removed');
       } catch (err) { toast(err.message, true); conv.checked = !conv.checked; }
+      return;
+    }
+    // Section access: gather every ticked section for this user and save it as the explicit
+    // allow-list. Unticking everything sends [] -> the user falls back to their role defaults.
+    const sec = e.target.closest('[data-section-for]');
+    if (sec) {
+      const uid = sec.dataset.sectionFor;
+      const checked = [...$('#usersList').querySelectorAll(`[data-section-for="${uid}"]`)]
+        .filter((b) => b.checked).map((b) => b.dataset.section);
+      try {
+        await api(`/api/users/${uid}`, { method: 'PATCH', body: JSON.stringify({ section_access: checked }) });
+        toast('Section access updated');
+      } catch (err) { toast(err.message, true); sec.checked = !sec.checked; }
     }
   });
 

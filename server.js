@@ -53,7 +53,8 @@ app.post('/api/login', async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
     const safe = { id: user.id, username: user.username, role: user.role, account_owner: user.account_owner || null, convert_access: !!user.convert_access };
-    res.json({ token: signToken(safe), user: safe });
+    // section_access rides on the /api/me response (read fresh), not the token, so grants apply live.
+    res.json({ token: signToken(safe), user: { ...safe, section_access: user.section_access || null } });
   } catch (e) { next(e); }
 });
 
@@ -83,7 +84,7 @@ app.get('/api/me', async (req, res, next) => {
   try {
     const u = await getUserById(req.user.id);
     if (!u) return res.status(401).json({ error: 'Unauthorized' });
-    res.json({ user: { id: u.id, username: u.username, role: u.role, account_owner: u.account_owner || null, convert_access: !!u.convert_access } });
+    res.json({ user: { id: u.id, username: u.username, role: u.role, account_owner: u.account_owner || null, convert_access: !!u.convert_access, section_access: u.section_access || null } });
   } catch (e) { next(e); }
 });
 
@@ -106,6 +107,34 @@ app.post('/api/change-password', async (req, res, next) => {
 // 403 unless the current user holds one of the listed roles.
 const requireRole = (...roles) => (req, res, next) =>
   roles.includes(req.user.role) ? next() : res.status(403).json({ error: 'You do not have permission to do that.' });
+
+// ---- Section access (sidebar visibility, per-user) ----
+// Sections are the sidebar tabs. Access is an explicit per-user allow-list (section_access); when a
+// user has none set we fall back to what their role has always shown. Admins always see everything.
+// Kept in sync with the client's roleDefaultSections()/userSections() in app.js.
+const ALL_SECTIONS = ['dashboard', 'newbooking', 'bookings', 'salessupport', 'churn', 'saas', 'billing', 'sfrecon', 'legacy'];
+function roleDefaultSections(role) {
+  const base = ['dashboard', 'bookings', 'churn', 'salessupport'];
+  if (role === 'admin') return ALL_SECTIONS.slice();
+  if (role === 'standard') return [...base, 'saas'];
+  if (role === 'billing') return [...base, 'saas', 'billing', 'legacy'];
+  return base; // sales_admin, sales, viewer
+}
+function effectiveSections(user) {
+  if (!user) return [];
+  if (user.role === 'admin') return ALL_SECTIONS.slice();
+  const sa = user.section_access;
+  return (Array.isArray(sa) && sa.length) ? sa : roleDefaultSections(user.role);
+}
+// Read the user fresh so a just-granted section works without re-login.
+async function sectionAllowed(req, section) {
+  if (req.user.role === 'admin') return true;
+  try { const u = await getUserById(req.user.id); return effectiveSections(u).includes(section); } catch { return false; }
+}
+const requireSection = (section) => async (req, res, next) => {
+  try { if (await sectionAllowed(req, section)) return next(); } catch { /* fall through */ }
+  res.status(403).json({ error: 'You do not have permission to do that.' });
+};
 
 const BILLING_KEYS = { bookings: BOOKING_BILLING_KEYS, churn: CHURN_BILLING_KEYS };
 
@@ -792,8 +821,9 @@ app.post('/api/sales_periods/open', requireRole('admin', 'sales_admin'), async (
   } catch (e) { next(e); }
 });
 
-// ---- Salesforce Recon Data: admin-only master reference, replaced wholesale on import ----
-app.get('/api/salesforce_recon', requireRole('admin'), async (_req, res, next) => {
+// ---- Salesforce Recon Data: master reference, replaced wholesale on import ----
+// Readable by admins, plus any user explicitly granted the "sfrecon" section. (Import stays admin.)
+app.get('/api/salesforce_recon', requireSection('sfrecon'), async (_req, res, next) => {
   try { res.json(await listRows('salesforce_recon')); } catch (e) { next(e); }
 });
 // Distinct Account Names (PMCs) for the Sales Support PMC dropdown. Anyone who can edit
@@ -825,11 +855,12 @@ app.post('/api/salesforce_recon/reconcile-owners', requireRole('admin'), async (
   try { await reconcileOwnerNames(); res.json({ ok: true }); } catch (e) { next(e); }
 });
 
-// ---- Legacy trackers (admin + billing): read-only archive from the old AR Tracking workbook ----
-app.get('/api/legacy_golives', requireRole('admin', 'billing'), async (_req, res, next) => {
+// ---- Legacy trackers: read-only archive from the old AR Tracking workbook ----
+// Readable by admins/billing (role default) and anyone granted the "legacy" section.
+app.get('/api/legacy_golives', requireSection('legacy'), async (_req, res, next) => {
   try { res.json(await listRows('legacy_golives')); } catch (e) { next(e); }
 });
-app.get('/api/legacy_churn', requireRole('admin', 'billing'), async (_req, res, next) => {
+app.get('/api/legacy_churn', requireSection('legacy'), async (_req, res, next) => {
   try { res.json(await listRows('legacy_churn')); } catch (e) { next(e); }
 });
 app.post('/api/legacy/import', requireRole('admin'), upload.single('file'), async (req, res, next) => {
@@ -1042,8 +1073,14 @@ app.post('/api/users', requireRole('admin'), async (req, res, next) => {
 app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { role, password, account_owner, convert_access } = req.body || {};
+    const { role, password, account_owner, convert_access, section_access } = req.body || {};
     if (role && !USER_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role.' });
+    // section_access, when provided, must be an array of known section keys (empty = role defaults).
+    let sections;
+    if (section_access !== undefined) {
+      if (!Array.isArray(section_access)) return res.status(400).json({ error: 'section_access must be an array.' });
+      sections = [...new Set(section_access)].filter((s) => ALL_SECTIONS.includes(s));
+    }
     // Never leave the system with zero admins.
     if (role && role !== 'admin') {
       const target = await getUserById(id);
@@ -1051,7 +1088,7 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
         return res.status(400).json({ error: 'Cannot change the role of the last admin.' });
       }
     }
-    const updated = await updateUser(id, { role, password, account_owner, convert_access });
+    const updated = await updateUser(id, { role, password, account_owner, convert_access, section_access: sections });
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(updated);
   } catch (e) { next(e); }
@@ -1075,7 +1112,7 @@ app.post('/api/impersonate/:id', requireRole('admin'), async (req, res, next) =>
     const target = await getUserById(Number(req.params.id));
     if (!target) return res.status(404).json({ error: 'User not found.' });
     const safe = { id: target.id, username: target.username, role: target.role, account_owner: target.account_owner || null, convert_access: !!target.convert_access };
-    res.json({ token: signToken({ ...safe, imp_by: req.user.username }), user: safe });
+    res.json({ token: signToken({ ...safe, imp_by: req.user.username }), user: { ...safe, section_access: target.section_access || null } });
   } catch (e) { next(e); }
 });
 
@@ -1226,8 +1263,8 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
   } catch (e) { next(e); }
 });
 
-// ---- Notifications (admin + billing) ----
-app.get('/api/notifications', requireRole('admin', 'billing'), async (_req, res, next) => {
+// ---- Notifications (admin + billing, plus anyone granted the Billing section) ----
+app.get('/api/notifications', requireSection('billing'), async (_req, res, next) => {
   try { res.json(await listNotifications()); } catch (e) { next(e); }
 });
 // Bell "✕" — acknowledge only (keeps the dashboard warning).

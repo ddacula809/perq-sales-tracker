@@ -460,12 +460,14 @@
     </div>
   </div>
 
-  <div class="modal" id="usersModal" hidden>
-    <div class="modal-card users-card">
+  <div class="page-view" id="usersModal" hidden>
+    <div class="page-view-inner users-page">
       <div class="entry-head">
         <h2>Users</h2>
-        <button type="button" class="entry-close" id="usersClose" title="Close">✕</button>
+        <button type="button" class="btn" id="usersClose" title="Back to app">← Back</button>
       </div>
+      <p class="users-hint">Tick the sections each user can access. Leave all boxes unchecked to fall back to the
+        role's default sections. Admins always have access to everything.</p>
       <div class="users-list" id="usersList"></div>
       <form id="addUserForm" class="add-user" autocomplete="off">
         <h3>Add user</h3>
