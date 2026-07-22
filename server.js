@@ -1360,9 +1360,11 @@ app.post('/api/legacy/preview', requireRole('admin'), upload.single('file'), asy
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const existing = (await listRows('bookings')).filter((b) => (b.instance || 'multifamily') === 'multifamily');
-    const { rows, skipped, errors, perTab } = parseLegacyWorkbook(req.file.buffer, existing);
+    const existingChurn = await listRows('churn');
+    const { rows, churnRows, skipped, skippedWon, errors, perTab } = parseLegacyWorkbook(req.file.buffer, existing, existingChurn);
     res.json({
-      toAdd: rows.length, skipped, perTab, errorCount: errors.length, errors: errors.slice(0, 50),
+      toAdd: rows.length, churnToAdd: churnRows.length, skipped, skippedWon, perTab,
+      errorCount: errors.length, errors: errors.slice(0, 50),
       sample: rows.slice(0, 25).map((r) => ({
         property: r.property_name || r.property_id, product: r.product,
         month: `${r.booking_month} ${r.booking_year}`, mrr: r.mrr, amount: r.company_total_override,
@@ -1376,31 +1378,37 @@ app.post('/api/legacy/commit', requireRole('admin'), upload.single('file'), asyn
   try {
     if (!req.file) { client.release(); return res.status(400).json({ error: 'No file uploaded' }); }
     const existing = (await listRows('bookings')).filter((b) => (b.instance || 'multifamily') === 'multifamily');
-    const { rows } = parseLegacyWorkbook(req.file.buffer, existing);
-    // Insert every legacy row in one transaction (atomic — a failure rolls the whole batch back),
-    // chunked into multi-row INSERTs. `legacy`/`instance` aren't schema fields so include them here.
-    const cols = [...BOOKING_FIELDS.map((f) => f.key), 'legacy', 'instance'];
-    const quoted = cols.map((c) => `"${c}"`).join(', ');
-    const CHUNK = 300;
-    let added = 0;
-    await client.query('BEGIN');
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const batch = rows.slice(i, i + CHUNK);
-      const params = []; const tuples = [];
-      for (const rec of batch) {
-        const ph = cols.map((c) => {
-          let v = c === 'legacy' ? true : (c === 'instance' ? 'multifamily' : rec[c]);
-          if (v === undefined) v = null;
-          params.push(v);
-          return `$${params.length}`;
-        });
-        tuples.push(`(${ph.join(', ')})`);
+    const existingChurn = await listRows('churn');
+    const { rows, churnRows } = parseLegacyWorkbook(req.file.buffer, existing, existingChurn);
+    // Insert booking rows AND churned-property rows (into the Churn Tracker) in ONE transaction
+    // (atomic — a failure rolls the whole batch back), chunked into multi-row INSERTs.
+    const bulkInsert = async (table, records, fields) => {
+      if (!records.length) return 0;
+      const cols = [...fields.map((f) => f.key), 'legacy', 'instance'].filter((c, i, a) => a.indexOf(c) === i);
+      const usable = cols.filter((c) => c !== 'instance' || table === 'bookings'); // instance is bookings-only
+      const quoted = usable.map((c) => `"${c}"`).join(', ');
+      const CHUNK = 300; let n = 0;
+      for (let i = 0; i < records.length; i += CHUNK) {
+        const batch = records.slice(i, i + CHUNK);
+        const params = []; const tuples = [];
+        for (const rec of batch) {
+          const ph = usable.map((c) => {
+            let v = c === 'legacy' ? true : (c === 'instance' ? 'multifamily' : rec[c]);
+            if (v === undefined) v = null;
+            params.push(v); return `$${params.length}`;
+          });
+          tuples.push(`(${ph.join(', ')})`);
+        }
+        await client.query(`INSERT INTO ${table} (${quoted}) VALUES ${tuples.join(', ')}`, params);
+        n += batch.length;
       }
-      await client.query(`INSERT INTO bookings (${quoted}) VALUES ${tuples.join(', ')}`, params);
-      added += batch.length;
-    }
+      return n;
+    };
+    await client.query('BEGIN');
+    const added = await bulkInsert('bookings', rows, BOOKING_FIELDS);
+    const churnAdded = await bulkInsert('churn', churnRows, CHURN_FIELDS);
     await client.query('COMMIT');
-    res.json({ added });
+    res.json({ added, churnAdded });
   } catch (e) { try { await client.query('ROLLBACK'); } catch { /* ignore */ } next(e); }
   finally { client.release(); }
 });

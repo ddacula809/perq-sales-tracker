@@ -278,6 +278,7 @@ export async function initDb() {
   // Historical rows migrated from the old SaaS Financials workbook. Tagged so the UI can mark them
   // and lock them for non-admins (admins may still correct them after reconciliation).
   await pool.query('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS legacy BOOLEAN NOT NULL DEFAULT false');
+  await pool.query('ALTER TABLE churn ADD COLUMN IF NOT EXISTS legacy BOOLEAN NOT NULL DEFAULT false');
   // Per-user access to the Convert instance (admins always have access).
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS convert_access BOOLEAN NOT NULL DEFAULT false');
   // Normalize Convert Division/Channel casing so variants collapse (auto/Auto -> Auto). initcap()

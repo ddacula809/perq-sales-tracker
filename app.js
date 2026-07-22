@@ -2469,9 +2469,10 @@ function wireActions() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Commit failed');
       const d = await res.json();
       state.rows.bookings = await api('/api/bookings');
+      state.rows.churn = await api('/api/churn');
       renderAll();
       $('#resultModal').hidden = true;
-      toast(`Migrated ${d.added} legacy row(s)`);
+      toast(`Migrated ${d.added} booking(s) + ${d.churnAdded || 0} churn record(s)`);
     } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Commit migration'; }
   });
 }
@@ -2487,7 +2488,8 @@ function legacyPreviewHtml(d) {
     + `<td>${s.pilot ? 'Pilot' : ''}</td></tr>`).join('');
   const errs = (d.errors || []).map((er) =>
     `<tr><td>${escapeHtml(er.tab)}</td><td>${escapeHtml(er.property || '—')}</td><td>${escapeHtml(er.reason)}</td></tr>`).join('');
-  let html = `<p><strong>${fmtNum(d.toAdd)}</strong> new row(s) to add · <strong>${fmtNum(d.skipped)}</strong> skipped (already present) · <strong>${fmtNum(d.errorCount)}</strong> couldn't map.</p>`
+  let html = `<p><strong>${fmtNum(d.toAdd)}</strong> booking(s) to add · <strong>${fmtNum(d.churnToAdd || 0)}</strong> churn record(s) to add (churned properties) · `
+    + `<strong>${fmtNum(d.skipped)}</strong> skipped (already present) · <strong>${fmtNum(d.skippedWon || 0)}</strong> WON pilots skipped · <strong>${fmtNum(d.errorCount)}</strong> couldn't map.</p>`
     + '<table class="recon-table"><thead><tr><th>Tab</th><th class="num">To add</th><th class="num">Skipped</th><th class="num">Errors</th><th>Note</th></tr></thead>'
     + `<tbody>${tabRows}</tbody></table>`;
   if (sample) {

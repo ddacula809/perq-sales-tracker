@@ -30,6 +30,20 @@ function hdrMonth(v) {
   return { month: MONTHS[m], year: y, iso: `${y}-${String(m + 1).padStart(2, '0')}-01` };
 }
 const isDateHdr = (v) => hdrMonth(v) !== null;
+// A day-level date cell (Date or Excel serial) -> 'YYYY-MM-DD', else null.
+function cellDate(v) {
+  let d = null;
+  if (v instanceof Date) d = v;
+  else if (typeof v === 'number' && v >= 20000 && v <= 90000) d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
+  return (d && !isNaN(d)) ? d.toISOString().slice(0, 10) : null;
+}
+// Last day of the month for a 'YYYY-MM-01' string (used as a churn's Last Date Under Contract).
+function monthEnd(iso) {
+  if (!iso) return null;
+  const [y, m] = iso.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m, 0));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
 // Runs of consecutive date-serial header columns. runs[0] = booking block, runs[1] = MRR timing.
 function dateRuns(header) {
   const runs = []; let cur = null;
@@ -42,11 +56,12 @@ function dateRuns(header) {
 }
 const findCol = (header, pred) => { for (let i = 0; i < header.length; i++) if (pred(norm(header[i]))) return i; return -1; };
 
-export function parseLegacyWorkbook(buffer, existingBookings = []) {
+export function parseLegacyWorkbook(buffer, existingBookings = [], existingChurn = []) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, sheets: ['Edit', 'PS', 'TrialsPilots'] });
   const existKey = new Set(existingBookings.map((b) => `${norm(b.property_id)}|${norm(b.product)}|${norm(b.booking_month)} ${String(b.booking_year ?? '').trim()}`));
-  const seen = new Set(); // avoid duplicates within this file
-  const rows = []; const errors = []; const perTab = {}; let skipped = 0;
+  const existChurnKey = new Set(existingChurn.map((c) => `${norm(c.property_id)}|${norm(c.product)}|${String(c.last_date_under_contract ?? '').slice(0, 10)}`));
+  const seen = new Set(); const seenChurn = new Set(); // avoid duplicates within this file
+  const rows = []; const churnRows = []; const errors = []; const perTab = {}; let skipped = 0; let skippedWon = 0;
 
   for (const [name, isPilot] of [['Edit', false], ['PS', false], ['TrialsPilots', true]]) {
     const ws = wb.Sheets[name];
@@ -68,14 +83,17 @@ export function parseLegacyWorkbook(buffer, existingBookings = []) {
       propname: findCol(header, (l) => l === 'pmc - property'),
       sage: findCol(header, (l) => l === 'sage customer id'),
       owner: findCol(header, (l) => l === 'account owner'),
+      lastservice: findCol(header, (l) => l === 'last date of service'),
     };
-    let added = 0; let tabSkip = 0; let tabErr = 0;
+    let added = 0; let tabSkip = 0; let tabErr = 0; let churnAdded = 0;
     if (C.pid < 0 || C.prod < 0 || !bookRun) {
       perTab[name] = { note: `missing key columns (Property ID/Product/booking block)`, added: 0, skipped: 0, errors: 0, cols: C };
       continue;
     }
     for (let r = 1; r < aoa.length; r++) {
       const row = aoa[r];
+      const status = String(row[0] ?? '').trim().toLowerCase(); // col A: a=Active, c=Churned, w=WON
+      if (isPilot && status === 'w') { skippedWon++; continue; } // WON pilots already live in Edit/PS
       const pid = String(row[C.pid] ?? '').trim();
       if (!pid) continue; // formula/template/blank rows have no Property ID
       const prodStr = String(row[C.prod] ?? '').trim();
@@ -91,9 +109,9 @@ export function parseLegacyWorkbook(buffer, existingBookings = []) {
       const propname = C.propname >= 0 ? String(row[C.propname] ?? '').trim() : '';
       const sage = C.sage >= 0 ? String(row[C.sage] ?? '').trim() : '';
       const pilotType = /paid/i.test(C.freepaid >= 0 ? String(row[C.freepaid] ?? '') : '') ? 'New - Paid' : 'New - Free';
-      // GoLive = first non-empty MRR-timing month.
-      let goLive = null;
-      if (timeRun) for (let i = timeRun[0]; i <= timeRun[1]; i++) { if (numOr(row[i])) { const hm = hdrMonth(header[i]); if (hm) { goLive = hm.iso; break; } } }
+      // GoLive = first non-empty MRR-timing month; also track the last for churned rows.
+      let goLive = null; let lastTiming = null;
+      if (timeRun) for (let i = timeRun[0]; i <= timeRun[1]; i++) { if (numOr(row[i])) { const hm = hdrMonth(header[i]); if (hm) { if (!goLive) goLive = hm.iso; lastTiming = hm.iso; } } }
       // One booking row per non-empty booking-month cell × product.
       for (let i = bookRun[0]; i <= bookRun[1]; i++) {
         const amt = numOr(row[i]); if (!amt) continue;
@@ -117,8 +135,25 @@ export function parseLegacyWorkbook(buffer, existingBookings = []) {
           rows.push(rec); added++;
         });
       }
+      // Churned (Edit/PS) rows: end recognition + show as Churned via a matching legacy churn row.
+      // Churn end date = "Last Date of Service" (col KM) if present, else the last MRR-timing month.
+      if (!isPilot && status === 'c' && mrr) {
+        const churnLast = (C.lastservice >= 0 ? cellDate(row[C.lastservice]) : null) || monthEnd(lastTiming);
+        const primary = products[0];
+        if (churnLast) {
+          const ck = `${norm(pid)}|${norm(primary)}|${churnLast}`;
+          if (!existChurnKey.has(ck) && !seenChurn.has(ck)) {
+            seenChurn.add(ck);
+            churnRows.push({
+              property_id: pid, product: primary, mrr, pmc_buying_center: pmc, property: propname,
+              sage_id: sage, last_date_under_contract: churnLast, date_added: churnLast, legacy: true,
+            });
+            churnAdded++;
+          }
+        } else { errors.push({ tab: name, property: pid, reason: 'churned but no end date (KM / MRR timing)' }); tabErr++; }
+      }
     }
-    perTab[name] = { added, skipped: tabSkip, errors: tabErr, bookRun, timeRun };
+    perTab[name] = { added, skipped: tabSkip, errors: tabErr, churn: churnAdded, bookRun, timeRun };
   }
-  return { rows, skipped, errors, perTab };
+  return { rows, churnRows, skipped, skippedWon, errors, perTab };
 }
