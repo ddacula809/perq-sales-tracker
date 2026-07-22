@@ -15,6 +15,7 @@ import {
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear, monthYear } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings, parseConvertEdit } from './importer.js';
 import { buildWorkbook } from './exporter.js';
+import { parseLegacyWorkbook } from './legacyImporter.js';
 import {
   BOOKING_FIELDS, BOOKING_COMPUTED, CHURN_FIELDS, CHURN_COMPUTED,
   BOOKING_BILLING_KEYS, CHURN_BILLING_KEYS, USER_ROLES, SALES_SUPPORT_FIELDS,
@@ -1350,6 +1351,59 @@ app.get('/api/health', async (_req, res) => {
 });
 // Current deploy version — clients poll this and prompt a refresh when it changes.
 app.get('/api/version', (_req, res) => res.json({ version: APP_VERSION }));
+
+// ---- Legacy migration: parse the old SaaS Financials workbook into legacy bookings ----
+// Preview is a dry run (no writes); commit inserts the new rows tagged legacy. Both dedupe against
+// existing bookings (same Property ID + Product + Booking Month/Year) so nothing already there is
+// touched or duplicated. Admin only, Multifamily instance.
+app.post('/api/legacy/preview', requireRole('admin'), upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const existing = (await listRows('bookings')).filter((b) => (b.instance || 'multifamily') === 'multifamily');
+    const { rows, skipped, errors, perTab } = parseLegacyWorkbook(req.file.buffer, existing);
+    res.json({
+      toAdd: rows.length, skipped, perTab, errorCount: errors.length, errors: errors.slice(0, 50),
+      sample: rows.slice(0, 25).map((r) => ({
+        property: r.property_name || r.property_id, product: r.product,
+        month: `${r.booking_month} ${r.booking_year}`, mrr: r.mrr, amount: r.company_total_override,
+        golive: r.golive_date, pilot: r.pilot_or_ctam === 'Pilot',
+      })),
+    });
+  } catch (e) { next(e); }
+});
+app.post('/api/legacy/commit', requireRole('admin'), upload.single('file'), async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (!req.file) { client.release(); return res.status(400).json({ error: 'No file uploaded' }); }
+    const existing = (await listRows('bookings')).filter((b) => (b.instance || 'multifamily') === 'multifamily');
+    const { rows } = parseLegacyWorkbook(req.file.buffer, existing);
+    // Insert every legacy row in one transaction (atomic — a failure rolls the whole batch back),
+    // chunked into multi-row INSERTs. `legacy`/`instance` aren't schema fields so include them here.
+    const cols = [...BOOKING_FIELDS.map((f) => f.key), 'legacy', 'instance'];
+    const quoted = cols.map((c) => `"${c}"`).join(', ');
+    const CHUNK = 300;
+    let added = 0;
+    await client.query('BEGIN');
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const batch = rows.slice(i, i + CHUNK);
+      const params = []; const tuples = [];
+      for (const rec of batch) {
+        const ph = cols.map((c) => {
+          let v = c === 'legacy' ? true : (c === 'instance' ? 'multifamily' : rec[c]);
+          if (v === undefined) v = null;
+          params.push(v);
+          return `$${params.length}`;
+        });
+        tuples.push(`(${ph.join(', ')})`);
+      }
+      await client.query(`INSERT INTO bookings (${quoted}) VALUES ${tuples.join(', ')}`, params);
+      added += batch.length;
+    }
+    await client.query('COMMIT');
+    res.json({ added });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch { /* ignore */ } next(e); }
+  finally { client.release(); }
+});
 
 // ---- Static frontend (served explicitly so backend source files aren't exposed) ----
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));

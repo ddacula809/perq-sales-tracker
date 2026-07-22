@@ -373,7 +373,7 @@ function rowInnerHtml(row, i, fields) {
   for (const f of cols) {
     if (f.key === 'churn_status') html += churnStatusCell(row);
     else if (f.key === 'ar_final_invoice_amount' && state.tab === 'churn' && isAdmin()) html += arOverrideCell(row);
-    else if (state.tab === 'bookings' && BOOKING_OVERRIDE[f.key] && isAdmin() && isBookingAdjusted(row)) html += bookingOverrideCell(f.key, row);
+    else if (state.tab === 'bookings' && BOOKING_OVERRIDE[f.key] && isAdmin() && (isBookingAdjusted(row) || row.legacy)) html += bookingOverrideCell(f.key, row);
     else if (computedKeys.has(f.key)) html += computedCell(f, row);
     else if (canEditField(f) && !locked) html += editCell(f, row);
     else html += readonlyCell(f, row);
@@ -573,7 +573,8 @@ function bookingOverrideCell(computedKey, row) {
   const overrideKey = BOOKING_OVERRIDE[computedKey];
   const ov = row[overrideKey];
   const hasOv = ov !== null && ov !== undefined && ov !== '';
-  return `<td class="num computed ar-override ar-overridden" data-col="${computedKey}" title="${escapeAttr(row.booking_adjustment + ' — enter the value manually')}">`
+  const tag = String(row.booking_adjustment || '').trim() || (row.legacy ? 'Legacy' : 'Manual');
+  return `<td class="num computed ar-override ar-overridden" data-col="${computedKey}" title="${escapeAttr(tag + ' — enter the value manually')}">`
     + `<input type="text" inputmode="decimal" data-key="${overrideKey}" value="${escapeAttr(hasOv ? fmtMoney(ov) : '')}" placeholder="$0" /></td>`;
 }
 
@@ -2063,6 +2064,7 @@ function renderAll() {
   $('#usersBtn').hidden = !isAdmin();
   $('#productsBtn').hidden = !(isAdmin() && mfOps);
   $('#closeMonthBtn').hidden = !(isAdmin() && mfOps);
+  $('#legacyImportBtn').hidden = !(isAdmin() && mfOps);
   $('#notifWrap').hidden = !canBilling;
   updateBell();
   // "Ask Claude" assistant: shown only when configured (API key set) and for full-data roles.
@@ -2439,6 +2441,69 @@ function wireActions() {
   $('#exportModal').addEventListener('click', (e) => { if (e.target.id === 'exportModal') $('#exportModal').hidden = true; });
   $('#exportSheets').onchange = syncExportSheetControls;
   $('#exportConfirm').onclick = doExport;
+
+  // Legacy SaaS Financials migration: upload -> dry-run preview -> (admin clicks) commit.
+  $('#legacyImportFile').onchange = async (e) => {
+    $('#moreMenu').hidden = true;
+    const file = e.target.files[0]; if (!file) return;
+    state.legacyFile = file;
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      toast('Analyzing workbook…');
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/legacy/preview', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Preview failed');
+      showResult('Legacy migration — preview (nothing saved yet)', legacyPreviewHtml(await res.json()));
+    } catch (err) { toast(err.message, true); }
+    e.target.value = '';
+  };
+  // Commit button lives inside the preview result modal.
+  $('#resultBody').addEventListener('click', async (e) => {
+    if (e.target.id !== 'legacyCommitBtn' || !state.legacyFile) return;
+    if (!confirm('Migrate the previewed rows into the Revenue Desk as Legacy Data?\n\nExisting rows are untouched; only new rows are added.')) return;
+    e.target.disabled = true; e.target.textContent = 'Migrating…';
+    const fd = new FormData(); fd.append('file', state.legacyFile);
+    try {
+      const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+      const res = await fetch('/api/legacy/commit', { method: 'POST', body: fd, headers });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Commit failed');
+      const d = await res.json();
+      state.rows.bookings = await api('/api/bookings');
+      renderAll();
+      $('#resultModal').hidden = true;
+      toast(`Migrated ${d.added} legacy row(s)`);
+    } catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Commit migration'; }
+  });
+}
+
+// Build the legacy-migration preview report shown in the result modal.
+function legacyPreviewHtml(d) {
+  const tabRows = Object.entries(d.perTab || {}).map(([name, t]) =>
+    `<tr><td>${escapeHtml(name)}</td><td class="num">${t.added ?? 0}</td><td class="num">${t.skipped ?? 0}</td>`
+    + `<td class="num">${t.errors ?? 0}</td><td class="muted">${escapeHtml(t.note || '')}</td></tr>`).join('');
+  const sample = (d.sample || []).map((s) =>
+    `<tr><td>${escapeHtml(s.property || '—')}</td><td>${escapeHtml(s.product || '—')}</td><td>${escapeHtml(s.month)}</td>`
+    + `<td class="num">${fmtMoney(s.mrr)}</td><td class="num">${fmtMoney(s.amount)}</td><td>${escapeHtml(s.golive || '—')}</td>`
+    + `<td>${s.pilot ? 'Pilot' : ''}</td></tr>`).join('');
+  const errs = (d.errors || []).map((er) =>
+    `<tr><td>${escapeHtml(er.tab)}</td><td>${escapeHtml(er.property || '—')}</td><td>${escapeHtml(er.reason)}</td></tr>`).join('');
+  let html = `<p><strong>${fmtNum(d.toAdd)}</strong> new row(s) to add · <strong>${fmtNum(d.skipped)}</strong> skipped (already present) · <strong>${fmtNum(d.errorCount)}</strong> couldn't map.</p>`
+    + '<table class="recon-table"><thead><tr><th>Tab</th><th class="num">To add</th><th class="num">Skipped</th><th class="num">Errors</th><th>Note</th></tr></thead>'
+    + `<tbody>${tabRows}</tbody></table>`;
+  if (sample) {
+    html += '<h3 class="recon-h">Sample (first 25 rows to add)</h3>'
+      + '<div class="result-detail"><table><thead><tr><th>Property</th><th>Product</th><th>Month</th><th class="num">MRR</th><th class="num">Booking $</th><th>GoLive</th><th></th></tr></thead>'
+      + `<tbody>${sample}</tbody></table></div>`;
+  }
+  if (errs) {
+    html += `<h3 class="recon-h">Couldn't map (${d.errorCount})</h3>`
+      + '<div class="result-detail"><table><thead><tr><th>Tab</th><th>Property</th><th>Reason</th></tr></thead>'
+      + `<tbody>${errs}</tbody></table></div>`;
+  }
+  if (d.toAdd > 0) {
+    html += `<div style="margin-top:14px;text-align:right"><button type="button" class="btn solid" id="legacyCommitBtn">Commit migration (${fmtNum(d.toAdd)} rows)</button></div>`;
+  }
+  return html;
 }
 
 // Populate the export dialog's Month/Year options from the bookings and show it.
