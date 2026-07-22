@@ -1362,8 +1362,23 @@ app.post('/api/legacy/preview', requireRole('admin'), upload.single('file'), asy
     const existing = (await listRows('bookings')).filter((b) => (b.instance || 'multifamily') === 'multifamily');
     const existingChurn = await listRows('churn');
     const { rows, churnRows, skipped, skippedWon, errors, perTab } = parseLegacyWorkbook(req.file.buffer, existing, existingChurn);
+    // Per-quarter Company Total: what's already in the Revenue Desk vs what this migration adds,
+    // so it can be checked against the workbook before committing.
+    const byQ = {};
+    const bump = (label, k, amt) => { if (!byQ[label]) byQ[label] = { existing: 0, toAdd: 0 }; byQ[label][k] += amt; };
+    for (const b of existing) {
+      const info = quarterFromMonthName(b.booking_month, b.booking_year); if (!info) continue;
+      bump(`Q${info.q} ${info.year}`, 'existing', Number(withComputed(b, computeBooking).company_total_booking) || 0);
+    }
+    for (const r of rows) {
+      const info = quarterFromMonthName(r.booking_month, r.booking_year); if (!info) continue;
+      bump(`Q${info.q} ${info.year}`, 'toAdd', Number(r.company_total_override) || 0);
+    }
+    const quarters = Object.entries(byQ)
+      .map(([label, v]) => ({ label, existing: v.existing, toAdd: v.toAdd, combined: v.existing + v.toAdd }))
+      .sort((a, b) => { const A = a.label.match(/Q(\d)\s+(\d+)/); const B = b.label.match(/Q(\d)\s+(\d+)/); return (Number(A[2]) - Number(B[2])) || (Number(A[1]) - Number(B[1])); });
     res.json({
-      toAdd: rows.length, churnToAdd: churnRows.length, skipped, skippedWon, perTab,
+      toAdd: rows.length, churnToAdd: churnRows.length, skipped, skippedWon, perTab, quarters,
       errorCount: errors.length, errors: errors.slice(0, 50),
       sample: rows.slice(0, 25).map((r) => ({
         property: r.property_name || r.property_id, product: r.product,
@@ -1411,6 +1426,14 @@ app.post('/api/legacy/commit', requireRole('admin'), upload.single('file'), asyn
     res.json({ added, churnAdded });
   } catch (e) { try { await client.query('ROLLBACK'); } catch { /* ignore */ } next(e); }
   finally { client.release(); }
+});
+// Undo a migration: delete every legacy-tagged booking + churn row (never touches real data).
+app.post('/api/legacy/clear', requireRole('admin'), async (_req, res, next) => {
+  try {
+    const b = await pool.query('DELETE FROM bookings WHERE legacy = true');
+    const c = await pool.query('DELETE FROM churn WHERE legacy = true');
+    res.json({ removedBookings: b.rowCount || 0, removedChurn: c.rowCount || 0 });
+  } catch (e) { next(e); }
 });
 
 // ---- Static frontend (served explicitly so backend source files aren't exposed) ----

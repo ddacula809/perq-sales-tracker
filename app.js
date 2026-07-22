@@ -2065,6 +2065,7 @@ function renderAll() {
   $('#productsBtn').hidden = !(isAdmin() && mfOps);
   $('#closeMonthBtn').hidden = !(isAdmin() && mfOps);
   $('#legacyImportBtn').hidden = !(isAdmin() && mfOps);
+  $('#legacyClearBtn').hidden = !(isAdmin() && mfOps);
   $('#notifWrap').hidden = !canBilling;
   updateBell();
   // "Ask Claude" assistant: shown only when configured (API key set) and for full-data roles.
@@ -2457,6 +2458,18 @@ function wireActions() {
     } catch (err) { toast(err.message, true); }
     e.target.value = '';
   };
+  // Remove all migrated legacy rows (undo a migration). Never touches real data.
+  $('#legacyClearBtn').onclick = async () => {
+    $('#moreMenu').hidden = true;
+    if (!confirm('Remove ALL migrated Legacy Data (bookings + churn)?\n\nThis deletes only rows tagged Legacy; your real data is untouched.')) return;
+    try {
+      const d = await api('/api/legacy/clear', { method: 'POST' });
+      state.rows.bookings = await api('/api/bookings');
+      state.rows.churn = await api('/api/churn');
+      renderAll();
+      toast(`Removed ${d.removedBookings} legacy booking(s) + ${d.removedChurn} churn`);
+    } catch (err) { toast(err.message, true); }
+  };
   // Commit button lives inside the preview result modal.
   $('#resultBody').addEventListener('click', async (e) => {
     if (e.target.id !== 'legacyCommitBtn' || !state.legacyFile) return;
@@ -2489,7 +2502,17 @@ function legacyPreviewHtml(d) {
   const errs = (d.errors || []).map((er) =>
     `<tr><td>${escapeHtml(er.tab)}</td><td>${escapeHtml(er.property || '—')}</td><td>${escapeHtml(er.reason)}</td></tr>`).join('');
   let html = `<p><strong>${fmtNum(d.toAdd)}</strong> booking(s) to add · <strong>${fmtNum(d.churnToAdd || 0)}</strong> churn record(s) to add (churned properties) · `
-    + `<strong>${fmtNum(d.skipped)}</strong> skipped (already present) · <strong>${fmtNum(d.skippedWon || 0)}</strong> WON pilots skipped · <strong>${fmtNum(d.errorCount)}</strong> couldn't map.</p>`
+    + `<strong>${fmtNum(d.skipped)}</strong> skipped (already present) · <strong>${fmtNum(d.skippedWon || 0)}</strong> WON pilots skipped · <strong>${fmtNum(d.errorCount)}</strong> couldn't map.</p>`;
+  // Per-quarter Company Total: already in the Revenue Desk vs. what this adds vs. combined — check
+  // "Combined" against the workbook's quarter total before committing.
+  if (d.quarters && d.quarters.length) {
+    const qrows = d.quarters.map((q) => `<tr><td>${escapeHtml(q.label)}</td><td class="num">${fmtMoney(q.existing)}</td>`
+      + `<td class="num">${fmtMoney(q.toAdd)}</td><td class="num"><strong>${fmtMoney(q.combined)}</strong></td></tr>`).join('');
+    html += '<h3 class="recon-h">Company Total by quarter (check "Combined" vs the workbook)</h3>'
+      + '<div class="result-detail"><table class="recon-table"><thead><tr><th>Quarter</th><th class="num">Already in RD</th><th class="num">This migration adds</th><th class="num">Combined</th></tr></thead>'
+      + `<tbody>${qrows}</tbody></table></div>`;
+  }
+  html += ''
     + '<table class="recon-table"><thead><tr><th>Tab</th><th class="num">To add</th><th class="num">Skipped</th><th class="num">Errors</th><th>Note</th></tr></thead>'
     + `<tbody>${tabRows}</tbody></table>`;
   if (sample) {
