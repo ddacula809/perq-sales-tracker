@@ -917,6 +917,13 @@ function renderSummary() {
   if (lockRep && tab !== 'churn' && colByKey.has('sales_rep') && !active.includes('sales_rep')) {
     active = adjustable ? ['sales_rep', ...active] : active; // dashboard already includes sales_rep
   }
+  // Dashboard's first-section "Filter by Quarter" defaults to the current calendar quarter on first
+  // load (only if that quarter has data). `undefined` = never touched; once the user picks anything
+  // — including "All" — the value is set and this no longer overrides it.
+  if (tab === 'dashboard' && colByKey.has('booking_quarter') && state.filters.dashboard.booking_quarter === undefined) {
+    const cur = currentQuarterLabel();
+    if (valuesFor(colByKey.get('booking_quarter')).includes(cur)) state.filters.dashboard.booking_quarter = [cur];
+  }
   const activeSet = new Set(active);
   let filtersHtml = '';
   if (!state.filtersHidden) {
