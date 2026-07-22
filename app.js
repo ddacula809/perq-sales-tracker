@@ -1433,9 +1433,11 @@ function renderBillingDashboard() {
 
   const hasImplFee = (r) => num(r.one_time_fee) > 0;
   const implCompleted = (r) => r.implementation_billing_status === 'Completed';
-  const implPending = (r) => hasImplFee(r) && r.implementation_billing_status !== 'Completed';
+  // Legacy SaaS rows were already billed in the old workbook — they must never surface as an
+  // outstanding billing action, so they're excluded from the "pending / not-completed" tiles.
+  const implPending = (r) => hasImplFee(r) && r.implementation_billing_status !== 'Completed' && !r.legacy;
   const recCompleted = (r) => r.recurring_billing_status === 'Completed';
-  const recPending = (r) => r.recurring_billing_status === 'Pending';
+  const recPending = (r) => r.recurring_billing_status === 'Pending' && !r.legacy;
   const notLive = (r) => !r.golive_date;
   const live = (r) => !!r.golive_date;
   const noSage = (r) => !String(r.sage_id || '').trim();
@@ -1448,7 +1450,8 @@ function renderBillingDashboard() {
   const arRows = (state.rows.churn || []).filter(arHas)
     .filter((c) => state.bdArMonth === 'All' || String(c.final_invoice_month).trim() === state.bdArMonth);
   const arDone = (c) => String(c.completed || '').trim() !== '';
-  const arNotList = arRows.filter((c) => !arDone(c));
+  // Legacy churn was already invoiced in the old workbook — keep it out of "Not Completed".
+  const arNotList = arRows.filter((c) => !arDone(c) && !c.legacy);
   const arDoneList = arRows.filter(arDone);
   const arSum = (list) => list.reduce((a, c) => a + (Number(c.ar_final_invoice_amount) || 0), 0);
 
