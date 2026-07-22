@@ -5398,7 +5398,6 @@ function renderSaas() {
   $('#saasDashboard').hidden = sub !== 'dashboard';
   $('#saasUnit').hidden = sub !== 'unit';
   $('#saasZoomGroup').style.display = sub === 'data' ? '' : 'none';
-  $('#saasNote').style.display = sub === 'data' ? '' : 'none';
 
   const { q, year } = parseQuarterLabel(state.saasQuarter);
   const idxs = [0, 1, 2].map((i) => year * 12 + (q - 1) * 3 + i);
