@@ -2460,7 +2460,9 @@ function wireActions() {
   $('#exportBtn').onclick = (e) => { e.preventDefault(); $('#moreMenu').hidden = true; openExport(); };
   $('#exportClose').onclick = () => { $('#exportModal').hidden = true; };
   $('#exportModal').addEventListener('click', (e) => { if (e.target.id === 'exportModal') $('#exportModal').hidden = true; });
-  $('#exportSheets').onchange = syncExportSheetControls;
+  $('#exportSheets').onchange = () => { syncExportSheetControls(); updateExportHint(); };
+  $('#exportMonth').onchange = updateExportHint;
+  $('#exportYear').onchange = updateExportHint;
   $('#exportConfirm').onclick = doExport;
 
   // Legacy SaaS Financials migration: upload -> dry-run preview -> (admin clicks) commit.
@@ -2559,10 +2561,31 @@ function openExport() {
   const yearVals = ['All', ...[...new Set(rows.map((r) => r.booking_year).filter((v) => v != null && v !== ''))].sort((a, b) => a - b)];
   $('#exportMonth').innerHTML = monthVals.map((m) => `<option>${m}</option>`).join('');
   $('#exportYear').innerHTML = yearVals.map((y) => `<option>${y}</option>`).join('');
+  // Default Year to the CURRENT year (not "All") so picking a month exports that month of this year
+  // — not every year's copy of that month (which would sweep in legacy/historical bookings).
+  const curYear = String(new Date().getFullYear());
+  $('#exportYear').value = yearVals.map(String).includes(curYear) ? curYear : 'All';
   // Default the Sheets choice to the tab you're on (Churn Tracker only when on the Churn tab).
   $('#exportSheets').value = state.tab === 'churn' ? 'churn' : 'both';
   syncExportSheetControls();
+  updateExportHint();
   $('#exportModal').hidden = false;
+}
+// Describe the period being exported, and warn on the foot-gun combo Month=specific + Year=All
+// (which sweeps in every year's copy of that month, including historical / legacy bookings).
+function updateExportHint() {
+  const el = $('#exportPeriodHint'); if (!el) return;
+  if ($('#exportSheets').value === 'churn') { el.textContent = ''; el.className = 'export-hint'; return; }
+  const m = $('#exportMonth').value; const y = $('#exportYear').value;
+  if (m !== 'All' && y === 'All') {
+    el.className = 'export-hint warn';
+    el.textContent = `⚠ Year is “All”, so this exports ${m} of EVERY year (including historical/legacy bookings). Pick a Year to limit it.`;
+  } else {
+    el.className = 'export-hint';
+    const scope = (m === 'All' && y === 'All') ? 'all bookings, all periods'
+      : `${m === 'All' ? 'all months' : m}${y === 'All' ? ', all years' : ` ${y}`}`;
+    el.textContent = `Exporting: ${scope}.`;
+  }
 }
 // The Booking period filters only apply when Bookings are being exported — disable them for
 // a Churn-only export.

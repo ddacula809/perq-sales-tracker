@@ -773,6 +773,8 @@ tr.ss-group td {
   font: inherit; margin-bottom: 12px; background: #fff; color: var(--ink);
 }
 .export-label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .06em; }
+.export-hint { margin: 8px 0 4px; font-size: 12px; color: var(--ink-soft); }
+.export-hint.warn { color: var(--neg); font-weight: 600; }
 
 /* New booking entry form */
 .entry-card { width: 680px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column; padding: 22px; }
