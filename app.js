@@ -5330,6 +5330,19 @@ function wireAssistant() {
 function saasCategoryOf(b) {
   return String(b.bpr_prod_category || '').trim() === 'Digital Advertising' ? 'Digital Advertising' : 'Multifamily';
 }
+// The Category dropdown keeps its internal keys ('Multifamily' = non-DA products, 'Digital
+// Advertising' = DA products) but is shown to users as Software / Professional Services, plus All.
+const SAAS_CAT_LABELS = { All: 'All', Multifamily: 'Software', 'Digital Advertising': 'Professional Services' };
+const catLabel = (c) => SAAS_CAT_LABELS[c] || c;
+const saasCatMatch = (cat, itemCat) => cat === 'All' || itemCat === cat;
+// A Re-rate/Downgrade booking whose Re-rate Old MRR exceeds its new MRR is a downgrade drop; its
+// MRR movement is represented as a "Churn Downgrade" churn line, so it's excluded from add events.
+function isDowngradeBooking(b) {
+  const ctam = String(b.ctam_type || '').trim();
+  if (ctam !== 'Re-rate' && ctam !== 'Downgrade') return false;
+  const num = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : 0; };
+  return num(b.rerate_old_mrr) > num(b.mrr);
+}
 // Pure pilots (Pilot in "Pilot or CTAM" with any pilot type except Conversion) are NOT
 // recognized in SaaS Financials — even once live — until a Conversion booking comes in for
 // the same property/product. MRR is recognized only from that conversion.
@@ -5421,6 +5434,7 @@ const SAAS_TYPE_CLASS = {
   Reactivation: 'saas-reactivation', Contraction: 'saas-contraction', Downgrade: 'saas-downgrade',
   'Churn prorated product': 'saas-churn-pro', 'Churn Product': 'saas-churn',
   'Churn Prorated Rooftop': 'saas-churn-pro', 'Churn Rooftop': 'saas-churn',
+  'Churn Logo': 'saas-churn', 'Churn Downgrade': 'saas-downgrade',
   Churn: 'saas-churn',
 };
 // Granular churn-family types that roll up into the single "Churn" bucket (Unit Economics).
@@ -5460,6 +5474,7 @@ function renderSaas() {
   // Precompute, across ALL active bookings: each property's bookings + first go-live month,
   // each PMC's first go-live month (for New Logo). Needed by the table and the Unit report.
   const allByProp = new Map();
+  const allByPmc = new Map();      // pmc -> its bookings (for PMC-level "logo churn" checks)
   const firstGoLive = new Map();   // property -> earliest go-live idx (any category)
   const pmcFirstGoLive = new Map(); // pmc -> earliest go-live idx (drives New Logo)
   for (const b of state.rows.bookings) {
@@ -5471,12 +5486,22 @@ function renderSaas() {
     allByProp.get(pid).push(b);
     if (!firstGoLive.has(pid) || gi < firstGoLive.get(pid)) firstGoLive.set(pid, gi);
     const pmc = String(b.pmc || '').trim().toLowerCase();
-    if (pmc && (!pmcFirstGoLive.has(pmc) || gi < pmcFirstGoLive.get(pmc))) pmcFirstGoLive.set(pmc, gi);
+    if (pmc) {
+      if (!allByPmc.has(pmc)) allByPmc.set(pmc, []);
+      allByPmc.get(pmc).push(b);
+      if (!pmcFirstGoLive.has(pmc) || gi < pmcFirstGoLive.get(pmc)) pmcFirstGoLive.set(pmc, gi);
+    }
   }
   // The property's total recognized MRR across ALL categories in a month — for Rooftop checks.
   const propTotalAt = (pid, idx) => (allByProp.get(pid) || []).reduce((a, b) => a + saasBookingMonthMRR(b, churnOf(b), idx), 0);
+  // The PMC's total recognized MRR in a month (NaN if the PMC has no bookings we know of, so we
+  // never mislabel an unknown PMC as a "logo churn"). Used to tell Churn Logo from Churn Rooftop.
+  const pmcTotalAt = (pmc, idx) => {
+    const list = allByPmc.get(pmc);
+    return list ? list.reduce((a, b) => a + saasBookingMonthMRR(b, churnOf(b), idx), 0) : NaN;
+  };
 
-  if (sub === 'unit') { renderSaasUnit(idxs, category, { churnOf, firstGoLive, pmcFirstGoLive, propTotalAt }); return; }
+  if (sub === 'unit') { renderSaasUnit(idxs, category, { churnOf, firstGoLive, pmcFirstGoLive, propTotalAt, pmcTotalAt }); return; }
 
   // MRR Type for a property+category row in absolute month `idx`. Returns { type, note }.
   function saasTypeFor(pid, pmc, catBookings, idx) {
@@ -5513,7 +5538,7 @@ function renderSaas() {
   // Group ALL bookings of the selected category by property (live AND not-yet-live).
   const byProp = new Map();
   for (const b of state.rows.bookings) {
-    if (saasCategoryOf(b) !== category || !saasRecognized(b)) continue; // skip pure pilots
+    if (!saasCatMatch(category, saasCategoryOf(b)) || !saasRecognized(b)) continue; // skip pure pilots
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
     if (!byProp.has(pid)) {
       byProp.set(pid, {
@@ -5600,7 +5625,7 @@ function renderSaas() {
   } else {
     $('#saasFoot').innerHTML = '';
   }
-  $('#saasCount').textContent = `${rows.length} ${category} propert${rows.length === 1 ? 'y' : 'ies'} · ${state.saasQuarter}`;
+  $('#saasCount').textContent = `${rows.length} ${catLabel(category)} propert${rows.length === 1 ? 'y' : 'ies'} · ${state.saasQuarter}`;
   applyColWidths(); // re-apply any saved SaaS column widths to the freshly built table
 }
 // SaaS Dashboard sub-tab: monthly Recognized-MRR tiles + monthly Churn tiles for the quarter,
@@ -5608,12 +5633,12 @@ function renderSaas() {
 function renderSaasDashboard(idxs, category, churnOf) {
   // Recognized MRR per month: all category bookings except pure pilots (not-live contribute 0).
   const mrrByMonth = idxs.map((idx) => state.rows.bookings.reduce(
-    (a, b) => ((saasCategoryOf(b) === category && saasRecognized(b)) ? a + saasBookingMonthMRR(b, churnOf(b), idx) : a), 0));
+    (a, b) => ((saasCatMatch(category, saasCategoryOf(b)) && saasRecognized(b)) ? a + saasBookingMonthMRR(b, churnOf(b), idx) : a), 0));
   // Churn per month (Churn Tracker amounts; category by product; excludes Contraction).
   const churnByMonth = idxs.map(() => 0);
   for (const c of state.rows.churn) {
     if (String(c.classification || '') === 'Contraction') continue;
-    if (saasProductCategory(c.product) !== category) continue;
+    if (!saasCatMatch(category, saasProductCategory(c.product))) continue;
     const pIdx = monthIdxFromMonthYear(c.prorated_churn_month);
     const fIdx = monthIdxFromMonthYear(c.final_churn_month);
     idxs.forEach((idx, j) => {
@@ -5683,51 +5708,70 @@ function renderSaasDashboard(idxs, category, churnOf) {
     + typeMonthOpts.map((o) => `<option${o === state.saasTypeMonth ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') + '</select>';
 
   $('#saasDashboard').innerHTML =
-    `<div class="metrics-title">${escapeHtml(category)} — Recognized MRR by Month</div><div class="metrics-row">${mrrTiles}</div>`
-    + `<div class="metrics-title">${escapeHtml(category)} — Churn by Month</div><div class="metrics-row">${churnTiles}</div>`
+    `<div class="metrics-title">${escapeHtml(catLabel(category))} — Recognized MRR by Month</div><div class="metrics-row">${mrrTiles}</div>`
+    + `<div class="metrics-title">${escapeHtml(catLabel(category))} — Churn by Month</div><div class="metrics-row">${churnTiles}</div>`
     + `<div class="metrics-title metrics-title-row"><span>Multifamily Bookings</span>${typeMonthSel}</div>`
     + `<div class="metrics-row">${totalTile}</div>`
     + '<div class="metrics-title">Bookings per Type</div>'
     + `<div class="metrics-row">${typeTiles || '<span class="muted">No bookings for this month.</span>'}</div>`;
-  $('#saasCount').textContent = `${category} · ${state.saasQuarter}`;
+  $('#saasCount').textContent = `${catLabel(category)} · ${state.saasQuarter}`;
 }
 
 // Order the buckets appear in the Unit Economics Report. "Churn" rolls up the churn-family
 // types (prorated/full, product/rooftop) plus Downgrade.
-const SAAS_BUCKET_ORDER = ['New Logo', 'Expansion', 'Upsell', 'Reactivation', 'Contraction', 'Churn'];
+const SAAS_BUCKET_ORDER = ['New Logo', 'Expansion', 'Upsell', 'Reactivation', 'Contraction',
+  'Churn Logo', 'Churn Rooftop', 'Churn Prorated Rooftop', 'Churn Downgrade'];
 
 // Unit Economics Report sub-tab: one card per month of the quarter (like Churn Details).
 // Each month's table lists the type buckets (New Logo, Expansion, …) as groups, with
 // PMC - Property / Product / MRR rows. Long PMC - Property values truncate; scroll horizontally.
 function renderSaasUnit(idxs, category, h) {
-  const { churnOf, firstGoLive, pmcFirstGoLive, propTotalAt } = h;
+  const { firstGoLive, pmcFirstGoLive, pmcTotalAt } = h;
   const idxSet = new Set(idxs);
   const events = [];
+  const push = (type, pmcProperty, product, monthIdx, amt) => {
+    if (!amt) return; // hide $0 rows
+    events.push({ type, pmcProperty, product: product || '—', monthIdx, mrr: amt });
+  };
+  // ADD events come from bookings (go-live). Downgrade/re-rate drops are represented as churn
+  // (below), so exclude them here to avoid showing them as a positive add.
   for (const b of state.rows.bookings) {
-    if (saasCategoryOf(b) !== category || !saasRecognized(b)) continue; // skip pure pilots
+    if (!saasCatMatch(category, saasCategoryOf(b)) || !saasRecognized(b)) continue; // skip pure pilots
+    if (isDowngradeBooking(b)) continue;
     const pid = String(b.property_id || b.property_name || `#${b.id}`);
-    const pmcProperty = b.property_name || b.property_id || '—'; // combined "PMC - Property"
+    const pmcProperty = b.property_name || b.property_id || '—';
     const mrr = Number(b.mrr) || 0;
-    // Adds default to the booking MRR; churn events pass their own (negative) recognized amount.
-    const push = (type, monthIdx, amt = mrr) => events.push({ type, pmcProperty, product: b.product || '—', monthIdx, mrr: amt });
-    // Go-live (add) event — effective month (carries over out of closed go-live months).
     const gi = effectiveGoLiveIdx(b);
-    if (gi != null && idxSet.has(gi)) {
-      if (b.offset_churn_id) push('Reactivation', gi);
-      else if (gi === firstGoLive.get(pid)) push(pmcFirstGoLive.get(String(b.pmc || '').trim().toLowerCase()) === gi ? 'New Logo' : 'Expansion', gi);
-      else if (String(b.ctam_type || '').trim() === 'Downgrade') push('Downgrade', gi); // goes in the Churn bucket
-      else push('Upsell', gi);
+    if (gi == null || !idxSet.has(gi)) continue;
+    let type;
+    if (b.offset_churn_id) type = 'Reactivation';
+    else if (gi === firstGoLive.get(pid)) type = pmcFirstGoLive.get(String(b.pmc || '').trim().toLowerCase()) === gi ? 'New Logo' : 'Expansion';
+    else type = 'Upsell';
+    push(type, pmcProperty, b.product, gi, mrr);
+  }
+  // CHURN events come straight from the Churn Tracker (so EVERY drop shows, even with no matching
+  // booking). Each churn recognizes a prorated remainder one month and its full drop the next:
+  //   • prorated portion            → Churn Prorated Rooftop
+  //   • final portion               → Churn Logo (this churn empties the whole PMC) else Churn Rooftop
+  //   • auto downgrade churn line    → Churn Downgrade
+  //   • Contraction                 → Contraction (its own bucket, unchanged)
+  for (const c of state.rows.churn) {
+    if (String(c.classification || '') === 'Churn Credit') continue; // accounting credit, not a drop
+    if (!saasCatMatch(category, saasProductCategory(c.product))) continue;
+    const isContraction = String(c.classification || '') === 'Contraction';
+    const pmc = String(c.pmc_buying_center || '').trim().toLowerCase();
+    const pmcProperty = c.property || c.property_id || '—';
+    const pIdx = monthIdxFromMonthYear(c.prorated_churn_month);
+    if (pIdx != null && idxSet.has(pIdx)) {
+      push(isContraction ? 'Contraction' : 'Churn Prorated Rooftop', pmcProperty, c.product, pIdx, Number(c.prorated_churn_amount) || 0);
     }
-    // Churn (drop) events — recognized as NEGATIVE amounts, exactly like the Main / SaaS dashboards:
-    // the prorated remainder in the final-invoice month and −AR the month after. Contraction is a
-    // partial reduction and is likewise negative.
-    const c = churnOf(b);
-    if (c) {
-      const isContraction = String(c.classification || '') === 'Contraction';
-      const pIdx = monthIdxFromMonthYear(c.final_invoice_month);
-      if (pIdx != null && idxSet.has(pIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, pIdx + 1) === 0 ? 'Churn Prorated Rooftop' : 'Churn prorated product'), pIdx, Number(c.prorated_churn_amount) || 0);
-      const fIdx = monthIdxFromMonthYear(c.final_churn_month);
-      if (fIdx != null && idxSet.has(fIdx)) push(isContraction ? 'Contraction' : (propTotalAt(pid, fIdx) === 0 ? 'Churn Rooftop' : 'Churn Product'), fIdx, Number(c.final_churn_amount) || 0);
+    const fIdx = monthIdxFromMonthYear(c.final_churn_month);
+    if (fIdx != null && idxSet.has(fIdx)) {
+      let type;
+      if (isContraction) type = 'Contraction';
+      else if (c.auto) type = 'Churn Downgrade';
+      else type = pmcTotalAt(pmc, fIdx) === 0 ? 'Churn Logo' : 'Churn Rooftop';
+      push(type, pmcProperty, c.product, fIdx, Number(c.final_churn_amount) || 0);
     }
   }
   const monthLabel = (idx) => `${MONTHS[idx % 12]} ${Math.floor(idx / 12)}`;
@@ -5738,9 +5782,9 @@ function renderSaasUnit(idxs, category, h) {
     if (!monthEvents.length) {
       body = '<tr><td class="muted" colspan="3" style="padding:10px">No activity this month.</td></tr>';
     } else {
-      // Group by bucket (Churn family rolls up into one "Churn" group).
+      // Group by bucket — each event's type IS its bucket (Churn Logo/Rooftop/Prorated/Downgrade).
       const byBucket = new Map();
-      for (const e of monthEvents) { const bk = saasBucketOf(e.type); if (!byBucket.has(bk)) byBucket.set(bk, []); byBucket.get(bk).push(e); }
+      for (const e of monthEvents) { const bk = e.type; if (!byBucket.has(bk)) byBucket.set(bk, []); byBucket.get(bk).push(e); }
       body = SAAS_BUCKET_ORDER.filter((bk) => byBucket.has(bk)).map((bk) => {
         const list = byBucket.get(bk);
         const total = list.reduce((a, e) => a + e.mrr, 0);
@@ -5779,7 +5823,7 @@ function renderSaasUnit(idxs, category, h) {
       + `<tbody>${body}</tbody></table></div></div>`;
   }).join('');
   $('#saasUnit').innerHTML = `<div class="churn-detail-grid">${cards}</div>`;
-  $('#saasCount').textContent = `${category} · ${state.saasQuarter} · ${events.length} event${events.length === 1 ? '' : 's'}`;
+  $('#saasCount').textContent = `${catLabel(category)} · ${state.saasQuarter} · ${events.length} event${events.length === 1 ? '' : 's'}`;
 }
 
 function wireSaas() {
