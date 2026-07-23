@@ -466,10 +466,13 @@ tbody td.offset-na { text-align: right; }
 tbody tr.row-legacy td { background: #ecebe8 !important; color: #6b6770; }
 tbody tr.row-churned td { background: #fbe1e1 !important; }
 tbody tr.row-never-live td { background: #e3ebfb !important; }
+/* Booking Clawback / Correction: amber tint so manual accounting adjustments stand out. */
+tbody tr.row-adjust td { background: #fdf0d6 !important; }
 /* Hovering a status-tinted row: a deeper shade of its own tint so the row highlight stays clear
    without losing the churned/never-live meaning. Higher specificity than the tint rules above. */
 tbody tr.row-churned:hover td { background: #f6c3c3 !important; }
 tbody tr.row-never-live:hover td { background: #cdd9f6 !important; }
+tbody tr.row-adjust:hover td { background: #f8e3b0 !important; }
 /* Keep the whole-row hover consistent over the overridden AR cell too (its coral border remains). */
 tbody tr:hover td.ar-override.ar-overridden { background: #f7d3bc !important; }
 .booking-status { font-weight: 600; white-space: nowrap; }

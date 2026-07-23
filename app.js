@@ -379,6 +379,7 @@ function rowStatusClass(row) {
   const cls = [];
   if (row.auto || row.legacy) cls.push('row-legacy'); // auto-derived / migrated rows: muted + locked
   if (state.tab === 'bookings') {
+    if (isBookingAdjusted(row)) cls.push('row-adjust'); // Booking Clawback / Correction: highlighted
     const s = bookingChurnStatus(row);
     if (s === 'churned' || s === 'never-live') cls.push(`row-${s}`);
   }
@@ -5347,6 +5348,9 @@ function isDowngradeBooking(b) {
 // recognized in SaaS Financials — even once live — until a Conversion booking comes in for
 // the same property/product. MRR is recognized only from that conversion.
 function saasRecognized(b) {
+  // Booking Clawback / Correction lines only adjust Revenue-Desk $ to match the source sheet —
+  // they aren't real MRR movement, so they never count toward SaaS Financials.
+  if (isBookingAdjusted(b)) return false;
   const poc = String(b.pilot_or_ctam || '').trim();
   const pt = String(b.pilot_type || '').trim();
   return !(poc === 'Pilot' && pt !== 'Conversion');

@@ -354,6 +354,8 @@ function deriveDowngradeChurn(bookings) {
   const out = [];
   for (const b of bookings) {
     if ((b.instance || 'multifamily') !== 'multifamily') continue;
+    const adj = String(b.booking_adjustment || '').trim();
+    if (adj === 'Booking Clawback' || adj === 'Booking Correction') continue; // accounting correction, not MRR movement
     const ctam = String(b.ctam_type || '').trim();
     if (ctam !== 'Re-rate' && ctam !== 'Downgrade') continue;
     const oldMrr = num(b.rerate_old_mrr);
