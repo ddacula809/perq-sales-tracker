@@ -98,7 +98,7 @@ export const CHURN_FIELDS = [
   // as 'Contraction' and excluded from churn totals. Set via the offset flow.
   // 'Churn Credit' is a positive adjustment auto-created when a CLOSED-month churn is offset:
   // it cancels the locked drop in the open month (the original closed-month churn is untouched).
-  { key: 'classification',           label: 'Classification',        excel: 22, type: 'select', options: ['', 'Churn', 'Contraction', 'Churn Credit'] },
+  { key: 'classification',           label: 'Classification',        excel: 22, type: 'select', options: ['', 'Churn', 'Contraction', 'Churn Credit', 'Downgrade'] },
 ];
 
 export const CHURN_COMPUTED = [

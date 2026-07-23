@@ -341,6 +341,51 @@ async function attachChurnOwners(rows) {
   }));
 }
 
+// Auto-derived "Downgrade" churn lines. A Re-rate / Downgrade booking whose Re-rate Old MRR is
+// higher than its new MRR is a drop: we surface that drop as a read-only churn line recognized the
+// month AFTER the booking's signing month, with Final Churn Amount = new MRR − old MRR (negative).
+// These are NOT stored — they're recomputed from the bookings on every churn read, so they always
+// track the booking (edit the booking to change the drop; delete it and the line disappears).
+const DG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+function deriveDowngradeChurn(bookings) {
+  const num = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : 0; };
+  const money = (n) => `$${(Math.round(n * 100) / 100).toLocaleString('en-US')}`;
+  const out = [];
+  for (const b of bookings) {
+    if ((b.instance || 'multifamily') !== 'multifamily') continue;
+    const ctam = String(b.ctam_type || '').trim();
+    if (ctam !== 'Re-rate' && ctam !== 'Downgrade') continue;
+    const oldMrr = num(b.rerate_old_mrr);
+    const newMrr = num(b.mrr);
+    if (!(oldMrr > newMrr)) continue; // only an actual MRR drop
+    const base = String(b.date_signed || b.golive_date || '').match(/^(\d{4})-(\d{2})/);
+    if (!base) continue;
+    const sY = Number(base[1]); const sM = Number(base[2]); // signing year + 1-based month
+    let ny = sY; let nmi = sM; // month AFTER signing (sM is already the next month, 0-based -> DG_MONTHS[sM])
+    if (nmi > 11) { nmi = 0; ny += 1; }
+    const finalChurnMonth = `${DG_MONTHS[nmi]} ${ny}`;
+    const lastDay = new Date(Date.UTC(sY, sM, 0)); // last day of the signing month (informational)
+    const lduc = lastDay.toISOString().slice(0, 10);
+    const drop = Math.round((newMrr - oldMrr) * 100) / 100; // negative
+    out.push({
+      id: `dg-${b.id}`, auto: 'downgrade',
+      property_id: b.property_id || '', product: b.product || '',
+      property: b.property_name || '', pmc_buying_center: b.pmc || '',
+      client_success_manager: '', google_search_budget: null, lost_mrr_reason: '',
+      mrr: Math.round((oldMrr - newMrr) * 100) / 100, // positive reduction magnitude
+      last_date_under_contract: lduc, date_added: (b.date_signed || lduc),
+      classification: 'Downgrade', completed: '', template_deleted: '',
+      notes: `Downgrade — re-rate ${money(oldMrr)} → ${money(newMrr)} (auto from booking)`,
+      // Computed churn fields set directly: a clean full drop the month after signing (no proration).
+      final_invoice_month: '', ar_final_invoice_amount: null,
+      prorated_churn_month: '', prorated_churn_amount: null,
+      final_churn_month: finalChurnMonth, final_churn_amount: drop,
+    });
+  }
+  return out;
+}
+
 function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
   // Read: any authenticated user. Churn rows are enriched with their Account Owner (from Recon).
   app.get(`/api/${table}`, async (req, res, next) => {
@@ -349,7 +394,11 @@ function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
       if (instance && !(await canAccessInstance(req, instance))) return res.status(403).json({ error: 'No access to that instance.' });
       let out = (await listRows(table)).map((r) => withComputed(r, computeFn));
       if (instanceScoped) out = out.filter((r) => (r.instance || 'multifamily') === instance);
-      if (table === 'churn') out = await attachChurnOwners(out);
+      if (table === 'churn') {
+        // Append read-only, auto-derived Downgrade churn lines (from Re-rate/Downgrade bookings).
+        out = out.concat(deriveDowngradeChurn(await listRows('bookings')));
+        out = await attachChurnOwners(out);
+      }
       res.json(out);
     } catch (e) { next(e); }
   });

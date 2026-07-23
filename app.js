@@ -376,15 +376,17 @@ function churnStatusCell(row) {
 }
 // The <tr> class that tints legacy (grey), churned (red) / never-live (blue) rows in Bookings.
 function rowStatusClass(row) {
-  if (state.tab !== 'bookings') return '';
   const cls = [];
-  if (row.legacy) cls.push('row-legacy');
-  const s = bookingChurnStatus(row);
-  if (s === 'churned' || s === 'never-live') cls.push(`row-${s}`);
+  if (row.auto || row.legacy) cls.push('row-legacy'); // auto-derived / migrated rows: muted + locked
+  if (state.tab === 'bookings') {
+    const s = bookingChurnStatus(row);
+    if (s === 'churned' || s === 'never-live') cls.push(`row-${s}`);
+  }
   return cls.length ? ` class="${cls.join(' ')}"` : '';
 }
-// Legacy (migrated) bookings are locked for everyone except admins.
-function rowLocked(row) { return !!row.legacy && !isAdmin(); }
+// Legacy (migrated) bookings are locked for everyone except admins. Auto-derived rows (e.g. the
+// Downgrade churn lines computed from bookings) are locked for everyone — edit the source booking.
+function rowLocked(row) { return !!row.auto || (!!row.legacy && !isAdmin()); }
 
 function rowInnerHtml(row, i, fields) {
   const { cols, computedKeys } = fields || fieldsForTab();
@@ -392,7 +394,7 @@ function rowInnerHtml(row, i, fields) {
   let html = `<td class="rownum">${i + 1}</td>`;
   for (const f of cols) {
     if (f.key === 'churn_status') html += churnStatusCell(row);
-    else if (f.key === 'ar_final_invoice_amount' && state.tab === 'churn' && isAdmin()) html += arOverrideCell(row);
+    else if (f.key === 'ar_final_invoice_amount' && state.tab === 'churn' && isAdmin() && !locked) html += arOverrideCell(row);
     else if (state.tab === 'bookings' && BOOKING_OVERRIDE[f.key] && isAdmin() && (isBookingAdjusted(row) || row.legacy)) html += bookingOverrideCell(f.key, row);
     else if (computedKeys.has(f.key)) html += computedCell(f, row);
     else if (canEditField(f) && !locked) html += editCell(f, row);
@@ -400,7 +402,7 @@ function rowInnerHtml(row, i, fields) {
   }
   let actions = (canAddDelete() && !locked) ? `<button class="row-del" title="Delete row" data-del="${row.id}">✕</button>` : '';
   // Admin only, on the Bookings & Churn grids: a ▾ reveals Add-below / Duplicate.
-  if ((state.tab === 'bookings' || state.tab === 'churn') && isAdmin()) {
+  if ((state.tab === 'bookings' || state.tab === 'churn') && isAdmin() && !locked) {
     actions += '<div class="row-more">'
       + '<button type="button" class="row-more-btn" title="More row actions">▾</button>'
       + '<div class="row-more-menu" hidden>'
@@ -2729,16 +2731,17 @@ function productLineHtml() {
 }
 
 // Offset Amount shows on a block's product lines only when that block's CTAM Type is License Transfer.
-// Re-rate fields (Re-rate Paid Months / Re-rate Old MRR) show on a block only when its CTAM Type
-// is Re-rate; otherwise they're hidden and blanked.
+// Re-rate fields (Re-rate Paid Months / Re-rate Old MRR) show on a block when its CTAM Type is
+// Re-rate or Downgrade (both use Old MRR to size the drop); otherwise they're hidden and blanked.
 function setRerateFields(block) {
   const ctam = block.querySelector('[data-shared] [data-key="ctam_type"]');
-  const isRerate = !!ctam && ctam.value.trim() === 'Re-rate';
+  const v = ctam ? ctam.value.trim() : '';
+  const show = v === 'Re-rate' || v === 'Downgrade';
   for (const key of RERATE_KEYS) {
     const field = block.querySelector(`[data-shared] [data-field="${key}"]`);
     if (!field) continue;
-    field.hidden = !isRerate;
-    if (!isRerate) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
+    field.hidden = !show;
+    if (!show) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
   }
 }
 
@@ -2914,7 +2917,8 @@ function offsetEligibleChurns(pmc, bq) {
   if (!pmc || !bq) return [];
   const p = String(pmc).trim().toLowerCase();
   return state.rows.churn
-    .filter((c) => String(c.pmc_buying_center || '').trim().toLowerCase() === p
+    .filter((c) => !c.auto // auto-derived Downgrade lines aren't real churn rows and can't be offset
+      && String(c.pmc_buying_center || '').trim().toLowerCase() === p
       && String(c.classification || '') !== 'Contraction')
     .map((c) => ({ churn: c, quarter: churnQuarterInfo(c) }))
     .filter((e) => e.quarter && qCmp(e.quarter, bq) >= 0)
@@ -5381,6 +5385,7 @@ function saasChurnFor(b) {
   const prod = String(b.product || '').trim().toLowerCase();
   let best = null;
   for (const c of state.rows.churn) {
+    if (c.auto) continue; // auto-derived Downgrade lines are booking-driven; skip to avoid double-count
     if (String(c.classification || '') === 'Churn Credit') continue; // accounting credit, not a real churn
     if (!c.last_date_under_contract) continue;
     if (String(c.property_id || '').trim().toLowerCase() !== pid) continue;
