@@ -548,6 +548,9 @@ td.del .row-more-menu .row-dup:hover { color: var(--plum); }
 .bd-detail th.bd-act-col, .bd-detail td.bd-act-col { width: 1%; white-space: nowrap; text-align: center; }
 .bd-detail { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .bd-detail table { width: max-content; }
+/* Original → Updated change columns in the "For Immediate Action" drill-downs. */
+.bd-detail td.bd-change-orig { color: var(--ink-soft); text-decoration: line-through; white-space: nowrap; }
+.bd-detail td.bd-change-upd { font-weight: 600; white-space: nowrap; }
 .bd-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .bd-filters { margin: 6px 0 10px; }
 .bd-collapsed .bd-detail { max-height: 82vh; }

@@ -230,6 +230,11 @@ export async function initDb() {
   // from the Billing Dashboard "For Immediate Action" tile. They are independent: dismissing
   // in the bell does NOT resolve the warning — only the Resolve button does.
   await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS resolved BOOLEAN NOT NULL DEFAULT false');
+  // The specific field that changed + its before/after values, so the Billing "For Immediate
+  // Action" drill-down can show Original vs Updated columns (message text is just a summary).
+  await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS field_key TEXT');
+  await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS old_value TEXT');
+  await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS new_value TEXT');
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales_periods (
       period TEXT PRIMARY KEY,
@@ -432,11 +437,16 @@ export async function getRowPeriod(table, id) {
 // Returns every unresolved warning (the "For Immediate Action" set), each carrying its
 // own `dismissed` flag so the header bell can hide acknowledged ones without resolving them.
 export async function listNotifications() {
-  const { rows } = await pool.query('SELECT id, target_tab, booking_id, message, created_at, dismissed FROM notifications WHERE resolved = false ORDER BY created_at DESC, id DESC');
+  const { rows } = await pool.query('SELECT id, target_tab, booking_id, message, field_key, old_value, new_value, created_at, dismissed FROM notifications WHERE resolved = false ORDER BY created_at DESC, id DESC');
   return rows;
 }
-export async function createNotification(targetTab, rowId, message) {
-  await pool.query('INSERT INTO notifications (target_tab, booking_id, message) VALUES ($1, $2, $3)', [targetTab, rowId, message]);
+export async function createNotification(targetTab, rowId, message, meta = {}) {
+  await pool.query(
+    'INSERT INTO notifications (target_tab, booking_id, message, field_key, old_value, new_value) VALUES ($1, $2, $3, $4, $5, $6)',
+    [targetTab, rowId, message,
+      meta.fieldKey ?? null,
+      meta.oldValue === undefined || meta.oldValue === null ? null : String(meta.oldValue),
+      meta.newValue === undefined || meta.newValue === null ? null : String(meta.newValue)]);
 }
 // Bell "✕": acknowledge — hide from the bell, but keep the warning on the dashboard.
 export async function dismissNotification(id) {

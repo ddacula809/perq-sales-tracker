@@ -533,7 +533,8 @@ function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
       for (const f of watched) {
         if (old[f.key] === undefined || sameWatched(old[f.key], row[f.key], f.money)) continue;
         await createNotification(table, row.id,
-          `${f.label} changed for ${WATCHED_NAME[table](row)}: ${fmtWatched(old[f.key], f.money)} → ${fmtWatched(row[f.key], f.money)}`);
+          `${f.label} changed for ${WATCHED_NAME[table](row)}: ${fmtWatched(old[f.key], f.money)} → ${fmtWatched(row[f.key], f.money)}`,
+          { fieldKey: f.key, oldValue: old[f.key], newValue: row[f.key] });
       }
       res.json(table === 'bookings' ? await computeBookingRow(row) : withComputed(row, computeFn));
     } catch (e) { next(e); }
@@ -1247,7 +1248,7 @@ app.post('/api/churn/upload', requireRole('admin', 'standard'), upload.single('f
       await updateRow('churn', match.id, { last_date_under_contract: next, date_added: todayStr() });
       const who = match.property || match.property_id || 'a property';
       const msg = `Last Date Under Contract changed for ${who} (${match.product || 'product'}) from ${cur || '(blank)'} to ${next || '(blank)'}`;
-      await createNotification('churn', match.id, msg);
+      await createNotification('churn', match.id, msg, { fieldKey: 'last_date_under_contract', oldValue: cur, newValue: next });
       changeLines.push(msg);
       changedRows.push({ property: who, product: match.product || '', mrr: match.mrr, from: cur, to: next });
       match.last_date_under_contract = next;
@@ -1315,7 +1316,7 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
         else {
           patch.golive_date = next;
           const msg = `GoLive date changed for ${who} (${b.product || 'product'}) from ${cur} to ${next}`;
-          await createNotification('bookings', b.id, msg);
+          await createNotification('bookings', b.id, msg, { fieldKey: 'golive_date', oldValue: cur, newValue: next });
           changeLines.push(msg);
           changedRows.push({ property: who, product: b.product || '—', mrr: dispMrr, from: cur, to: next });
           changed += 1;
@@ -1327,7 +1328,7 @@ app.post('/api/bookings/golives', requireRole('admin', 'standard'), upload.singl
             patch.mrr = sheetMrr;
             const money = (v) => (v === null || v === undefined ? '$0' : `$${Number(v).toLocaleString('en-US')}`);
             const msg = `MRR changed for ${who} (${b.product || 'product'}) from ${money(curMrr)} to ${money(sheetMrr)}`;
-            await createNotification('bookings', b.id, msg);
+            await createNotification('bookings', b.id, msg, { fieldKey: 'mrr', oldValue: curMrr, newValue: sheetMrr });
             mrrLines.push(msg);
             mrrRows.push({ property: who, product: b.product || '—', from: curMrr, to: sheetMrr });
             mrrUpdated += 1;

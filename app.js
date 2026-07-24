@@ -1666,17 +1666,29 @@ function renderActionDetail(action, notifs) {
   const canEdit = isGolive ? bdCanEdit : churnCanEdit;
   const byId = new Map(state.rows[tab].map((r) => [String(r.id), r]));
   const defs = keys.map((k) => state.schema[tab].editable.find((f) => f.key === k)).filter(Boolean);
-  const headRow = '<th class="bd-act-col">Action</th>' + defs.map((f) => `<th>${escapeHtml(f.label)}</th>`).join('');
+  // Original → Updated of whatever field changed (from the notification), plus the editable row.
+  // Columns are resizable (data-col + .col-resize, applied via applyBillingDetailWidths).
+  const th = (col, label) => `<th data-col="${col}">${escapeHtml(label)}<span class="col-resize"></span></th>`;
+  const origLabel = isGolive ? 'Original GoLive' : 'Original Last Date';
+  const updLabel = isGolive ? 'Updated GoLive' : 'Updated Last Date';
+  const headRow = '<th class="bd-act-col">Action</th>' + th('_change_orig', origLabel) + th('_change_upd', updLabel)
+    + defs.map((f) => th(f.key, f.label)).join('');
+  const fmtChange = (n, v) => {
+    if (v === null || v === undefined || v === '') return '<span class="muted">(blank)</span>';
+    return String(n.field_key) === 'mrr' ? escapeHtml(fmtMoney(v)) : escapeHtml(String(v));
+  };
   const body = notifs.map((n) => {
     const row = byId.get(String(n.booking_id));
     if (!row) return ''; // the underlying row no longer exists
     const act = `<td class="bd-act-col"><button type="button" class="bd-resolve" data-resolve="${n.id}" title="${escapeAttr(n.message || 'Mark resolved')}">⚠ Resolve</button></td>`;
+    const orig = `<td data-col="_change_orig" class="bd-change-orig">${fmtChange(n, n.old_value)}</td>`;
+    const upd = `<td data-col="_change_upd" class="bd-change-upd">${fmtChange(n, n.new_value)}</td>`;
     const cells = defs.map((f) => (canEdit(f.key) ? editCell(f, row) : readonlyCell(f, row))).join('');
-    return `<tr data-id="${row.id}">${act}${cells}</tr>`;
+    return `<tr data-id="${row.id}">${act}${orig}${upd}${cells}</tr>`;
   }).join('');
   return `<div class="metrics-title">${title} (${notifs.length})</div>`
     + `<div class="bd-detail" data-action-tab="${tab}"><table><thead><tr>${headRow}</tr></thead>`
-    + `<tbody>${body || `<tr><td class="muted" colspan="${defs.length + 1}" style="padding:12px">No matching rows.</td></tr>`}</tbody></table></div>`;
+    + `<tbody>${body || `<tr><td class="muted" colspan="${defs.length + 3}" style="padding:12px">No matching rows.</td></tr>`}</tbody></table></div>`;
 }
 
 function wireBilling() {
