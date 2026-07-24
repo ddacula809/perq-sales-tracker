@@ -441,12 +441,36 @@ export async function listNotifications() {
   return rows;
 }
 export async function createNotification(targetTab, rowId, message, meta = {}) {
+  const fieldKey = meta.fieldKey ?? null;
+  const oldStr = meta.oldValue === undefined || meta.oldValue === null ? null : String(meta.oldValue);
+  const newStr = meta.newValue === undefined || meta.newValue === null ? null : String(meta.newValue);
+  // Keep at most ONE unresolved notification per (tab, line item, field): if the same field on the
+  // same row changes again while still unresolved, update that entry in place instead of stacking a
+  // duplicate. The ORIGINAL old_value is kept as the baseline (Original → latest), the edit time is
+  // refreshed, and it re-alerts (dismissed=false). If the value is back to the baseline, resolve it.
+  if (fieldKey != null && rowId != null) {
+    const { rows } = await pool.query(
+      `SELECT id, old_value FROM notifications
+        WHERE resolved = false AND target_tab = $1 AND booking_id = $2 AND field_key = $3
+        ORDER BY created_at ASC`, [targetTab, rowId, fieldKey]);
+    if (rows.length) {
+      const keep = rows[0];
+      if (rows.length > 1) { // collapse any legacy duplicates down to one
+        await pool.query('UPDATE notifications SET resolved = true, dismissed = true WHERE id = ANY($1)', [rows.slice(1).map((r) => r.id)]);
+      }
+      if (String(keep.old_value ?? '') === String(newStr ?? '')) { // net change back to baseline
+        await pool.query('UPDATE notifications SET resolved = true, dismissed = true WHERE id = $1', [keep.id]);
+        return;
+      }
+      await pool.query(
+        'UPDATE notifications SET message = $1, new_value = $2, created_at = now(), dismissed = false WHERE id = $3',
+        [message, newStr, keep.id]);
+      return;
+    }
+  }
   await pool.query(
     'INSERT INTO notifications (target_tab, booking_id, message, field_key, old_value, new_value) VALUES ($1, $2, $3, $4, $5, $6)',
-    [targetTab, rowId, message,
-      meta.fieldKey ?? null,
-      meta.oldValue === undefined || meta.oldValue === null ? null : String(meta.oldValue),
-      meta.newValue === undefined || meta.newValue === null ? null : String(meta.newValue)]);
+    [targetTab, rowId, message, fieldKey, oldStr, newStr]);
 }
 // Bell "✕": acknowledge — hide from the bell, but keep the warning on the dashboard.
 export async function dismissNotification(id) {
