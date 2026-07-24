@@ -94,6 +94,9 @@ export const CHURN_FIELDS = [
   { key: 'template_deleted',         label: 'Template Deleted',      excel: 19, type: 'text' },
   { key: 'completed',                label: 'Completed',             excel: 20, type: 'select', options: ['', 'CM', 'Invoice', 'No Action needed'] },
   { key: 'notes',                    label: 'Notes',                 excel: 21, type: 'text' },
+  // Billing-editable free-text note (separate from the system-generated Notes above, which carry
+  // License Transfer / offset cross-references). Mirrors the bookings Billing Notes column.
+  { key: 'billing_notes',            label: 'Billing Notes',         excel: 25, type: 'text' },
   // Churn vs Contraction. A churn used to offset a License Transfer booking is reclassified
   // as 'Contraction' and excluded from churn totals. Set via the offset flow.
   // 'Churn Credit' is a positive adjustment auto-created when a CLOSED-month churn is offset:
@@ -234,7 +237,9 @@ export const BOOKING_BILLING_KEYS = [
   'billing_trigger', 'recurring_billing_status', 'implementation_billing_status',
   'completed_by', 'completed_date', 'sage_id', 'billing_notes',
 ];
-export const CHURN_BILLING_KEYS = ['template_deleted', 'completed', 'notes'];
+// Billing (blue) churn columns. Note: the system-generated "notes" (License Transfer / offset
+// cross-references) is intentionally NOT here — billing edits the separate "billing_notes".
+export const CHURN_BILLING_KEYS = ['template_deleted', 'completed', 'billing_notes'];
 
 // User roles. admin: full access + user management. standard: edit all data.
 // sales_admin: view Bookings, full Sales Support (+ open/close quarters), no billing/recon.

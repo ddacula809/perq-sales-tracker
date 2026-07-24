@@ -297,7 +297,7 @@ function parseMoney(v) {
 // tinted blue. Keys are in the order they should appear.
 const BILLING_KEYS = {
   bookings: new Set(['billing_trigger', 'recurring_billing_status', 'implementation_billing_status', 'completed_by', 'completed_date', 'sage_id', 'billing_notes']),
-  churn: new Set(['template_deleted', 'completed', 'notes']),
+  churn: new Set(['template_deleted', 'completed', 'billing_notes']),
 };
 function isBilling(key) { return !!(BILLING_KEYS[state.tab] && BILLING_KEYS[state.tab].has(key)); }
 
@@ -1437,8 +1437,9 @@ const BD_DETAIL_KEYS_BY = {
   noSage: ['property_id', 'property_name', 'mrr', 'golive_date', 'sage_id', 'billing_notes'],
 };
 // Columns shown in the Churn "For Immediate Action" drill-down (editable so billing can act).
+// Uses the billing-editable Billing Notes (not the system-generated License Transfer "notes").
 const CHURN_DETAIL_KEYS = ['property_id', 'property', 'product', 'mrr', 'last_date_under_contract',
-  'template_deleted', 'completed', 'notes'];
+  'template_deleted', 'completed', 'billing_notes'];
 // Who can edit a churn cell in the drill-down: admin/standard all; billing = churn billing columns.
 function churnCanEdit(key) {
   const r = role();
@@ -1569,8 +1570,8 @@ function renderBillingDashboard() {
 // + amount (read-only) and an editable Completed column (saves to churn via the billing handler).
 function renderArDrillDown(list, key) {
   const label = key === 'arCompleted' ? 'AR Final Invoice — Completed' : 'AR Final Invoice — Not Completed';
-  // The three editable billing columns on a churn row: Completed, Template Deleted, Notes.
-  const editDefs = ['completed', 'template_deleted', 'notes']
+  // The three editable billing columns on a churn row: Completed, Template Deleted, Billing Notes.
+  const editDefs = ['completed', 'template_deleted', 'billing_notes']
     .map((k) => state.schema.churn.editable.find((f) => f.key === k)).filter(Boolean);
   const head = ['Property', 'Product', 'MRR', 'AR Final Invoice Month', 'AR Final Invoice Amt', ...editDefs.map((f) => f.label)]
     .map((h) => `<th>${escapeHtml(h)}</th>`).join('');
