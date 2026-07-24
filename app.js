@@ -74,6 +74,7 @@ const state = {
   bdMonth: 'All',     // Billing Dashboard Booking Month/Year filter
   bdArMonth: 'All',   // Billing Dashboard AR Final Invoice Month filter (churn tiles)
   bdFilters: {},      // Billing Dashboard drill-down column filters { colKey: value }
+  bdActionFilters: {}, // "For Immediate Action" (GoLive/Churn change) drill-down filters { colKey: value }
   aiHistory: [],      // "Ask Claude" conversation [{role, content}]
   aiBusy: false,      // a chat request is in flight
   pendingBookings: [], // new-booking payloads awaiting confirmation
@@ -1685,9 +1686,22 @@ function renderActionDetail(action, notifs) {
     return isNaN(d) ? escapeHtml(String(v))
       : escapeHtml(d.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }));
   };
-  const body = notifs.map((n) => {
+  // Plain (unformatted-for-HTML) values used for the dynamic filter — one flat row per notification
+  // covering every column shown: the change columns, edit day, and each detail field.
+  const editDay = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); };
+  const changeVal = (n, v) => (v === null || v === undefined || v === '') ? '(blank)' : (String(n.field_key) === 'mrr' ? fmtMoney(v) : String(v));
+  const items = notifs.map((n) => {
     const row = byId.get(String(n.booking_id));
-    if (!row) return ''; // the underlying row no longer exists
+    if (!row) return null; // the underlying row no longer exists
+    const flat = { _edit_date: editDay(n.created_at), _change_orig: changeVal(n, n.old_value), _change_upd: changeVal(n, n.new_value) };
+    defs.forEach((f) => { flat[f.key] = row[f.key]; });
+    return { n, row, flat };
+  }).filter(Boolean);
+  // The dynamic "Add Filter" columns = every column in the detail table.
+  const filterDefs = [{ key: '_edit_date', label: 'Edit Date' }, { key: '_change_orig', label: origLabel },
+    { key: '_change_upd', label: updLabel }, ...defs.map((f) => ({ key: f.key, label: f.label }))];
+  const shown = items.filter((it) => bdActionRowMatches(it.flat));
+  const body = shown.map(({ n, row }) => {
     const act = `<td class="bd-act-col"><button type="button" class="bd-resolve" data-resolve="${n.id}" title="${escapeAttr(n.message || 'Mark resolved')}">⚠ Resolve</button></td>`;
     const edited = `<td data-col="_edit_date" class="bd-edit-date">${fmtEdit(n.created_at)}</td>`;
     const orig = `<td data-col="_change_orig" class="bd-change-orig">${fmtChange(n, n.old_value)}</td>`;
@@ -1696,8 +1710,41 @@ function renderActionDetail(action, notifs) {
     return `<tr data-id="${row.id}">${act}${edited}${orig}${upd}${cells}</tr>`;
   }).join('');
   return `<div class="metrics-title">${title} (${notifs.length})</div>`
+    + bdActionFilterBarHtml(filterDefs, items.map((it) => it.flat))
     + `<div class="bd-detail" data-action-tab="${tab}"><table><thead><tr>${headRow}</tr></thead>`
-    + `<tbody>${body || `<tr><td class="muted" colspan="${defs.length + 4}" style="padding:12px">No matching rows.</td></tr>`}</tbody></table></div>`;
+    + `<tbody>${body || `<tr><td class="muted" colspan="${defs.length + 4}" style="padding:12px">No rows match the current filters.</td></tr>`}</tbody></table></div>`;
+}
+// Does a flat action-detail row pass the "For Immediate Action" drill-down filters?
+function bdActionRowMatches(flat) {
+  return Object.entries(state.bdActionFilters).every(([k, v]) => {
+    if (v == null || v === 'All' || v === '') return true;
+    if (v === '(blank)') { const s = String(flat[k] ?? '').trim(); return s === '' || s === '(blank)'; }
+    return String(flat[k] ?? '') === String(v);
+  });
+}
+// Distinct values for an action-detail column (within the current change rows).
+function bdActionValuesFor(flats, key) {
+  const isBlank = (v) => v === null || v === undefined || String(v).trim() === '' || String(v) === '(blank)';
+  const hasBlank = flats.some((r) => isBlank(r[key]));
+  const d = [...new Set(flats.filter((r) => !isBlank(r[key])).map((r) => String(r[key])))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return ['All', ...(hasBlank ? ['(blank)'] : []), ...d];
+}
+// Adjustable "Add Filter" bar over the action-detail columns (own state so it never clashes with
+// the metric-tile drill-down filters).
+function bdActionFilterBarHtml(defs, flats) {
+  const labelOf = (k) => (defs.find((f) => f.key === k) || {}).label || k;
+  const active = Object.keys(state.bdActionFilters).filter((k) => defs.some((f) => f.key === k));
+  const tiles = active.map((k) => {
+    const cur = state.bdActionFilters[k] || 'All';
+    const opts = bdActionValuesFor(flats, k).map((o) => `<option${String(o) === String(cur) ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('');
+    return `<div class="filter" data-filter="${escapeAttr(k)}"><button type="button" class="filter-x" data-bda-remove-filter="${escapeAttr(k)}" title="Remove filter">✕</button>`
+      + `<label>${escapeHtml(labelOf(k))}</label><select data-bda-filter="${escapeAttr(k)}">${opts}</select></div>`;
+  }).join('');
+  const addOpts = ['<option value="">+ Add a filter…</option>']
+    .concat(defs.filter((f) => !active.includes(f.key)).map((f) => `<option value="${escapeAttr(f.key)}">${escapeHtml(f.label)}</option>`)).join('');
+  const addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="bdActionAddFilter">${addOpts}</select></div>`;
+  return `<div class="filters-row bd-filters">${tiles}${addTile}</div>`;
 }
 
 function wireBilling() {
@@ -1707,10 +1754,15 @@ function wireBilling() {
     // "For Immediate Action" tile -> toggle its drill-down.
     const actionTile = e.target.closest('[data-bd-action]');
     if (actionTile) {
-      state.bdAction = state.bdAction === actionTile.dataset.bdAction ? null : actionTile.dataset.bdAction;
+      const a = actionTile.dataset.bdAction;
+      if (state.bdAction !== a) state.bdActionFilters = {}; // switching drill-downs clears its filters
+      state.bdAction = state.bdAction === a ? null : a;
       renderBillingDashboard();
       return;
     }
+    // Remove an action drill-down filter tile.
+    const rmActionFilter = e.target.closest('[data-bda-remove-filter]');
+    if (rmActionFilter) { delete state.bdActionFilters[rmActionFilter.dataset.bdaRemoveFilter]; renderBillingDashboard(); return; }
     // Resolve a change -> clears the warning entirely (and removes it from the bell).
     const resolveBtn = e.target.closest('[data-resolve]');
     if (resolveBtn) {
@@ -1741,6 +1793,10 @@ function wireBilling() {
     if (e.target.id === 'bdAddFilter') { const k = e.target.value; if (k) state.bdFilters[k] = 'All'; renderBillingDashboard(); return; }
     const bf = e.target.closest('[data-bd-filter]');
     if (bf) { state.bdFilters[bf.dataset.bdFilter] = e.target.value; renderBillingDashboard(); return; }
+    // Action ("For Immediate Action") drill-down filters.
+    if (e.target.id === 'bdActionAddFilter') { const k = e.target.value; if (k) state.bdActionFilters[k] = 'All'; renderBillingDashboard(); return; }
+    const bfa = e.target.closest('[data-bda-filter]');
+    if (bfa) { state.bdActionFilters[bfa.dataset.bdaFilter] = e.target.value; renderBillingDashboard(); return; }
     const ctl = e.target.closest('[data-key]');
     if (!ctl) return;
     const tr = ctl.closest('tr');
