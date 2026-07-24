@@ -52,7 +52,9 @@ export function buildWorkbook(bookings, churn, opts = {}) {
   }
 
   if (sheets !== 'churn') {
-    const bAoa = buildAoa(bookings, BOOKING_FIELDS, BOOKING_COMPUTED, computeBooking, bExclude);
+    // opts.bookingCompute lets the caller supply Downgrade paid-months context; default to plain compute.
+    const bCompute = opts.bookingCompute || computeBooking;
+    const bAoa = buildAoa(bookings, BOOKING_FIELDS, BOOKING_COMPUTED, bCompute, bExclude);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(bAoa), BOOKING_SHEET);
   }
   if (sheets !== 'bookings') {

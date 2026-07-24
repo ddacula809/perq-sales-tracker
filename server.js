@@ -12,7 +12,7 @@ import {
   listProducts, loadCatalog,
   listClosedMonths, closeMonth, reopenMonth,
 } from './db.js';
-import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear, monthYear } from './compute.js';
+import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear, monthYear, wholeMonthsBetween } from './compute.js';
 import { parseWorkbook, parseChurnUpload, parseBookingReconcile, parseGolives, parseSalesforceRecon, parseLegacyTracker, parsePriorBookings, parseConvertEdit } from './importer.js';
 import { buildWorkbook } from './exporter.js';
 import { parseLegacyWorkbook } from './legacyImporter.js';
@@ -139,6 +139,39 @@ const requireSection = (section) => async (req, res, next) => {
 const BILLING_KEYS = { bookings: BOOKING_BILLING_KEYS, churn: CHURN_BILLING_KEYS };
 
 const withComputed = (row, fn) => ({ ...row, ...fn(row) });
+
+// ---- Downgrade paid-months: read-time lookup of the property's existing GoLive ----
+// A Downgrade assumes the property already has a booking. "Months already paying the old MRR" =
+// whole months from that existing booking's GoLive date to the Downgrade's Date Signed. Built from
+// the FULL bookings list (the original may be a different month/year than the downgrade).
+function goliveByProperty(allBookings) {
+  const m = new Map();
+  const put = (k, gl) => { if (!k || !gl) return; const cur = m.get(k); if (!cur || String(gl) < String(cur)) m.set(k, gl); };
+  for (const b of allBookings) {
+    if (!b.golive_date) continue;
+    if (String(b.ctam_type || '').trim() === 'Downgrade') continue; // never reference a downgrade row itself
+    const pid = String(b.property_id || '').trim().toLowerCase();
+    const prod = String(b.product || '').trim().toLowerCase();
+    put(`${pid}|${prod}`, b.golive_date); // same subscription line (property + product)
+    put(`${pid}|`, b.golive_date);        // property-level fallback (earliest go-live)
+  }
+  return m;
+}
+// Paid months for a Downgrade booking (undefined for non-downgrades → computeBooking ignores it).
+function downgradePaid(r, glMap) {
+  if (String(r.ctam_type || '').trim() !== 'Downgrade') return undefined;
+  const pid = String(r.property_id || '').trim().toLowerCase();
+  const prod = String(r.product || '').trim().toLowerCase();
+  const gl = glMap.get(`${pid}|${prod}`) || glMap.get(`${pid}|`);
+  return gl ? wholeMonthsBetween(gl, r.date_signed) : 0;
+}
+// Merge computed booking fields, resolving Downgrade paid-months from a prebuilt GoLive map.
+const withBooking = (row, glMap) => ({ ...row, ...computeBooking(row, downgradePaid(row, glMap)) });
+// Compute a single booking row: fetch the list once to resolve any Downgrade paid-months.
+async function computeBookingRow(row) {
+  const all = await listRows('bookings');
+  return withBooking(row, goliveByProperty(all));
+}
 
 // Owner dropdown options = Salesforce Recon Account Owner full names + any original
 // options that have no Recon match (e.g. "House/CSM", "Doug") + blank if originally allowed.
@@ -394,7 +427,11 @@ function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
     try {
       const instance = instanceScoped ? reqInstance(req) : null;
       if (instance && !(await canAccessInstance(req, instance))) return res.status(403).json({ error: 'No access to that instance.' });
-      let out = (await listRows(table)).map((r) => withComputed(r, computeFn));
+      const raw = await listRows(table);
+      // Bookings carry Downgrade paid-months context (from the property's existing GoLive).
+      let out = table === 'bookings'
+        ? (() => { const glMap = goliveByProperty(raw); return raw.map((r) => withBooking(r, glMap)); })()
+        : raw.map((r) => withComputed(r, computeFn));
       if (instanceScoped) out = out.filter((r) => (r.instance || 'multifamily') === instance);
       if (table === 'churn') {
         // Append read-only, auto-derived Downgrade churn lines (from Re-rate/Downgrade bookings).
@@ -417,7 +454,7 @@ function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
       // overrides its pilot booking) and return that row — then no new row is inserted.
       if (beforeInsert) {
         const replaced = await beforeInsert(body);
-        if (replaced) return res.json(withComputed(replaced, computeFn));
+        if (replaced) return res.json(table === 'bookings' ? await computeBookingRow(replaced) : withComputed(replaced, computeFn));
       }
       const row = await insertRow(table, body);
       // `instance` isn't a schema/grid field, so insertRow doesn't write it — stamp it explicitly
@@ -426,7 +463,7 @@ function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
         await pool.query('UPDATE bookings SET instance=$1 WHERE id=$2', [body.instance, row.id]);
         row.instance = body.instance;
       }
-      const computed = withComputed(row, computeFn);
+      const computed = table === 'bookings' ? await computeBookingRow(row) : withComputed(row, computeFn);
       // Optional side-effect after insert (e.g. auto-track a new booking in Sales Support).
       if (afterInsert) { try { await afterInsert(computed); } catch (e) { console.error('[afterInsert]', e.message); } }
       res.status(201).json(computed);
@@ -498,7 +535,7 @@ function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
         await createNotification(table, row.id,
           `${f.label} changed for ${WATCHED_NAME[table](row)}: ${fmtWatched(old[f.key], f.money)} → ${fmtWatched(row[f.key], f.money)}`);
       }
-      res.json(withComputed(row, computeFn));
+      res.json(table === 'bookings' ? await computeBookingRow(row) : withComputed(row, computeFn));
     } catch (e) { next(e); }
   });
 }
@@ -1410,7 +1447,11 @@ app.get('/api/export', async (req, res, next) => {
   try {
     const instance = reqInstance(req);
     if (!(await canAccessInstance(req, instance))) return res.status(403).json({ error: 'No access to that instance.' });
-    let bookings = (await listRows('bookings')).filter((r) => (r.instance || 'multifamily') === instance);
+    const allBookings = (await listRows('bookings')).filter((r) => (r.instance || 'multifamily') === instance);
+    // GoLive map is built from ALL bookings (the property's original may be a different month/year
+    // than the downgrade being exported) so Downgrade paid-months resolve correctly.
+    const glMap = goliveByProperty(allBookings);
+    let bookings = allBookings;
     const { month, year } = req.query;
     if (month) bookings = bookings.filter((r) => r.booking_month === month);
     if (year) bookings = bookings.filter((r) => String(r.booking_year) === String(year));
@@ -1420,6 +1461,7 @@ app.get('/api/export', async (req, res, next) => {
     const opts = req.query.scope === 'commission'
       ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set(CHURN_BILLING_KEYS) }
       : {};
+    opts.bookingCompute = (r) => computeBooking(r, downgradePaid(r, glMap));
     // Which tabs to include: 'both' (default), 'bookings', or 'churn'.
     const sheets = ['bookings', 'churn'].includes(req.query.sheets) ? req.query.sheets : 'both';
     opts.sheets = sheets;

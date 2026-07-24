@@ -2755,15 +2755,21 @@ function productLineHtml() {
 }
 
 // Offset Amount shows on a block's product lines only when that block's CTAM Type is License Transfer.
-// Re-rate fields (Re-rate Paid Months / Re-rate Old MRR) show on a block when its CTAM Type is
-// Re-rate or Downgrade (both use Old MRR to size the drop); otherwise they're hidden and blanked.
+// Old MRR / Paid Months fields, shown by CTAM Type:
+//  • Re-rate   → Paid Months + Old MRR (both drive the Re-rate math).
+//  • Downgrade → Old MRR only (Paid Months is auto-computed from the property's existing GoLive).
+//  • anything else → hidden + blanked.
 function setRerateFields(block) {
   const ctam = block.querySelector('[data-shared] [data-key="ctam_type"]');
   const v = ctam ? ctam.value.trim() : '';
-  const show = v === 'Re-rate' || v === 'Downgrade';
+  const showByKey = {
+    rerate_paid_months: v === 'Re-rate',
+    rerate_old_mrr: v === 'Re-rate' || v === 'Downgrade',
+  };
   for (const key of RERATE_KEYS) {
     const field = block.querySelector(`[data-shared] [data-field="${key}"]`);
     if (!field) continue;
+    const show = !!showByKey[key];
     field.hidden = !show;
     if (!show) { const inp = field.querySelector('[data-key]'); if (inp) inp.value = ''; }
   }
@@ -2893,16 +2899,17 @@ async function submitEntries() {
         return;
       }
     }
-    // Re-rate requires its two extra fields (Re-rate Paid Months / Re-rate Old MRR).
-    if (String(shared.ctam_type || '').trim() === 'Re-rate') {
-      for (const key of RERATE_KEYS) {
-        if (!String(shared[key] ?? '').trim()) {
-          const f = fieldDef(key);
-          toast(`${f ? f.label : key} is required for a Re-rate.`, true);
-          const ctl = block.querySelector(`[data-shared] [data-key="${key}"]`);
-          if (ctl) ctl.focus();
-          return;
-        }
+    // Required extra fields by CTAM Type: Re-rate needs Paid Months + Old MRR; Downgrade needs
+    // Old MRR (its paid months come from the property's existing GoLive automatically).
+    const ctamSel = String(shared.ctam_type || '').trim();
+    const requiredExtra = ctamSel === 'Re-rate' ? RERATE_KEYS : (ctamSel === 'Downgrade' ? ['rerate_old_mrr'] : []);
+    for (const key of requiredExtra) {
+      if (!String(shared[key] ?? '').trim()) {
+        const f = fieldDef(key);
+        toast(`${f ? f.label : key} is required for a ${ctamSel}.`, true);
+        const ctl = block.querySelector(`[data-shared] [data-key="${key}"]`);
+        if (ctl) ctl.focus();
+        return;
       }
     }
     block.querySelectorAll('[data-products] [data-product]').forEach((line) => {

@@ -19,7 +19,7 @@ export const BOOKING_FIELDS = [
   { key: 'product',                         label: 'Product',                excel: 10, type: 'select', options: ['AI Lead Capture Agent', 'Call to Text', 'Pulse Data Hub', 'AI Leasing Agent', 'Performance Reporting Agent', 'Property Website', 'Corporate Website', 'Google Search Management', 'AI Google Bookings Agent', 'AI Google Posts and Products', 'SEO', 'Google Performance Max'] },
   { key: 'mql',                             label: 'MQL',                    excel: 12, type: 'select', options: ['', 'YES', 'NO'] },
   { key: 'rerate_paid_months',              label: 'Re-rate Paid Months',    excel: 13, type: 'number' },
-  { key: 'rerate_old_mrr',                  label: 'Re-rate Old MRR',        excel: 14, type: 'number' },
+  { key: 'rerate_old_mrr',                  label: 'Old MRR',                excel: 14, type: 'number' },
   { key: 'contract_term',                   label: 'Contract Term',          excel: 15, type: 'number' },
   { key: 'booked_term',                     label: 'Booked Term',            excel: 16, type: 'number' },
   // Free (promotional) months after GoLive before MRR is recognized in SaaS Financials — e.g. 3

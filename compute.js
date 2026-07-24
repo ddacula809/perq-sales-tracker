@@ -19,6 +19,23 @@ function monthYear(d) {
   return `${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
 }
 
+// Parse a 'YYYY-MM-DD' string (or Date) without timezone shifting.
+function parseYMD(v) {
+  if (!v) return null;
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return { y: +m[1], mo: +m[2], d: +m[3] };
+  const dt = v instanceof Date ? v : new Date(v);
+  return isNaN(dt) ? null : { y: dt.getUTCFullYear(), mo: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+// Whole (completed) months between two dates. e.g. 2026-02-01 → 2026-07-24 = 5.
+export function wholeMonthsBetween(startV, endV) {
+  const s = parseYMD(startV); const e = parseYMD(endV);
+  if (!s || !e) return 0;
+  let m = (e.y - s.y) * 12 + (e.mo - s.mo);
+  if (e.d < s.d) m -= 1;
+  return Math.max(0, m);
+}
+
 // ---------- May 2026 bookings ----------
 
 // Column L: BPR Prod Category (derived from Product)
@@ -56,7 +73,9 @@ export function formulaColumn(pilotType, ctamType) {
 }
 
 // Computes all derived booking fields. `r` is a booking row (plain object).
-export function computeBooking(r) {
+// `paidMonths` (optional): for a Downgrade, the whole months the property has already been paying
+// the OLD MRR — supplied by the caller from the property's existing booking (GoLive → Date Signed).
+export function computeBooking(r, paidMonths) {
   const H = (r.pilot_type || '').trim();
   const I = (r.ctam_type || '').trim();
   const G = (r.pilot_or_ctam || '').trim();
@@ -87,6 +106,8 @@ export function computeBooking(r) {
     } else if (I === 'Re-rate') {
       const v = ((S ?? 0) - (O ?? 0)) * (P ?? 0);
       companyTotal = v < 0 ? 0 : v;
+    } else if (I === 'Downgrade') {
+      companyTotal = 0; // Downgrades never add company booking (the reduction is a commission clawback)
     } else if (formula === 'License Transfer') {
       companyTotal = ((S ?? 0) - (T ?? 0)) * (Q ?? 0);
     } else {
@@ -101,6 +122,10 @@ export function computeBooking(r) {
       commissionable = 0;
     } else if (I === 'Re-rate') {
       commissionable = ((S ?? 0) - (O ?? 0)) * ((P ?? 0) - (N ?? 0));
+    } else if (I === 'Downgrade') {
+      // (New MRR − Old MRR) × the remaining months of the year (12 − months already on the old MRR).
+      const paid = Number.isFinite(paidMonths) ? paidMonths : 0;
+      commissionable = ((S ?? 0) - (O ?? 0)) * Math.max(0, 12 - paid);
     } else if (G === 'Pilot' && H === 'Conversion') {
       commissionable = ((P ?? 0) - 3) * (S ?? 0);
     } else if (H === 'New - Paid') {
