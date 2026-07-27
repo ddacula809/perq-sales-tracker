@@ -46,6 +46,7 @@ const state = {
   saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   churnComOpen: false,      // dashboard: whether the COM (Property Sold/PMC Change) detail is open
+  churnDetailExpanded: new Set(), // dashboard Churn Details: property rows expanded to per-product detail
   bookingQuarter: 'All', // dashboard booking-per-category quarter filter (separate from churn)
   convertYear: null,     // Convert dashboard: selected year (defaults to current/most-recent with data)
   convertQuarter: '',    // Convert dashboard: selected quarter tile (defaults to current/most-recent)
@@ -712,6 +713,15 @@ function wireFilterMenus() {
   const summary = $('#summary');
   if (!summary) return;
   summary.addEventListener('click', (e) => {
+    // Churn Details: expand / collapse a property row to its per-product detail.
+    const chExp = e.target.closest('[data-churn-expand]');
+    if (chExp) {
+      const k = chExp.dataset.churnExpand;
+      if (state.churnDetailExpanded.has(k)) state.churnDetailExpanded.delete(k); else state.churnDetailExpanded.add(k);
+      renderSummary();
+      e.stopPropagation();
+      return;
+    }
     const btn = e.target.closest('[data-ms-btn]');
     if (btn && !btn.disabled) {
       const menu = btn.parentElement.querySelector('.ms-menu');
@@ -1405,14 +1415,38 @@ function renderChurnDetail(quarterLabel) {
   const table = (monthLabel, wantContraction, thirdLabel, thirdKey, thirdCell, emptyLabel) => {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
+    const section = wantContraction ? 'c' : 'n';
+    const badge = (x) => x.credit ? ' <span class="carry-badge credit-badge">Churn Credit</span>'
+      : (x.carriedFrom ? ` <span class="carry-badge" title="Carried over because ${escapeAttr(x.carriedFrom)} was closed before this churn was added">carried from ${escapeHtml(x.carriedFrom)}</span>` : '');
+    // Group the month's churn by property; each property rolls up to a total with a ▸ arrow that
+    // expands to its per-product detail (single-product properties show inline, no arrow).
+    const groups = new Map();
+    for (const x of list) {
+      const gk = `${x.pmc}||${x.prop}`;
+      if (!groups.has(gk)) groups.set(gk, { pmc: x.pmc, prop: x.prop, entries: [] });
+      groups.get(gk).entries.push(x);
+    }
+    const propGroups = [...groups.values()].sort((a, b) => (a.pmc || '').localeCompare(b.pmc || '') || (a.prop || '').localeCompare(b.prop || ''));
     const body = list.length
-      ? list.map((x) => {
-        const pmcProp = [x.pmc, x.prop].filter(Boolean).join(' - ') || '—';
-        const badge = x.credit ? ' <span class="carry-badge credit-badge">Churn Credit</span>'
-          : (x.carriedFrom ? ` <span class="carry-badge" title="Carried over because ${escapeAttr(x.carriedFrom)} was closed before this churn was added">carried from ${escapeHtml(x.carriedFrom)}</span>` : '');
-        return `<tr><td data-col="pmcprop" title="${escapeAttr(pmcProp)}">${escapeHtml(pmcProp)}${badge}</td>`
-          + `<td data-col="product" title="${escapeAttr(x.product || '')}">${escapeHtml(x.product || '—')}</td>`
-          + `<td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`;
+      ? propGroups.map((g) => {
+        const pmcProp = [g.pmc, g.prop].filter(Boolean).join(' - ') || '—';
+        const gTotal = g.entries.reduce((s, x) => s + x.amt, 0);
+        if (g.entries.length === 1) {
+          const x = g.entries[0];
+          return `<tr><td data-col="pmcprop" title="${escapeAttr(pmcProp)}"><span class="churn-nocaret"></span>${escapeHtml(pmcProp)}${badge(x)}</td>`
+            + `<td data-col="product" title="${escapeAttr(x.product || '')}">${escapeHtml(x.product || '—')}</td>`
+            + `<td class="num" data-col="mrr">${fmtMoney(gTotal)}</td>${thirdCell(x)}</tr>`;
+        }
+        const key = `${monthLabel}|${section}|${pmcProp}`;
+        const open = state.churnDetailExpanded.has(key);
+        const caret = `<button type="button" class="ss-expand${open ? ' open' : ''}" data-churn-expand="${escapeAttr(key)}" title="Show / hide products">▸</button>`;
+        const propRow = `<tr class="churn-prop-row"><td data-col="pmcprop" title="${escapeAttr(pmcProp)}">${caret}${escapeHtml(pmcProp)} <span class="ss-count">${g.entries.length}</span></td>`
+          + `<td data-col="product"></td><td class="num" data-col="mrr">${fmtMoney(gTotal)}</td><td data-col="${thirdKey}"></td></tr>`;
+        const detail = open ? g.entries.slice().sort((a, b) => String(a.product).localeCompare(b.product)).map((x) =>
+          `<tr class="churn-detail-sub"><td data-col="pmcprop"><span class="ss-detail-indent">↳</span></td>`
+          + `<td data-col="product" title="${escapeAttr(x.product || '')}">${escapeHtml(x.product || '—')}${badge(x)}</td>`
+          + `<td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('') : '';
+        return propRow + detail;
       }).join('')
       : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'

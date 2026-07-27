@@ -341,6 +341,10 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .churn-detail-card thead th { background: var(--panel); color: var(--ink-soft); font-weight: 600; }
 .churn-detail-card tfoot td { font-weight: 700; border-top: 2px solid var(--line-strong); border-bottom: none; }
 .churn-detail-card tbody tr:last-child td { border-bottom: none; }
+/* Property rollup rows + expandable per-product detail in the Churn Details tables. */
+.churn-detail-card .churn-nocaret { display: inline-block; width: 15px; }
+.churn-detail-card tr.churn-prop-row td { font-weight: 600; }
+.churn-detail-card tr.churn-detail-sub td { background: color-mix(in srgb, var(--paper) 45%, transparent); color: var(--ink-soft); }
 /* Notes can be long: truncate with an ellipsis; full text shows on hover (title). */
 .churn-detail-card td.churn-note { max-width: 140px; }
 .churn-detail-card td.churn-note span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
