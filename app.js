@@ -25,6 +25,7 @@ const state = {
   closedMonths: {}, // { "May 2026": "2026-06-25" } — closed accounting months + official close date
   closedMonthsList: [], // raw rows for the admin Close Month panel
   offsetPmc: 'All', // License Transfer offsets review: filter by PMC
+  offsetProp: 'All', // License Transfer offsets review: filter by Property (cascades within PMC)
   offsetSel: {}, // License Transfer offsets review: pending churn selections { bookingId: {churnId, amount} }
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
@@ -3281,9 +3282,16 @@ function renderOffsetReview() {
   // Filter by PMC (options = PMCs that actually have offsettable bookings).
   const pmcs = [...new Set(all.map((c) => String(c.booking.pmc || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   if (state.offsetPmc !== 'All' && !pmcs.includes(state.offsetPmc)) state.offsetPmc = 'All';
-  const cands = state.offsetPmc === 'All' ? all : all.filter((c) => String(c.booking.pmc || '').trim() === state.offsetPmc);
-  const filterHtml = '<div class="offset-filter"><label>Filter by PMC '
-    + `<select data-offset-pmc>${['All', ...pmcs].map((p) => `<option${p === state.offsetPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label></div>`;
+  let cands = state.offsetPmc === 'All' ? all : all.filter((c) => String(c.booking.pmc || '').trim() === state.offsetPmc);
+  // Filter by Property — cascades within the selected PMC (options reflect the PMC-filtered set).
+  const propOf = (c) => String(c.booking.property_name || c.booking.property_id || '').trim();
+  const props = [...new Set(cands.map(propOf).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  if (state.offsetProp !== 'All' && !props.includes(state.offsetProp)) state.offsetProp = 'All';
+  if (state.offsetProp !== 'All') cands = cands.filter((c) => propOf(c) === state.offsetProp);
+  const filterHtml = '<div class="offset-filter">'
+    + `<label>Filter by PMC <select data-offset-pmc>${['All', ...pmcs].map((p) => `<option${p === state.offsetPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
+    + `<label>Filter by Property <select data-offset-prop>${['All', ...props].map((p) => `<option${p === state.offsetProp ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
+    + '</div>';
   // Pending (un-applied) selections consume churn drop, so a churn chosen for one booking is
   // removed from the others once fully used, or shows only its remaining drop if partially used.
   const sel = state.offsetSel || (state.offsetSel = {});
@@ -3340,12 +3348,14 @@ function pruneOffsetSel() {
   }
 }
 function wireOffsetReview() {
-  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; state.offsetSel = {}; state.offsetPmc = 'All'; $('#offsetModal').hidden = false; renderOffsetReview(); };
+  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; state.offsetSel = {}; state.offsetPmc = 'All'; state.offsetProp = 'All'; $('#offsetModal').hidden = false; renderOffsetReview(); };
   $('#offsetClose').onclick = () => { $('#offsetModal').hidden = true; };
   $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
   $('#offsetBody').addEventListener('change', (e) => {
     const pmcSel = e.target.closest('[data-offset-pmc]');
-    if (pmcSel) { state.offsetPmc = pmcSel.value; renderOffsetReview(); return; }
+    if (pmcSel) { state.offsetPmc = pmcSel.value; state.offsetProp = 'All'; renderOffsetReview(); return; }
+    const propSel = e.target.closest('[data-offset-prop]');
+    if (propSel) { state.offsetProp = propSel.value; renderOffsetReview(); return; }
     const sel = state.offsetSel || (state.offsetSel = {});
     const churnSel = e.target.closest('[data-churn-sel]');
     if (churnSel) {
