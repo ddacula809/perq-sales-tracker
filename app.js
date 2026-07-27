@@ -3065,18 +3065,36 @@ function churnQuarterInfo(c) {
   return monthYearQuarter(m); // { q, year, label }
 }
 const qCmp = (a, b) => (a.year - b.year) * 4 + (a.q - b.q); // >0 a is later, 0 same, <0 earlier
+// Offsettable churns grouped by PMC (lowercased), built ONCE per churn dataset and cached.
+// Without this, offsetEligibleChurns rescanned every churn row per booking — O(bookings × churn),
+// which lagged badly on selection/filtering after the migration bulked up the tables.
+let _churnByPmc = null;
+let _churnByPmcSrc = null;
+function churnByPmcIndex() {
+  if (_churnByPmcSrc === state.rows.churn && _churnByPmc) return _churnByPmc;
+  const idx = new Map();
+  for (const c of (state.rows.churn || [])) {
+    if (c.auto) continue; // auto-derived Downgrade lines can't be offset
+    if (String(c.classification || '') === 'Contraction') continue;
+    const q = churnQuarterInfo(c);
+    if (!q) continue;
+    const p = String(c.pmc_buying_center || '').trim().toLowerCase();
+    if (!p) continue;
+    if (!idx.has(p)) idx.set(p, []);
+    idx.get(p).push({ churn: c, quarter: q });
+  }
+  _churnByPmc = idx; _churnByPmcSrc = state.rows.churn;
+  return idx;
+}
 // Churns that can offset a booking in quarter bq: same OR future quarter (never past),
 // each annotated with its quarter and whether it's a future-quarter churn.
 function offsetEligibleChurns(pmc, bq) {
   if (!pmc || !bq) return [];
-  const p = String(pmc).trim().toLowerCase();
-  return state.rows.churn
-    .filter((c) => !c.auto // auto-derived Downgrade lines aren't real churn rows and can't be offset
-      && String(c.pmc_buying_center || '').trim().toLowerCase() === p
-      && String(c.classification || '') !== 'Contraction')
-    .map((c) => ({ churn: c, quarter: churnQuarterInfo(c) }))
-    .filter((e) => e.quarter && qCmp(e.quarter, bq) >= 0)
-    .map((e) => ({ ...e, isFuture: qCmp(e.quarter, bq) > 0 }))
+  const list = churnByPmcIndex().get(String(pmc).trim().toLowerCase());
+  if (!list) return [];
+  return list
+    .filter((e) => qCmp(e.quarter, bq) >= 0)
+    .map((e) => ({ churn: e.churn, quarter: e.quarter, isFuture: qCmp(e.quarter, bq) > 0 }))
     .sort((a, b) => (a.isFuture - b.isFuture) || qCmp(a.quarter, b.quarter));
 }
 const churnDropAmt = (c) => Math.abs(Number(c && c.mrr) || 0); // monthly MRR that dropped
@@ -3284,7 +3302,15 @@ async function confirmBookings() {
 
 // ---------- License Transfer offset review (existing bookings) ----------
 // Bookings (not yet offset) that have an eligible churn in the same quarter + PMC.
+// Memoized on the bookings + churn dataset refs so repeated renders (every filter/select change
+// in the review) don't recompute the whole booking scan.
+let _offsetCands = null;
+let _offsetCandsSrc = null;
+// Force a rebuild of the offset caches (call when opening the review, in case grid edits mutated
+// the churn/booking rows in place without swapping the array reference).
+function invalidateOffsetCaches() { _offsetCands = null; _offsetCandsSrc = null; _churnByPmc = null; _churnByPmcSrc = null; }
 function offsetCandidates() {
+  if (_offsetCandsSrc && _offsetCandsSrc.b === state.rows.bookings && _offsetCandsSrc.c === state.rows.churn) return _offsetCands;
   const out = [];
   for (const b of state.rows.bookings) {
     // Already offset = still linked to a churn AND still a License Transfer. If the offset was
@@ -3295,6 +3321,7 @@ function offsetCandidates() {
     const eligible = offsetEligibleChurns(b.pmc, bq);
     if (eligible.length) out.push({ booking: b, eligible });
   }
+  _offsetCands = out; _offsetCandsSrc = { b: state.rows.bookings, c: state.rows.churn };
   return out;
 }
 function renderOffsetReview() {
@@ -3401,6 +3428,7 @@ function pruneOffsetSel() {
 function wireOffsetReview() {
   $('#offsetReviewBtn').onclick = async () => {
     $('#moreMenu').hidden = true; state.offsetSel = {}; state.offsetPmc = 'All'; state.offsetProp = 'All';
+    invalidateOffsetCaches();
     $('#offsetModal').hidden = false;
     renderOffsetReview();
     try { state.offsetTxns = await api('/api/offset-txns'); renderOffsetReview(); } catch { /* undo panel is best-effort */ }
