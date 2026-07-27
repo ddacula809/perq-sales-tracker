@@ -9,6 +9,7 @@ import {
   listPeriods, getOpenPeriod, closeAllOpenPeriods, latestPeriod, createPeriod, getRowPeriod,
   getPeriod, closePeriod, reconcileOwnerNames,
   listNotifications, createNotification, dismissNotification, resolveNotification,
+  createOffsetTxn, listOffsetTxns, getOffsetTxn, markOffsetTxnUndone,
   listProducts, loadCatalog,
   listClosedMonths, closeMonth, reopenMonth,
 } from './db.js';
@@ -751,6 +752,13 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
       return { month: pm, amount: pa };
     };
 
+    // Undo snapshot: the booking's offset fields + the churns we're about to modify, and the set of
+    // churn ids that already exist (so afterwards we can identify the split/credit rows we inserted).
+    const bookingBefore = { pilot_or_ctam: booking.pilot_or_ctam, ctam_type: booking.ctam_type,
+      offset_amount: booking.offset_amount, offset_churn_id: booking.offset_churn_id, notes: booking.notes };
+    const churnSnapshots = work.map((w) => ({ id: w.churn.id, before: { ...w.churn } }));
+    const beforeChurnIds = new Set((await pool.query('SELECT id FROM churn')).rows.map((r) => r.id));
+
     const labels = [];
     let total = 0;
     for (const { churn, amount } of work) {
@@ -871,8 +879,55 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
          offset_amount=$1, offset_churn_id=$2, notes=$3, updated_at=now() WHERE id=$4`,
       [total, work[0].churn.id, bNote, booking.id]);
 
+    // Record an undo snapshot (best-effort — never blocks the offset itself).
+    try {
+      const afterChurnIds = (await pool.query('SELECT id FROM churn')).rows.map((r) => r.id);
+      const insertedChurnIds = afterChurnIds.filter((id) => !beforeChurnIds.has(id));
+      await createOffsetTxn({
+        bookingId: booking.id,
+        label: `${bookingProp}${bookingPeriod ? ` · ${bookingPeriod}` : ''} — offset by ${labels.join(' + ')}`,
+        data: { bookingId: booking.id, bookingBefore, updatedChurns: churnSnapshots, insertedChurnIds },
+        createdBy: req.user && req.user.username,
+      });
+    } catch (e) { console.error('[offsetTxn]', e.message); }
+
     const b2 = (await pool.query('SELECT * FROM bookings WHERE id=$1', [booking.id])).rows[0];
     res.json({ booking: withComputed(b2, computeBooking), offsetsApplied: work.length, totalOffset: total });
+  } catch (e) { next(e); }
+});
+
+// Recent (not-yet-undone) offset transactions, newest first — for the Undo panel.
+app.get('/api/offset-txns', requireRole('admin', 'standard'), async (_req, res, next) => {
+  try { res.json(await listOffsetTxns()); } catch (e) { next(e); }
+});
+// Undo an applied offset: delete the split/credit rows it created, restore the churns it modified
+// to their exact prior state, and restore the booking's offset fields — all from the snapshot.
+app.post('/api/bookings/undo-offset', requireRole('admin', 'standard'), async (req, res, next) => {
+  try {
+    const txnId = Number(req.body && req.body.txnId);
+    const txn = txnId ? await getOffsetTxn(txnId) : null;
+    if (!txn || txn.undone) return res.status(404).json({ error: 'That offset was not found or was already undone.' });
+    const data = typeof txn.data === 'string' ? JSON.parse(txn.data) : txn.data;
+    // 1) Remove the split / Churn Credit / carried-over rows this offset created.
+    if (Array.isArray(data.insertedChurnIds) && data.insertedChurnIds.length) {
+      await pool.query('DELETE FROM churn WHERE id = ANY($1)', [data.insertedChurnIds]);
+    }
+    // 2) Restore each churn we modified to its snapshot values.
+    const cols = CHURN_FIELDS.map((f) => f.key);
+    for (const u of (data.updatedChurns || [])) {
+      const b = u.before || {};
+      const sets = cols.map((c, i) => `"${c}"=$${i + 1}`).join(', ');
+      const vals = cols.map((c) => (b[c] === undefined ? null : b[c]));
+      vals.push(u.id);
+      await pool.query(`UPDATE churn SET ${sets} WHERE id=$${vals.length}`, vals);
+    }
+    // 3) Restore the booking's offset fields (CTAM/Pilot, offset amount/link, notes).
+    const bb = data.bookingBefore || {};
+    await pool.query(
+      'UPDATE bookings SET pilot_or_ctam=$1, ctam_type=$2, offset_amount=$3, offset_churn_id=$4, notes=$5, updated_at=now() WHERE id=$6',
+      [bb.pilot_or_ctam ?? null, bb.ctam_type ?? null, bb.offset_amount ?? null, bb.offset_churn_id ?? null, bb.notes ?? null, data.bookingId]);
+    await markOffsetTxnUndone(txn.id);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

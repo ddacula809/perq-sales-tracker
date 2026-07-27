@@ -215,6 +215,19 @@ export async function initDb() {
   `);
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username))');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS account_owner TEXT'); // tag for 'sales' role
+  // Offset transaction log — a before-snapshot per applied License Transfer offset so it can be
+  // undone (restores the churn rows + booking exactly; deletes the split/credit rows it created).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS offset_txns (
+      id SERIAL PRIMARY KEY,
+      booking_id INTEGER,
+      label TEXT,
+      data JSONB NOT NULL,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      undone BOOLEAN NOT NULL DEFAULT false
+    );
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications (
       id SERIAL PRIMARY KEY,
@@ -479,6 +492,26 @@ export async function dismissNotification(id) {
 // Dashboard "Resolve": clear the warning entirely (also clears it from the bell).
 export async function resolveNotification(id) {
   await pool.query('UPDATE notifications SET resolved = true, dismissed = true WHERE id=$1', [id]);
+}
+
+// ---- Offset transactions (undo log for applied License Transfer offsets) ----
+export async function createOffsetTxn({ bookingId, label, data, createdBy }) {
+  const { rows } = await pool.query(
+    'INSERT INTO offset_txns (booking_id, label, data, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
+    [bookingId, label, JSON.stringify(data), createdBy || null]);
+  return rows[0];
+}
+export async function listOffsetTxns() {
+  const { rows } = await pool.query(
+    'SELECT id, booking_id, label, created_by, created_at FROM offset_txns WHERE undone = false ORDER BY created_at DESC, id DESC');
+  return rows;
+}
+export async function getOffsetTxn(id) {
+  const { rows } = await pool.query('SELECT * FROM offset_txns WHERE id=$1', [id]);
+  return rows[0];
+}
+export async function markOffsetTxnUndone(id) {
+  await pool.query('UPDATE offset_txns SET undone = true WHERE id=$1', [id]);
 }
 
 // Seed the first admin if there are no users yet, so a fresh deploy isn't locked out.

@@ -27,6 +27,7 @@ const state = {
   offsetPmc: 'All', // License Transfer offsets review: filter by PMC
   offsetProp: 'All', // License Transfer offsets review: filter by Property (cascades within PMC)
   offsetSel: {}, // License Transfer offsets review: pending selections { bookingId: {propKey, amount} } (churning property)
+  offsetTxns: [], // recent applied offsets (undo log) shown in the Offset Review
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
@@ -3300,7 +3301,8 @@ function renderOffsetReview() {
   // Only bookings with real MRR need offsetting — hide $0 lines (e.g. $0 secondary products).
   const all = offsetCandidates().filter((c) => (parseMoney(c.booking.mrr) || 0) > 0.005);
   if (!all.length) {
-    $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC, this or a future quarter) available to offset.</p>';
+    $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC, this or a future quarter) available to offset.</p>'
+      + offsetUndoHtml();
     return;
   }
   // Filter by PMC (options = PMCs that actually have offsettable bookings).
@@ -3368,7 +3370,21 @@ function renderOffsetReview() {
     + '<colgroup><col class="c-prop"><col class="c-prod"><col class="c-mrr"><col class="c-churn"><col class="c-offset"><col class="c-apply"></colgroup>'
     + '<thead><tr>'
     + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th class="num">Offset</th><th></th>'
-    + `</tr></thead><tbody>${rows}</tbody></table>`;
+    + `</tr></thead><tbody>${rows}</tbody></table>`
+    + offsetUndoHtml();
+}
+// The Undo panel: recent applied offsets, newest first, each with an Undo button.
+function offsetUndoHtml() {
+  const txns = state.offsetTxns || [];
+  if (!txns.length) return '';
+  const rowsH = txns.map((t) => {
+    const when = t.created_at ? new Date(t.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+    return `<div class="offset-undo-row"><span class="offset-undo-label" title="${escapeAttr(t.label || '')}">${escapeHtml(t.label || `Offset #${t.id}`)}</span>`
+      + `<span class="offset-undo-when">${escapeHtml(when)}${t.created_by ? ` · ${escapeHtml(t.created_by)}` : ''}</span>`
+      + `<button type="button" class="btn ghost offset-undo-btn" data-undo-offset="${t.id}">Undo</button></div>`;
+  }).join('');
+  return `<div class="offset-undo"><div class="offset-undo-title">Recent offsets — Undo</div>${rowsH}`
+    + '<p class="offset-note">Undo removes the split / Churn Credit rows the offset created and restores the churn(s) and booking to their state before it was applied. If you applied several, undo the most recent first.</p></div>';
 }
 // Drop pending offset selections that are no longer valid (booking already offset, or the chosen
 // churn is no longer eligible — e.g. it became a Contraction or was split after an Apply).
@@ -3382,7 +3398,12 @@ function pruneOffsetSel() {
   }
 }
 function wireOffsetReview() {
-  $('#offsetReviewBtn').onclick = () => { $('#moreMenu').hidden = true; state.offsetSel = {}; state.offsetPmc = 'All'; state.offsetProp = 'All'; $('#offsetModal').hidden = false; renderOffsetReview(); };
+  $('#offsetReviewBtn').onclick = async () => {
+    $('#moreMenu').hidden = true; state.offsetSel = {}; state.offsetPmc = 'All'; state.offsetProp = 'All';
+    $('#offsetModal').hidden = false;
+    renderOffsetReview();
+    try { state.offsetTxns = await api('/api/offset-txns'); renderOffsetReview(); } catch { /* undo panel is best-effort */ }
+  };
   $('#offsetClose').onclick = () => { $('#offsetModal').hidden = true; };
   $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
   $('#offsetBody').addEventListener('change', (e) => {
@@ -3410,6 +3431,25 @@ function wireOffsetReview() {
     }
   });
   $('#offsetBody').addEventListener('click', async (e) => {
+    // Undo a previously applied offset.
+    const undoBtn = e.target.closest('[data-undo-offset]');
+    if (undoBtn) {
+      if (undoBtn.disabled) return;
+      if (!confirm('Undo this offset? It restores the churn(s) and booking to before the offset and removes the rows it created.')) return;
+      undoBtn.disabled = true;
+      undoBtn.innerHTML = '<span class="btn-spinner"></span>Undoing…';
+      try {
+        await api('/api/bookings/undo-offset', { method: 'POST', body: JSON.stringify({ txnId: Number(undoBtn.dataset.undoOffset) }) });
+        state.rows.bookings = await api('/api/bookings');
+        state.rows.churn = await api('/api/churn');
+        state.offsetTxns = await api('/api/offset-txns');
+        pruneOffsetSel();
+        renderOffsetReview();
+        renderAll();
+        toast('Offset undone');
+      } catch (err) { undoBtn.disabled = false; undoBtn.textContent = 'Undo'; toast(err.message, true); }
+      return;
+    }
     const btn = e.target.closest('[data-apply-offset]');
     if (!btn || btn.disabled) return;
     const bid = btn.closest('[data-booking]').dataset.booking;
@@ -3437,6 +3477,7 @@ function wireOffsetReview() {
       delete sel[bid];
       state.rows.bookings = await api('/api/bookings');
       state.rows.churn = await api('/api/churn');
+      try { state.offsetTxns = await api('/api/offset-txns'); } catch { /* undo panel best-effort */ }
       pruneOffsetSel(); // clear selections invalidated by the split/contraction
       renderOffsetReview(); // rebuilds the table (and the button) from fresh data
       renderAll();

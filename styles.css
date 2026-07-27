@@ -923,6 +923,12 @@ tr.ss-group td {
 .offset-table td, .offset-table th { overflow: hidden; }
 .offset-table td.offset-prod { text-overflow: ellipsis; }
 /* PMC filter row above the License Transfer offsets table */
+.offset-undo { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+.offset-undo-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); margin-bottom: 8px; }
+.offset-undo-row { display: flex; align-items: center; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--line); }
+.offset-undo-label { flex: 1; font-size: 12.5px; }
+.offset-undo-when { font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
+.offset-undo-btn { flex-shrink: 0; }
 .offset-filter { margin: 0 0 10px; font-size: 12px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
 .offset-filter select { font: inherit; font-size: 12px; margin-left: 6px; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); max-width: 260px; }
 /* Small inline spinner shown on the Apply button while an offset is being applied. */
