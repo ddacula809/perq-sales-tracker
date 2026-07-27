@@ -923,6 +923,13 @@ tr.ss-group td {
 .offset-table td, .offset-table th { overflow: hidden; }
 .offset-table td.offset-prod { text-overflow: ellipsis; }
 /* PMC filter row above the License Transfer offsets table */
+.offset-diag-toggle { margin-top: 16px; }
+.offset-diag { margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--panel); }
+.offset-diag-bar { margin-bottom: 8px; font-size: 12px; }
+.offset-diag-bar input { font: inherit; margin-left: 6px; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; min-width: 220px; }
+.offset-diag table td.diag-status { white-space: normal; }
+.offset-diag tr.diag-ok td { background: #e6f4ea; }
+.offset-diag tr.diag-no td { background: #fdf0d6; }
 .offset-undo { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
 .offset-undo-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); margin-bottom: 8px; }
 .offset-undo-row { display: flex; align-items: center; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--line); }

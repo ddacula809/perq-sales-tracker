@@ -28,6 +28,8 @@ const state = {
   offsetProp: 'All', // License Transfer offsets review: filter by Property (cascades within PMC)
   offsetSel: {}, // License Transfer offsets review: pending selections { bookingId: {propKey, amount} } (churning property)
   offsetTxns: [], // recent applied offsets (undo log) shown in the Offset Review
+  offsetDiag: false, // Offset Review: churn-eligibility diagnostic open
+  offsetDiagQ: '',   // diagnostic search term (property / PMC)
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
@@ -3345,9 +3347,73 @@ async function confirmBookings() {
 // in the review) don't recompute the whole booking scan.
 let _offsetCands = null;
 let _offsetCandsSrc = null;
+let _offBk = null;
+let _offBkSrc = null;
 // Force a rebuild of the offset caches (call when opening the review, in case grid edits mutated
 // the churn/booking rows in place without swapping the array reference).
-function invalidateOffsetCaches() { _offsetCands = null; _offsetCandsSrc = null; _churnByPmc = null; _churnByPmcSrc = null; }
+function invalidateOffsetCaches() { _offsetCands = null; _offsetCandsSrc = null; _churnByPmc = null; _churnByPmcSrc = null; _offBk = null; _offBkSrc = null; }
+// Offsettable bookings (not yet offset, with a valid quarter) grouped by PMC — for the diagnostic.
+function offsettableBookingsByPmc() {
+  if (_offBkSrc === state.rows.bookings && _offBk) return _offBk;
+  const m = new Map();
+  for (const b of state.rows.bookings) {
+    if (b.offset_churn_id && String(b.ctam_type || '').trim() === 'License Transfer') continue;
+    const bq = monthYearQuarter(`${b.booking_month || ''} ${b.booking_year || ''}`);
+    if (!bq) continue;
+    const p = String(b.pmc || '').trim().toLowerCase();
+    if (!p) continue;
+    if (!m.has(p)) m.set(p, []);
+    m.get(p).push({ booking: b, q: bq });
+  }
+  _offBk = m; _offBkSrc = state.rows.bookings;
+  return m;
+}
+// Why a churn is / isn't offerable — the exact rule that decides whether it shows in the dropdown.
+function churnOfferability(c) {
+  if (c.auto) return { ok: false, reason: 'Auto-derived Downgrade line — not offsettable' };
+  const cls = String(c.classification || '');
+  if (cls === 'Contraction') return { ok: false, reason: 'Already used to offset (Contraction)' };
+  if (cls === 'Churn Credit') return { ok: false, reason: 'Churn Credit line — not offsettable' };
+  const q = churnQuarterInfo(c);
+  if (!q) return { ok: false, reason: 'No Final Churn Month — needs a Last Date Under Contract + MRR' };
+  const p = String(c.pmc_buying_center || '').trim().toLowerCase();
+  if (!p) return { ok: false, reason: 'Churn has no PMC' };
+  const bs = offsettableBookingsByPmc().get(p);
+  if (!bs || !bs.length) return { ok: false, reason: `No open booking under PMC “${c.pmc_buying_center || ''}” to offset` };
+  const match = bs.filter((x) => qCmp(q, x.q) >= 0); // churn same/future vs booking
+  if (!match.length) return { ok: false, reason: `This PMC’s open bookings are all in a LATER quarter than this churn (${q.label})` };
+  return { ok: true, reason: `Offerable — ${match.length} booking${match.length === 1 ? '' : 's'} in ${q.label} or earlier` };
+}
+// Toggle + (when open) the search bar and results container for the eligibility diagnostic.
+function offsetDiagHtml() {
+  const btn = `<button type="button" class="view-btn" id="offsetDiagToggle">${state.offsetDiag ? 'Hide' : 'Show'} churn eligibility diagnostic</button>`;
+  if (!state.offsetDiag) return `<div class="offset-diag-toggle">${btn}</div>`;
+  return `<div class="offset-diag-toggle">${btn}</div>`
+    + '<div class="offset-diag"><div class="offset-diag-bar">'
+    + `<label>Search churn <input type="text" id="offsetDiagSearch" placeholder="property or PMC…" value="${escapeAttr(state.offsetDiagQ || '')}" autocomplete="off" /></label></div>`
+    + '<div id="offsetDiagResults"></div></div>';
+}
+// Fill the diagnostic results (updated on its own so the search box keeps focus).
+function renderOffsetDiagResults() {
+  const el = document.getElementById('offsetDiagResults');
+  if (!el) return;
+  const qstr = String(state.offsetDiagQ || '').trim().toLowerCase();
+  if (!qstr) { el.innerHTML = '<p class="muted" style="padding:8px">Type a property or PMC above to see why its churn is or isn’t offerable.</p>'; return; }
+  const matches = (state.rows.churn || []).filter((c) => `${c.property || ''} ${c.pmc_buying_center || ''} ${c.product || ''} ${c.property_id || ''}`.toLowerCase().includes(qstr));
+  if (!matches.length) { el.innerHTML = `<p class="muted" style="padding:8px">No churn matches “${escapeHtml(state.offsetDiagQ)}”.</p>`; return; }
+  const body = matches.slice(0, 200).map((c) => {
+    const o = churnOfferability(c);
+    return `<tr class="${o.ok ? 'diag-ok' : 'diag-no'}">`
+      + `<td>${escapeHtml(c.property || c.property_id || '—')}</td>`
+      + `<td>${escapeHtml(c.pmc_buying_center || '—')}</td>`
+      + `<td>${escapeHtml(c.product || '—')}</td>`
+      + `<td class="num">${fmtMoney(churnDropAmt(c))}</td>`
+      + `<td>${escapeHtml(String(c.final_churn_month || '').trim() || '—')}</td>`
+      + `<td>${o.ok ? '✓ ' : '⚠ '}${escapeHtml(o.reason)}</td></tr>`;
+  }).join('');
+  el.innerHTML = '<table class="recon-table"><thead><tr><th>Property</th><th>PMC</th><th>Product</th><th class="num">Drop</th><th>Final Churn Month</th><th>Status</th></tr></thead>'
+    + `<tbody>${body}</tbody></table>${matches.length > 200 ? `<p class="muted" style="padding:6px">Showing first 200 of ${matches.length}.</p>` : ''}`;
+}
 function offsetCandidates() {
   if (_offsetCandsSrc && _offsetCandsSrc.b === state.rows.bookings && _offsetCandsSrc.c === state.rows.churn) return _offsetCands;
   const out = [];
@@ -3369,7 +3435,8 @@ function renderOffsetReview() {
   const all = offsetCandidates().filter((c) => (parseMoney(c.booking.mrr) || 0) > 0.005);
   if (!all.length) {
     $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC, this or a future quarter) available to offset.</p>'
-      + offsetUndoHtml();
+      + offsetUndoHtml() + offsetDiagHtml();
+    if (state.offsetDiag) renderOffsetDiagResults();
     return;
   }
   // Filter by PMC (options = PMCs that actually have offsettable bookings).
@@ -3438,7 +3505,8 @@ function renderOffsetReview() {
     + '<thead><tr>'
     + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th class="num">Offset</th><th></th>'
     + `</tr></thead><tbody>${rows}</tbody></table>`
-    + offsetUndoHtml();
+    + offsetUndoHtml() + offsetDiagHtml();
+  if (state.offsetDiag) renderOffsetDiagResults();
 }
 // The Undo panel: recent applied offsets, newest first, each with an Undo button.
 function offsetUndoHtml() {
@@ -3474,6 +3542,10 @@ function wireOffsetReview() {
   };
   $('#offsetClose').onclick = () => { $('#offsetModal').hidden = true; };
   $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
+  // Diagnostic search — updates just the results (keeps the input focused as you type).
+  $('#offsetBody').addEventListener('input', (e) => {
+    if (e.target.id === 'offsetDiagSearch') { state.offsetDiagQ = e.target.value; renderOffsetDiagResults(); }
+  });
   $('#offsetBody').addEventListener('change', (e) => {
     const pmcSel = e.target.closest('[data-offset-pmc]');
     if (pmcSel) { state.offsetPmc = pmcSel.value; state.offsetProp = 'All'; renderOffsetReview(); return; }
@@ -3499,6 +3571,8 @@ function wireOffsetReview() {
     }
   });
   $('#offsetBody').addEventListener('click', async (e) => {
+    // Toggle the churn-eligibility diagnostic.
+    if (e.target.closest('#offsetDiagToggle')) { state.offsetDiag = !state.offsetDiag; renderOffsetReview(); return; }
     // Undo a previously applied offset.
     const undoBtn = e.target.closest('[data-undo-offset]');
     if (undoBtn) {
