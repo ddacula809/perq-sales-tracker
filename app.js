@@ -894,7 +894,9 @@ function renderSummary() {
       const combos = [...new Set(src
         .map((r) => (r.booking_month && r.booking_year != null && r.booking_year !== '') ? `${r.booking_month} ${r.booking_year}` : '')
         .filter(Boolean))];
-      return ['All', ...sortMonthYear(combos)];
+      // Bookings section lists the periods most-recent → oldest; elsewhere keep oldest → newest.
+      const ordered = sortMonthYear(combos);
+      return ['All', ...(tab === 'bookings' ? ordered.reverse() : ordered)];
     }
     if (col.key === 'churn_quarter' || col.key === 'booking_quarter') {
       const set = new Set();
