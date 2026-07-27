@@ -930,6 +930,11 @@ tr.ss-group td {
 .offset-diag table td.diag-status { white-space: normal; }
 .offset-diag tr.diag-ok td { background: #e6f4ea; }
 .offset-diag tr.diag-no td { background: #fdf0d6; }
+/* ⚠ hint in the Bookings grid's Offset Amount cell — a churn is available to offset this booking. */
+.offset-hint { border: 0; background: transparent; cursor: pointer; font-size: 14px; line-height: 1;
+  padding: 2px 5px; border-radius: 6px; color: #b7791f; }
+.offset-hint:hover { background: #fdf0d6; }
+.offset-filter-only { margin-bottom: 10px; }
 .offset-undo { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
 .offset-undo-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); margin-bottom: 8px; }
 .offset-undo-row { display: flex; align-items: center; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--line); }

@@ -30,6 +30,8 @@ const state = {
   offsetTxns: [], // recent applied offsets (undo log) shown in the Offset Review
   offsetDiag: false, // Offset Review: churn-eligibility diagnostic open
   offsetDiagQ: '',   // diagnostic search term (property / PMC)
+  offsetOnly: null,  // when set to a booking id, the Offset Review is scoped to that one booking
+                     // (opened from the ⚠ hint in the Bookings grid's Offset Amount column)
   token: localStorage.getItem('perqToken') || '',
   adminToken: localStorage.getItem('perqAdminToken') || '', // set while impersonating another user
   user: null, // { id, username, role }
@@ -560,8 +562,13 @@ function renderPager(total, page, totalPages, start, count) {
 
 function editCell(f, row) {
   const val = row[f.key] ?? '';
-  // Offset Amount only applies to License Transfers; otherwise show a non-editable dash.
+  // Offset Amount only applies to License Transfers; otherwise show a non-editable dash — unless the
+  // system found a churn this booking could offset, in which case show a ⚠ hint that opens the same
+  // Offset Review (scoped to this booking) so it can be turned into a License Transfer offset.
   if (f.key === 'offset_amount' && (row.ctam_type || '').trim() !== 'License Transfer') {
+    if (bookingHasOffsetHint(row)) {
+      return `<td class="num offset-na" data-col="${f.key}"><button type="button" class="offset-hint" data-offset-hint="${row.id}" title="Available churn to offset this booking — click to review">⚠</button></td>`;
+    }
     return `<td class="num offset-na" data-col="${f.key}"><span class="na">—</span></td>`;
   }
   const billing = isBilling(f.key) ? ' billing' : '';
@@ -2347,6 +2354,9 @@ function wireGrid() {
   });
 
   tbody.addEventListener('click', async (e) => {
+    // ⚠ Offset Amount hint — open the Offset Review scoped to this booking.
+    const offHint = e.target.closest('[data-offset-hint]');
+    if (offHint) { openOffsetReview(offHint.dataset.offsetHint); return; }
     // Toggle the ▾ "more actions" menu.
     const moreBtn = e.target.closest('.row-more-btn');
     if (moreBtn) {
@@ -3430,12 +3440,31 @@ function offsetCandidates() {
   _offsetCands = out; _offsetCandsSrc = { b: state.rows.bookings, c: state.rows.churn };
   return out;
 }
+// Candidate lookup by booking id (for the grid's Offset Amount ⚠ hint). Rebuilt whenever the
+// candidate list is (it returns a fresh array each time its data refs change).
+let _offsetCandMap = null;
+let _offsetCandMapSrc = null;
+function offsetCandForBooking(bookingId) {
+  const list = offsetCandidates();
+  if (_offsetCandMapSrc !== list) { _offsetCandMap = new Map(list.map((c) => [String(c.booking.id), c])); _offsetCandMapSrc = list; }
+  return _offsetCandMap.get(String(bookingId)) || null;
+}
+// A booking shows the ⚠ hint when it has an eligible churn to offset AND real MRR (matches exactly
+// the set the Offset Review lists — see renderOffsetReview's MRR > 0 filter).
+function bookingHasOffsetHint(row) {
+  return (parseMoney(row && row.mrr) || 0) > 0.005 && !!offsetCandForBooking(row.id);
+}
 function renderOffsetReview() {
   const m = fmtMoney;
   // Only bookings with real MRR need offsetting — hide $0 lines (e.g. $0 secondary products).
-  const all = offsetCandidates().filter((c) => (parseMoney(c.booking.mrr) || 0) > 0.005);
+  let all = offsetCandidates().filter((c) => (parseMoney(c.booking.mrr) || 0) > 0.005);
+  // Scoped to a single booking (opened from the grid's Offset Amount ⚠ hint).
+  const only = state.offsetOnly;
+  if (only != null) all = all.filter((c) => String(c.booking.id) === String(only));
   if (!all.length) {
-    $('#offsetBody').innerHTML = '<p class="muted" style="padding:10px">No bookings currently have a matching churn (same PMC, this or a future quarter) available to offset.</p>'
+    $('#offsetBody').innerHTML = `<p class="muted" style="padding:10px">${only != null
+      ? 'This booking no longer has a matching churn (same PMC, this or a future quarter) available to offset.'
+      : 'No bookings currently have a matching churn (same PMC, this or a future quarter) available to offset.'}</p>`
       + offsetUndoHtml() + offsetDiagHtml();
     if (state.offsetDiag) renderOffsetDiagResults();
     return;
@@ -3449,10 +3478,14 @@ function renderOffsetReview() {
   const props = [...new Set(cands.map(propOf).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   if (state.offsetProp !== 'All' && !props.includes(state.offsetProp)) state.offsetProp = 'All';
   if (state.offsetProp !== 'All') cands = cands.filter((c) => propOf(c) === state.offsetProp);
-  const filterHtml = '<div class="offset-filter">'
-    + `<label>Filter by PMC <select data-offset-pmc>${['All', ...pmcs].map((p) => `<option${p === state.offsetPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
-    + `<label>Filter by Property <select data-offset-prop>${['All', ...props].map((p) => `<option${p === state.offsetProp ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
-    + '</div>';
+  // When scoped to one booking, skip the PMC/Property filters (there's only one row) and show a
+  // "back to the full review" link instead.
+  const filterHtml = only != null
+    ? '<div class="offset-filter offset-filter-only"><button type="button" class="view-btn" id="offsetShowAll">← Show all offsettable bookings</button></div>'
+    : '<div class="offset-filter">'
+      + `<label>Filter by PMC <select data-offset-pmc>${['All', ...pmcs].map((p) => `<option${p === state.offsetPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
+      + `<label>Filter by Property <select data-offset-prop>${['All', ...props].map((p) => `<option${p === state.offsetProp ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
+      + '</div>';
   // Pending (un-applied) selections consume churn drop, so a churn chosen for one booking is
   // removed from the others once fully used, or shows only its remaining drop if partially used.
   const sel = state.offsetSel || (state.offsetSel = {});
@@ -3533,14 +3566,19 @@ function pruneOffsetSel() {
     if (!keys || !keys.has(String(sel[bid].propKey))) delete sel[bid];
   }
 }
+// Open the Offset Review modal. Pass a bookingId to scope it to a single booking (from the grid's
+// Offset Amount ⚠ hint); omit it for the full review. Same list, same logic either way.
+async function openOffsetReview(bookingId) {
+  $('#moreMenu').hidden = true;
+  state.offsetSel = {}; state.offsetPmc = 'All'; state.offsetProp = 'All';
+  state.offsetOnly = bookingId != null ? String(bookingId) : null;
+  invalidateOffsetCaches();
+  $('#offsetModal').hidden = false;
+  renderOffsetReview();
+  try { state.offsetTxns = await api('/api/offset-txns'); renderOffsetReview(); } catch { /* undo panel is best-effort */ }
+}
 function wireOffsetReview() {
-  $('#offsetReviewBtn').onclick = async () => {
-    $('#moreMenu').hidden = true; state.offsetSel = {}; state.offsetPmc = 'All'; state.offsetProp = 'All';
-    invalidateOffsetCaches();
-    $('#offsetModal').hidden = false;
-    renderOffsetReview();
-    try { state.offsetTxns = await api('/api/offset-txns'); renderOffsetReview(); } catch { /* undo panel is best-effort */ }
-  };
+  $('#offsetReviewBtn').onclick = () => openOffsetReview();
   $('#offsetClose').onclick = () => { $('#offsetModal').hidden = true; };
   $('#offsetModal').addEventListener('click', (e) => { if (e.target.id === 'offsetModal') $('#offsetModal').hidden = true; });
   // Diagnostic search — updates just the results (keeps the input focused as you type).
@@ -3574,6 +3612,8 @@ function wireOffsetReview() {
   $('#offsetBody').addEventListener('click', async (e) => {
     // Toggle the churn-eligibility diagnostic.
     if (e.target.closest('#offsetDiagToggle')) { state.offsetDiag = !state.offsetDiag; renderOffsetReview(); return; }
+    // Leave single-booking scope and show the full review.
+    if (e.target.closest('#offsetShowAll')) { openOffsetReview(); return; }
     // Undo a previously applied offset.
     const undoBtn = e.target.closest('[data-undo-offset]');
     if (undoBtn) {
