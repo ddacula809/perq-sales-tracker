@@ -3456,18 +3456,25 @@ function wireOffsetReview() {
     const sel = state.offsetSel || {};
     const cur = sel[bid];
     if (!cur || !cur.propKey) { toast('Choose a churn to offset with.', true); return; }
-    // Expand the chosen churning-property selection into per-churn offsets, consuming its records
-    // current-quarter-first (offsetEligibleChurns already sorts them that way) up to the amount.
+    // Expand the chosen churning-property selection into per-churn offsets. Consume EARLIEST MONTH
+    // FIRST across ALL of the property's churns — i.e. exhaust the whole current-month drop before
+    // touching any future month — rather than draining one record (incl. its later month) at a time.
     const cand = offsetCandidates().find((c) => String(c.booking.id) === String(bid));
     const group = cand && groupEligibleByProperty(cand.eligible).find((g) => g.key === cur.propKey);
     if (!group) { toast('That churn is no longer available — reselect.', true); return; }
-    let left = Number(cur.amount) || 0;
-    const offsets = [];
-    for (const e of group.entries) { // current-quarter-first
-      if (left <= 0.005) break;
-      const use = Math.min(left, churnDropAmt(e.churn));
-      if (use > 0.005) { offsets.push({ churnId: Number(e.churn.id), amount: Math.round(use * 100) / 100 }); left -= use; }
+    const pieces = [];
+    for (const e of group.entries) {
+      for (const pc of churnMonthlyPieces(e.churn)) pieces.push({ churnId: Number(e.churn.id), monthIdx: monthIdxFromMonthYear(pc.month) || 0, amt: pc.amt });
     }
+    pieces.sort((a, b) => a.monthIdx - b.monthIdx); // earliest month first (across records)
+    let left = Number(cur.amount) || 0;
+    const perRecord = new Map();
+    for (const p of pieces) {
+      if (left <= 0.005) break;
+      const use = Math.min(left, p.amt);
+      if (use > 0.005) { perRecord.set(p.churnId, (perRecord.get(p.churnId) || 0) + use); left -= use; }
+    }
+    const offsets = [...perRecord.entries()].map(([churnId, amount]) => ({ churnId, amount: Math.round(amount * 100) / 100 }));
     if (!offsets.length) { toast('Enter an amount to offset.', true); return; }
     // Show a spinner on the button while the offset applies + data reloads.
     btn.disabled = true;
