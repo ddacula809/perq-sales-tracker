@@ -311,7 +311,8 @@ function fieldsForTab() {
   const computedKeys = new Set(s.computed.map((f) => f.key));
   // Some stored fields have no column of their own — they're edited inline through a computed
   // cell: ar_override (AR Final Invoice Amt) and the Booking Clawback/Correction overrides.
-  const inlineOnly = new Set(['ar_override', ...BOOKING_OVERRIDE_KEYS]);
+  // Hidden from the grid: inline-only overrides + the system recognition_date (churn month lever).
+  const inlineOnly = new Set(['ar_override', 'recognition_date', ...BOOKING_OVERRIDE_KEYS]);
   let cols = [...s.editable, ...s.computed].filter((c) => !inlineOnly.has(c.key));
   // Move this tab's billing fields to the very end, after the computed columns.
   const billing = BILLING_KEYS[state.tab];

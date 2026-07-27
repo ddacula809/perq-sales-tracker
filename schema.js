@@ -97,6 +97,10 @@ export const CHURN_FIELDS = [
   // Billing-editable free-text note (separate from the system-generated Notes above, which carry
   // License Transfer / offset cross-references). Mirrors the bookings Billing Notes column.
   { key: 'billing_notes',            label: 'Billing Notes',         excel: 25, type: 'text' },
+  // System-only helper: the date that DRIVES churn recognition (which month the drop lands in) when
+  // an offset splits a churn into pieces. compute.js uses this instead of Last Date Under Contract
+  // when set, so the real "Last Date Under Contract" never changes. Hidden from the grid + export.
+  { key: 'recognition_date',         label: 'Recognition Date',      excel: 26, type: 'date' },
   // Churn vs Contraction. A churn used to offset a License Transfer booking is reclassified
   // as 'Contraction' and excluded from churn totals. Set via the offset flow.
   // 'Churn Credit' is a positive adjustment auto-created when a CLOSED-month churn is offset:

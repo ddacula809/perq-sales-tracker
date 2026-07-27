@@ -786,7 +786,7 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
         const proratedUsed = Math.min(used, Pa);
         const proratedNet = Pa - proratedUsed;
         const broughtLast = lastDayOfMonthLabel(Pm) || churn.last_date_under_contract; // -> recognizes the open month
-        const openBase = { ...churn, last_date_under_contract: broughtLast, date_added: todayStr() };
+        const openBase = { ...churn, recognition_date: broughtLast, date_added: todayStr() };
         // Credit the full prorated brought over (cancels the locked closed-month drop).
         await insertRow('churn', { ...openBase, mrr: sign * Pa, classification: 'Churn Credit',
           notes: `Churn Credit for prorated churn brought over from ${Pm} (offset of ${bookingProp}, ${bookingPeriod})` });
@@ -803,17 +803,17 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
           // closed-month prorated is NOT shown as a contraction in the closed month. The prorated
           // is restored as a locked real churn so the closed month's total is unchanged.
           await updateRow('churn', churn.id, {
-            mrr: sign * rooftopUsed, last_date_under_contract: lastDayOfMonthLabel(Pm),
+            mrr: sign * rooftopUsed, recognition_date: lastDayOfMonthLabel(Pm),
             classification: 'Contraction', date_added: todayStr(), ar_override: null,
             notes: appendNote(churn.notes, `Rooftop contracted to offset ${bookingProp} (${bookingPeriod}); prorated carried over (License Transfer)`),
           });
           await insertRow('churn', {
-            ...churn, mrr: sign * Pa, last_date_under_contract: lastDayBeforeMonth(Pm),
+            ...churn, mrr: sign * Pa, recognition_date: lastDayBeforeMonth(Pm),
             classification: String(churn.classification || '') || 'Churn', date_added: churn.date_added,
             notes: `Prorated churn retained in ${Pm} (closed) after the original was carried over to offset ${bookingProp}`,
           });
           if (rooftopRemain > 0.005) await insertRow('churn', {
-            ...churn, mrr: sign * rooftopRemain, last_date_under_contract: lastDayOfMonthLabel(Pm),
+            ...churn, mrr: sign * rooftopRemain, recognition_date: lastDayOfMonthLabel(Pm),
             classification: String(churn.classification || '') || 'Churn', date_added: todayStr(),
             notes: `Churn Rooftop remaining in ${Fm}; ${usd(rooftopRemain)} not offset`,
           });
@@ -844,29 +844,29 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
         if (hasPro) {
           // Repurpose the original as the prorated-month Contraction (oldest month, used first).
           await updateRow('churn', churn.id, {
-            mrr: sign * proratedUsed, last_date_under_contract: lastDayBeforeMonth(Pm), classification: 'Contraction', ar_override: null,
+            mrr: sign * proratedUsed, recognition_date: lastDayBeforeMonth(Pm), classification: 'Contraction', ar_override: null,
             notes: appendNote(churn.notes, `Contracted ${usd(proratedUsed)} of the ${Pm} drop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`),
           });
           if (proratedRemain > 0.005) await insertRow('churn', {
-            ...churn, mrr: sign * proratedRemain, last_date_under_contract: lastDayBeforeMonth(Pm), classification: cls,
+            ...churn, mrr: sign * proratedRemain, recognition_date: lastDayBeforeMonth(Pm), classification: cls,
             notes: `Churn Net — ${usd(proratedRemain)} of the ${Pm} drop not offset`,
           });
           if (rooftopUsed > 0.005) await insertRow('churn', {
-            ...churn, mrr: sign * rooftopUsed, last_date_under_contract: roofLast, classification: 'Contraction',
+            ...churn, mrr: sign * rooftopUsed, recognition_date: roofLast, classification: 'Contraction',
             notes: `Contracted ${usd(rooftopUsed)} of the ${Fm} rooftop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`,
           });
           if (rooftopRemain > 0.005) await insertRow('churn', {
-            ...churn, mrr: sign * rooftopRemain, last_date_under_contract: roofLast, classification: cls,
+            ...churn, mrr: sign * rooftopRemain, recognition_date: roofLast, classification: cls,
             notes: `Churn Rooftop — ${usd(rooftopRemain)} of the ${Fm} drop not offset`,
           });
         } else {
           // No prorated piece (full-month churn) — only the rooftop month.
           await updateRow('churn', churn.id, {
-            mrr: sign * rooftopUsed, last_date_under_contract: roofLast, classification: 'Contraction', ar_override: null,
+            mrr: sign * rooftopUsed, recognition_date: roofLast, classification: 'Contraction', ar_override: null,
             notes: appendNote(churn.notes, `Contracted ${usd(rooftopUsed)} of the ${Fm} drop to offset ${bookingProp} (${bookingPeriod}) — License Transfer`),
           });
           if (rooftopRemain > 0.005) await insertRow('churn', {
-            ...churn, mrr: sign * rooftopRemain, last_date_under_contract: roofLast, classification: cls,
+            ...churn, mrr: sign * rooftopRemain, recognition_date: roofLast, classification: cls,
             notes: `Churn Net — ${usd(rooftopRemain)} of the ${Fm} drop not offset`,
           });
         }
@@ -1515,8 +1515,8 @@ app.get('/api/export', async (req, res, next) => {
     const churn = instance === 'convert' ? [] : await listRows('churn');
     // "For Sales Commission" export drops the billing (blue) columns from both tabs.
     const opts = req.query.scope === 'commission'
-      ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set(CHURN_BILLING_KEYS) }
-      : {};
+      ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set([...CHURN_BILLING_KEYS, 'recognition_date']) }
+      : { excludeChurnKeys: new Set(['recognition_date']) }; // system month-lever, never exported
     opts.bookingCompute = (r) => computeBooking(r, downgradePaid(r, glMap));
     // Which tabs to include: 'both' (default), 'bookings', or 'churn'.
     const sheets = ['bookings', 'churn'].includes(req.query.sheets) ? req.query.sheets : 'both';

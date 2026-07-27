@@ -168,7 +168,11 @@ export function computeBooking(r, paidMonths) {
 // Computes derived churn fields (columns N, O, P, Q, R, S).
 export function computeChurn(r) {
   const S = num(r.mrr);
-  const j = r.last_date_under_contract ? new Date(r.last_date_under_contract) : null;
+  // Recognition uses the system "recognition_date" when set (an offset split sets it to place the
+  // piece in a specific month); otherwise the real Last Date Under Contract. The displayed
+  // Last Date Under Contract is never changed by offsets.
+  const recog = r.recognition_date || r.last_date_under_contract;
+  const j = recog ? new Date(recog) : null;
   const blank = { final_invoice_month: '', ar_final_invoice_amount: null,
                   prorated_churn_month: '', prorated_churn_amount: null,
                   final_churn_month: '', final_churn_amount: null };
