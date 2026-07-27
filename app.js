@@ -3076,7 +3076,8 @@ function churnByPmcIndex() {
   if (_churnByPmcSrc === state.rows.churn && _churnByPmc) return _churnByPmc;
   const idx = new Map();
   for (const c of (state.rows.churn || [])) {
-    if (c.auto) continue; // auto-derived Downgrade lines can't be offset
+    // Auto-derived Downgrade lines (id "dg-…") ARE offsettable — the server materializes them into a
+    // real churn row on apply. Their id is preserved through expandOffsetPieces for that.
     if (String(c.classification || '') === 'Contraction') continue;
     const q = churnQuarterInfo(c);
     if (!q) continue;
@@ -3137,7 +3138,8 @@ function groupBreakdown(entries) {
 // records -> [{churnId, amount}] for the apply endpoint (so the current month is exhausted first).
 function expandOffsetPieces(entries, amount) {
   const pieces = [];
-  for (const e of entries) for (const pc of churnMonthlyPieces(e.churn)) pieces.push({ churnId: Number(e.churn.id), monthIdx: monthIdxFromMonthYear(pc.month) || 0, amt: pc.amt });
+  // churnId kept raw: a real numeric id, or a "dg-<bookingId>" placeholder the server materializes.
+  for (const e of entries) for (const pc of churnMonthlyPieces(e.churn)) pieces.push({ churnId: e.churn.id, monthIdx: monthIdxFromMonthYear(pc.month) || 0, amt: pc.amt });
   pieces.sort((a, b) => a.monthIdx - b.monthIdx);
   let left = Number(amount) || 0;
   const per = new Map();
@@ -3370,7 +3372,6 @@ function offsettableBookingsByPmc() {
 }
 // Why a churn is / isn't offerable — the exact rule that decides whether it shows in the dropdown.
 function churnOfferability(c) {
-  if (c.auto) return { ok: false, reason: 'Auto-derived Downgrade line — not offsettable' };
   const cls = String(c.classification || '');
   if (cls === 'Contraction') return { ok: false, reason: 'Already used to offset (Contraction)' };
   if (cls === 'Churn Credit') return { ok: false, reason: 'Churn Credit line — not offsettable' };
@@ -5787,7 +5788,9 @@ function saasChurnFor(b) {
   const prod = String(b.product || '').trim().toLowerCase();
   let best = null;
   for (const c of state.rows.churn) {
-    if (c.auto) continue; // auto-derived Downgrade lines are booking-driven; skip to avoid double-count
+    // Downgrade lines — on-the-fly (auto) or materialized (downgrade_booking_id set) — are
+    // booking-driven; the re-rate booking's reduced MRR already reflects the drop. Skip to avoid double-count.
+    if (c.auto || c.downgrade_booking_id != null) continue;
     if (String(c.classification || '') === 'Churn Credit') continue; // accounting credit, not a real churn
     if (!c.last_date_under_contract) continue;
     if (String(c.property_id || '').trim().toLowerCase() !== pid) continue;
@@ -6158,7 +6161,7 @@ function renderSaasUnit(idxs, category, h) {
     if (fIdx != null && idxSet.has(fIdx)) {
       let type;
       if (isContraction) type = 'Contraction';
-      else if (c.auto) type = 'Churn Downgrade';
+      else if (c.auto || String(c.classification || '') === 'Downgrade') type = 'Churn Downgrade';
       else type = pmcTotalAt(pmc, fIdx) === 0 ? 'Churn Logo' : 'Churn Rooftop';
       push(type, pmcProperty, c.product, fIdx, Number(c.final_churn_amount) || 0);
     }

@@ -382,44 +382,72 @@ async function attachChurnOwners(rows) {
 // track the booking (edit the booking to change the drop; delete it and the line disappears).
 const DG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
-function deriveDowngradeChurn(bookings) {
+// The stored (editable) churn fields for ONE booking's downgrade drop, or null if the booking is
+// not a Re-rate/Downgrade MRR drop. Recognition is driven by last_date_under_contract = last day of
+// the signing month, so compute.js lands the full drop the month AFTER signing (matches the direct
+// values below). Shared by the on-the-fly derivation and the offset materialization.
+function downgradeChurnForBooking(b) {
   const num = (v) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : 0; };
   const money = (n) => `$${(Math.round(n * 100) / 100).toLocaleString('en-US')}`;
+  if ((b.instance || 'multifamily') !== 'multifamily') return null;
+  const adj = String(b.booking_adjustment || '').trim();
+  if (adj === 'Booking Clawback' || adj === 'Booking Correction') return null; // accounting correction, not MRR movement
+  const ctam = String(b.ctam_type || '').trim();
+  if (ctam !== 'Re-rate' && ctam !== 'Downgrade') return null;
+  const oldMrr = num(b.rerate_old_mrr);
+  const newMrr = num(b.mrr);
+  if (!(oldMrr > newMrr)) return null; // only an actual MRR drop
+  const base = String(b.date_signed || b.golive_date || '').match(/^(\d{4})-(\d{2})/);
+  if (!base) return null;
+  const sY = Number(base[1]); const sM = Number(base[2]); // signing year + 1-based month
+  const lastDay = new Date(Date.UTC(sY, sM, 0)); // last day of the signing month
+  const lduc = lastDay.toISOString().slice(0, 10);
+  return {
+    property_id: b.property_id || '', product: b.product || '',
+    property: b.property_name || '', pmc_buying_center: b.pmc || '',
+    client_success_manager: '', google_search_budget: null, lost_mrr_reason: '',
+    mrr: Math.round((oldMrr - newMrr) * 100) / 100, // positive reduction magnitude
+    last_date_under_contract: lduc, date_added: (b.date_signed || lduc),
+    classification: 'Downgrade', completed: '', template_deleted: '',
+    notes: `Downgrade — re-rate ${money(oldMrr)} → ${money(newMrr)} (auto from booking)`,
+  };
+}
+// On-the-fly "Downgrade" churn lines for display. `materialized` is the set of booking ids that have
+// already been turned into a real churn row (used for an offset) — those are skipped so the derived
+// line and the real row never both appear.
+function deriveDowngradeChurn(bookings, materialized = new Set()) {
   const out = [];
   for (const b of bookings) {
-    if ((b.instance || 'multifamily') !== 'multifamily') continue;
-    const adj = String(b.booking_adjustment || '').trim();
-    if (adj === 'Booking Clawback' || adj === 'Booking Correction') continue; // accounting correction, not MRR movement
-    const ctam = String(b.ctam_type || '').trim();
-    if (ctam !== 'Re-rate' && ctam !== 'Downgrade') continue;
-    const oldMrr = num(b.rerate_old_mrr);
-    const newMrr = num(b.mrr);
-    if (!(oldMrr > newMrr)) continue; // only an actual MRR drop
+    if (materialized.has(Number(b.id))) continue;
+    const row = downgradeChurnForBooking(b);
+    if (!row) continue;
     const base = String(b.date_signed || b.golive_date || '').match(/^(\d{4})-(\d{2})/);
-    if (!base) continue;
-    const sY = Number(base[1]); const sM = Number(base[2]); // signing year + 1-based month
-    let ny = sY; let nmi = sM; // month AFTER signing (sM is already the next month, 0-based -> DG_MONTHS[sM])
+    const sY = Number(base[1]); const sM = Number(base[2]);
+    let ny = sY; let nmi = sM; // month AFTER signing (sM is already 0-based next month -> DG_MONTHS[sM])
     if (nmi > 11) { nmi = 0; ny += 1; }
-    const finalChurnMonth = `${DG_MONTHS[nmi]} ${ny}`;
-    const lastDay = new Date(Date.UTC(sY, sM, 0)); // last day of the signing month (informational)
-    const lduc = lastDay.toISOString().slice(0, 10);
-    const drop = Math.round((newMrr - oldMrr) * 100) / 100; // negative
     out.push({
-      id: `dg-${b.id}`, auto: 'downgrade',
-      property_id: b.property_id || '', product: b.product || '',
-      property: b.property_name || '', pmc_buying_center: b.pmc || '',
-      client_success_manager: '', google_search_budget: null, lost_mrr_reason: '',
-      mrr: Math.round((oldMrr - newMrr) * 100) / 100, // positive reduction magnitude
-      last_date_under_contract: lduc, date_added: (b.date_signed || lduc),
-      classification: 'Downgrade', completed: '', template_deleted: '',
-      notes: `Downgrade — re-rate ${money(oldMrr)} → ${money(newMrr)} (auto from booking)`,
+      ...row, id: `dg-${b.id}`, auto: 'downgrade',
       // Computed churn fields set directly: a clean full drop the month after signing (no proration).
       final_invoice_month: '', ar_final_invoice_amount: null,
       prorated_churn_month: '', prorated_churn_amount: null,
-      final_churn_month: finalChurnMonth, final_churn_amount: drop,
+      final_churn_month: `${DG_MONTHS[nmi]} ${ny}`, final_churn_amount: -row.mrr,
     });
   }
   return out;
+}
+// Turn a booking's on-the-fly Downgrade line into a REAL churn row so the offset engine can contract
+// it. Idempotent: if one already exists for the booking it's returned as-is. Returns the churn row
+// (raw stored fields, no compute) or null if the booking no longer qualifies / doesn't exist.
+async function materializeDowngradeChurn(bookingId) {
+  const bid = Number(bookingId);
+  if (!Number.isFinite(bid)) return null;
+  const existing = (await pool.query('SELECT * FROM churn WHERE downgrade_booking_id=$1 LIMIT 1', [bid])).rows[0];
+  if (existing) return existing;
+  const booking = (await pool.query('SELECT * FROM bookings WHERE id=$1', [bid])).rows[0];
+  if (!booking) return null;
+  const fields = downgradeChurnForBooking(booking);
+  if (!fields) return null;
+  return await insertRow('churn', { ...fields, downgrade_booking_id: bid });
 }
 
 function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
@@ -435,8 +463,10 @@ function crud(table, computeFn, afterInsert, beforeInsert, instanceScoped) {
         : raw.map((r) => withComputed(r, computeFn));
       if (instanceScoped) out = out.filter((r) => (r.instance || 'multifamily') === instance);
       if (table === 'churn') {
-        // Append read-only, auto-derived Downgrade churn lines (from Re-rate/Downgrade bookings).
-        out = out.concat(deriveDowngradeChurn(await listRows('bookings')));
+        // Append read-only, auto-derived Downgrade churn lines (from Re-rate/Downgrade bookings),
+        // skipping any that were already materialized into a real churn row (used for an offset).
+        const materialized = new Set(out.filter((c) => c.downgrade_booking_id != null).map((c) => Number(c.downgrade_booking_id)));
+        out = out.concat(deriveDowngradeChurn(await listRows('bookings'), materialized));
         out = await attachChurnOwners(out);
       }
       res.json(out);
@@ -689,8 +719,10 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
     let offsets = Array.isArray(body.offsets) ? body.offsets
       : (body.churnId ? [{ churnId: body.churnId, amount: body.offsetAmount }] : []);
     offsets = offsets
-      .map((o) => ({ churnId: Number(o.churnId), amount: Number(String(o.amount ?? '').replace(/[$,]/g, '')) }))
-      .filter((o) => o.churnId && Number.isFinite(o.amount) && o.amount > 0);
+      // churnId is kept raw — a real numeric id OR a "dg-<bookingId>" placeholder for an on-the-fly
+      // Downgrade line, which is materialized into a real churn row just below.
+      .map((o) => ({ churnId: o.churnId, amount: Number(String(o.amount ?? '').replace(/[$,]/g, '')) }))
+      .filter((o) => o.churnId != null && o.churnId !== '' && Number.isFinite(o.amount) && o.amount > 0);
     if (!offsets.length) return res.status(400).json({ error: 'Select at least one churn to offset, with a valid amount.' });
 
     const booking = (await pool.query('SELECT * FROM bookings WHERE id=$1', [Number(body.bookingId)])).rows[0];
@@ -703,7 +735,15 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
     // Validate EVERY churn before mutating anything (PMC, quarter, not already used).
     const work = [];
     for (const o of offsets) {
-      const churn = (await pool.query('SELECT * FROM churn WHERE id=$1', [o.churnId])).rows[0];
+      const idStr = String(o.churnId);
+      let churn;
+      if (idStr.startsWith('dg-')) {
+        // On-the-fly Downgrade line — materialize it into a real churn row so it can be contracted.
+        churn = await materializeDowngradeChurn(idStr.slice(3));
+        if (!churn) return res.status(400).json({ error: 'Could not turn a Downgrade line into an offsettable churn (the booking may have changed).' });
+      } else {
+        churn = (await pool.query('SELECT * FROM churn WHERE id=$1', [Number(idStr)])).rows[0];
+      }
       if (!churn) return res.status(404).json({ error: 'A selected churn was not found.' });
       if (norm(booking.pmc) !== norm(churn.pmc_buying_center)) {
         return res.status(400).json({ error: 'A selected churn is under a different PMC than the booking.' });
@@ -1515,8 +1555,8 @@ app.get('/api/export', async (req, res, next) => {
     const churn = instance === 'convert' ? [] : await listRows('churn');
     // "For Sales Commission" export drops the billing (blue) columns from both tabs.
     const opts = req.query.scope === 'commission'
-      ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set([...CHURN_BILLING_KEYS, 'recognition_date']) }
-      : { excludeChurnKeys: new Set(['recognition_date']) }; // system month-lever, never exported
+      ? { excludeBookingKeys: new Set(BOOKING_BILLING_KEYS), excludeChurnKeys: new Set([...CHURN_BILLING_KEYS, 'recognition_date', 'downgrade_booking_id']) }
+      : { excludeChurnKeys: new Set(['recognition_date', 'downgrade_booking_id']) }; // system-only columns, never exported
     opts.bookingCompute = (r) => computeBooking(r, downgradePaid(r, glMap));
     // Which tabs to include: 'both' (default), 'bookings', or 'churn'.
     const sheets = ['bookings', 'churn'].includes(req.query.sheets) ? req.query.sheets : 'both';

@@ -101,6 +101,10 @@ export const CHURN_FIELDS = [
   // an offset splits a churn into pieces. compute.js uses this instead of Last Date Under Contract
   // when set, so the real "Last Date Under Contract" never changes. Hidden from the grid + export.
   { key: 'recognition_date',         label: 'Recognition Date',      excel: 26, type: 'date' },
+  // System-only link: when an auto-derived "Downgrade" churn line is used for an offset it is
+  // materialized into a real churn row, tagged here with the source Re-rate/Downgrade booking id so
+  // the on-the-fly derivation stops re-emitting it (no duplicate). Hidden from the grid + export.
+  { key: 'downgrade_booking_id',     label: 'Downgrade Booking',     excel: 27, type: 'number' },
   // Churn vs Contraction. A churn used to offset a License Transfer booking is reclassified
   // as 'Contraction' and excluded from churn totals. Set via the offset flow.
   // 'Churn Credit' is a positive adjustment auto-created when a CLOSED-month churn is offset:
