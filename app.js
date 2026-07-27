@@ -26,7 +26,7 @@ const state = {
   closedMonthsList: [], // raw rows for the admin Close Month panel
   offsetPmc: 'All', // License Transfer offsets review: filter by PMC
   offsetProp: 'All', // License Transfer offsets review: filter by Property (cascades within PMC)
-  offsetSel: {}, // License Transfer offsets review: pending selections { bookingId: {propKey, amount} } (churning property)
+  offsetSel: {}, // License Transfer offsets review: pending selections { bookingId: [{propKey, amount}, …] } (a booking can offset with several churning properties)
   offsetTxns: [], // recent applied offsets (undo log) shown in the Offset Review
   offsetDiag: false, // Offset Review: churn-eligibility diagnostic open
   offsetDiagQ: '',   // diagnostic search term (property / PMC)
@@ -3486,61 +3486,97 @@ function renderOffsetReview() {
       + `<label>Filter by PMC <select data-offset-pmc>${['All', ...pmcs].map((p) => `<option${p === state.offsetPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
       + `<label>Filter by Property <select data-offset-prop>${['All', ...props].map((p) => `<option${p === state.offsetProp ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select></label>`
       + '</div>';
-  // Pending (un-applied) selections consume churn drop, so a churn chosen for one booking is
-  // removed from the others once fully used, or shows only its remaining drop if partially used.
+  // Pending (un-applied) selections. A booking can offset with SEVERAL churning properties, so
+  // sel[bookingId] is an ARRAY of { propKey, amount }. A churning property's drop is shared by
+  // amount across bookings; within one booking a property is chosen at most once.
   const sel = state.offsetSel || (state.offsetSel = {});
-  // Pending selections consume a churning property's drop (tracked at property level now).
-  const consumedByOthers = (propKey, exceptBookingId) => {
+  const selArr = (bid) => (Array.isArray(sel[bid]) ? sel[bid] : []);
+  // Drop of a churning property already consumed by OTHER bookings' selections (by amount).
+  const consumedByOtherBookings = (propKey, exceptBid) => {
     let s = 0;
     for (const bid of Object.keys(sel)) {
-      if (bid === String(exceptBookingId)) continue;
-      const v = sel[bid];
-      if (v && String(v.propKey) === String(propKey)) s += Number(v.amount) || 0;
+      if (bid === String(exceptBid)) continue;
+      for (const o of selArr(bid)) if (String(o.propKey) === String(propKey)) s += Number(o.amount) || 0;
     }
     return s;
   };
   const rows = cands.map(({ booking: b, eligible }) => {
     const hasSame = eligible.some((e) => !e.isFuture);
-    const cur = sel[b.id] || { propKey: '', amount: 0 };
     const lineMrr = parseMoney(b.mrr) || 0;
-    // One option per CHURNING PROPERTY: total available drop + a per-month breakdown (info),
-    // consumed current-month-first on apply.
-    const optList = ['<option value="">— choose a churn —</option>'];
-    for (const g of groupEligibleByProperty(eligible)) {
-      const gross = g.entries.reduce((s, e) => s + churnDropAmt(e.churn), 0);
-      const remaining = gross - consumedByOthers(g.key, b.id);
-      const isCur = String(cur.propKey) === String(g.key);
-      if (remaining <= 0.005 && !isCur) continue; // fully used by another booking
+    const groups = groupEligibleByProperty(eligible);
+    const sels = selArr(b.id);
+    // Drop of a group still available to THIS booking = gross − other bookings' amounts.
+    const availFor = (g) => groupDropTotal(g.entries) - consumedByOtherBookings(g.key, b.id);
+    const optionFor = (g, selected) => {
+      const avail = availFor(g);
+      const bd = groupBreakdown(g.entries);
       const allFuture = g.entries.every((e) => e.isFuture);
-      const monthMap = new Map();
-      for (const e of g.entries) for (const pc of churnMonthlyPieces(e.churn)) monthMap.set(pc.month, (monthMap.get(pc.month) || 0) + pc.amt);
-      const breakdown = [...monthMap.entries()]
-        .sort((a, c) => (monthIdxFromMonthYear(a[0]) || 0) - (monthIdxFromMonthYear(c[0]) || 0))
-        .map(([mo, amt]) => `${mo} ${m(amt)}`).join(', ');
-      optList.push(`<option value="${escapeAttr(g.key)}" data-remaining="${remaining}"${isCur ? ' selected' : ''}>`
-        + `${escapeHtml(g.name)} — ${escapeHtml(m(remaining))} total${breakdown ? ` (${escapeHtml(breakdown)})` : ''}${allFuture ? ' · future' : ''}</option>`);
-    }
+      return `<option value="${escapeAttr(g.key)}" data-remaining="${avail}"${selected ? ' selected' : ''}>`
+        + `${escapeHtml(g.name)} — ${escapeHtml(m(avail))} available${bd ? ` (${escapeHtml(bd)})` : ''}${allFuture ? ' · future' : ''}</option>`;
+    };
+    // Always show at least one selection row (a placeholder dropdown when nothing chosen yet).
+    const displayRows = sels.length ? sels : [{ propKey: '', amount: 0 }];
+    const rowsH = displayRows.map((o, r) => {
+      const picked = !!o.propKey;
+      const usedOtherRows = new Set(sels.filter((_, rr) => rr !== r).map((x) => String(x.propKey)));
+      const opts = groups.filter((g) => String(o.propKey) === String(g.key) || (!usedOtherRows.has(g.key) && availFor(g) > 0.005));
+      const optionHtml = ['<option value="">— choose a churn —</option>', ...opts.map((g) => optionFor(g, String(o.propKey) === String(g.key)))].join('');
+      const delH = sels.length ? `<button type="button" class="offset-del" data-or-del="${b.id}:${r}" title="Remove this churn">✕</button>` : '';
+      return '<div class="offset-row">'
+        + `<select class="offset-sel" data-or-sel="${b.id}:${r}">${optionHtml}</select>`
+        + `<label class="offset-amt-l">Offset <input type="text" class="offset-amt" data-or-amt="${b.id}:${r}" value="${picked ? escapeAttr(m(Number(o.amount) || 0)) : ''}"${picked ? '' : ' disabled'} /></label>`
+        + delH + '</div>';
+    }).join('');
+    const total = sels.reduce((a, o) => a + (Number(o.amount) || 0), 0);
+    const remainingMrr = lineMrr - total;
+    const usedThis = new Set(sels.map((o) => String(o.propKey)));
+    const canAdd = sels.length && groups.some((g) => !usedThis.has(g.key) && availFor(g) > 0.005);
+    const addH = canAdd ? `<button type="button" class="btn ghost offset-add" data-or-add="${b.id}">+ Add another churn</button>` : '';
+    const statusH = sels.length
+      ? `<div class="offset-status">Offsetting <strong>${m(total)}</strong> of ${m(lineMrr)} MRR · ${remainingMrr > 0.005 ? `${m(remainingMrr)} not yet covered` : (remainingMrr < -0.005 ? `<span class="offset-over">over by ${m(-remainingMrr)}</span>` : 'fully covered')}</div>`
+      : '';
     const period = `${b.booking_month || ''} ${b.booking_year || ''}`.trim();
     const futureNote = hasSame ? ''
       : '<div class="offset-future-note">⚠ No churn this quarter for this PMC — the option(s) are future-quarter churns.</div>';
     const propFull = b.property_name || b.property_id || '—';
-    const picked = !!cur.propKey;
     return `<tr data-booking="${b.id}">
       <td class="offset-prop" title="${escapeAttr(propFull)}"><div class="offset-prop-name">${escapeHtml(propFull)}</div><div class="muted-sm">${escapeHtml(b.pmc || '')} · ${escapeHtml(period)}</div>${futureNote}</td>
       <td class="offset-prod" title="${escapeAttr(b.product || '')}">${escapeHtml(b.product || '—')}</td>
       <td class="num">${m(b.mrr)}</td>
-      <td><select class="offset-sel" data-churn-sel>${optList.join('')}</select></td>
-      <td class="num"><input type="text" class="offset-amt" data-amt value="${picked ? escapeAttr(m(Number(cur.amount) || 0)) : ''}"${picked ? '' : ' disabled'} /></td>
-      <td><button type="button" class="btn solid offset-apply" data-apply-offset${picked ? '' : ' disabled'}>Apply</button></td>
+      <td class="offset-churn-cell">${rowsH}${addH}${statusH}</td>
+      <td><button type="button" class="btn solid offset-apply" data-apply-offset${total > 0.005 ? '' : ' disabled'}>Apply</button></td>
     </tr>`;
   }).join('');
-  $('#offsetBody').innerHTML = filterHtml + '<table class="recon-table offset-table">'
-    + '<colgroup><col class="c-prop"><col class="c-prod"><col class="c-mrr"><col class="c-churn"><col class="c-offset"><col class="c-apply"></colgroup>'
+  $('#offsetBody').innerHTML = filterHtml + '<table class="recon-table offset-table offset-table-multi">'
+    + '<colgroup><col class="c-prop"><col class="c-prod"><col class="c-mrr"><col class="c-churn"><col class="c-apply"></colgroup>'
     + '<thead><tr>'
-    + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th class="num">Offset</th><th></th>'
+    + '<th>Booking property</th><th>Product</th><th class="num">MRR</th><th>Offset with churn</th><th></th>'
     + `</tr></thead><tbody>${rows}</tbody></table>`
     + offsetUndoHtml() + offsetDiagHtml();
   if (state.offsetDiag) renderOffsetDiagResults();
+}
+// Drop of a churning property consumed by OTHER bookings' pending selections (by amount).
+function orConsumedByOtherBookings(propKey, exceptBid) {
+  const sel = state.offsetSel || {};
+  let s = 0;
+  for (const bid of Object.keys(sel)) {
+    if (bid === String(exceptBid)) continue;
+    for (const o of (Array.isArray(sel[bid]) ? sel[bid] : [])) if (String(o.propKey) === String(propKey)) s += Number(o.amount) || 0;
+  }
+  return s;
+}
+// Suggested amount for a churn newly chosen on a booking's row: min(the booking's MRR not yet
+// covered by its other rows, the property's drop still available after other bookings).
+function orDefaultAmount(bid, rowIndex, propKey) {
+  const b = state.rows.bookings.find((x) => String(x.id) === String(bid));
+  const mrr = parseMoney(b && b.mrr) || 0;
+  const sels = Array.isArray(state.offsetSel[bid]) ? state.offsetSel[bid] : [];
+  const otherTotal = sels.reduce((a, o, rr) => a + (rr === rowIndex ? 0 : (Number(o.amount) || 0)), 0);
+  const remainingMrr = Math.max(0, mrr - otherTotal);
+  const cand = offsetCandidates().find((c) => String(c.booking.id) === String(bid));
+  const g = cand && groupEligibleByProperty(cand.eligible).find((x) => x.key === String(propKey));
+  const avail = g ? Math.max(0, groupDropTotal(g.entries) - orConsumedByOtherBookings(g.key, bid)) : 0;
+  return Math.round(Math.min(remainingMrr || avail, avail) * 100) / 100;
 }
 // The Undo panel: recent applied offsets, newest first, each with an Undo button.
 function offsetUndoHtml() {
@@ -3562,8 +3598,10 @@ function pruneOffsetSel() {
   const byBooking = new Map(offsetCandidates().map((c) => [String(c.booking.id), c]));
   for (const bid of Object.keys(sel)) {
     const cand = byBooking.get(bid);
-    const keys = cand ? new Set(groupEligibleByProperty(cand.eligible).map((g) => g.key)) : null;
-    if (!keys || !keys.has(String(sel[bid].propKey))) delete sel[bid];
+    if (!cand) { delete sel[bid]; continue; }
+    const keys = new Set(groupEligibleByProperty(cand.eligible).map((g) => g.key));
+    const arr = (Array.isArray(sel[bid]) ? sel[bid] : []).filter((o) => keys.has(String(o.propKey)));
+    if (arr.length) sel[bid] = arr; else delete sel[bid];
   }
 }
 // Open the Offset Review modal. Pass a bookingId to scope it to a single booking (from the grid's
@@ -3585,28 +3623,29 @@ function wireOffsetReview() {
   $('#offsetBody').addEventListener('input', (e) => {
     if (e.target.id === 'offsetDiagSearch') { state.offsetDiagQ = e.target.value; renderOffsetDiagResults(); }
   });
+  // "bid:r" -> [bookingId (string), rowIndex (number)]
+  const orKey = (s) => { const [b, r] = String(s || '').split(':'); return [b, Number(r)]; };
   $('#offsetBody').addEventListener('change', (e) => {
     const pmcSel = e.target.closest('[data-offset-pmc]');
     if (pmcSel) { state.offsetPmc = pmcSel.value; state.offsetProp = 'All'; renderOffsetReview(); return; }
     const propSel = e.target.closest('[data-offset-prop]');
     if (propSel) { state.offsetProp = propSel.value; renderOffsetReview(); return; }
     const sel = state.offsetSel || (state.offsetSel = {});
-    const churnSel = e.target.closest('[data-churn-sel]');
-    if (churnSel) {
-      const bid = churnSel.closest('[data-booking]').dataset.booking;
-      const propKey = churnSel.value;
-      if (!propKey) { delete sel[bid]; renderOffsetReview(); return; }
-      const remaining = Number(churnSel.selectedOptions[0] && churnSel.selectedOptions[0].dataset.remaining) || 0;
-      const b = state.rows.bookings.find((x) => String(x.id) === bid);
-      const lineMrr = parseMoney(b && b.mrr) || 0;
-      sel[bid] = { propKey, amount: Math.min(lineMrr || remaining, remaining) };
+    const orSel = e.target.closest('[data-or-sel]');
+    if (orSel) {
+      const [bid, r] = orKey(orSel.dataset.orSel);
+      const arr = sel[bid] || (sel[bid] = []);
+      const propKey = orSel.value;
+      if (!propKey) { arr.splice(r, 1); if (!arr.length) delete sel[bid]; renderOffsetReview(); return; }
+      arr[r] = { propKey, amount: orDefaultAmount(bid, r, propKey) };
       renderOffsetReview();
       return;
     }
-    const amtEl = e.target.closest('[data-amt]');
-    if (amtEl) {
-      const bid = amtEl.closest('[data-booking]').dataset.booking;
-      if (sel[bid]) { sel[bid].amount = parseMoney(amtEl.value); renderOffsetReview(); }
+    const orAmt = e.target.closest('[data-or-amt]');
+    if (orAmt) {
+      const [bid, r] = orKey(orAmt.dataset.orAmt);
+      const arr = sel[bid];
+      if (arr && arr[r]) { arr[r].amount = parseMoney(orAmt.value); renderOffsetReview(); }
     }
   });
   $('#offsetBody').addEventListener('click', async (e) => {
@@ -3633,20 +3672,45 @@ function wireOffsetReview() {
       } catch (err) { undoBtn.disabled = false; undoBtn.textContent = 'Undo'; toast(err.message, true); }
       return;
     }
+    // Add another churn to a booking's offset (first still-available churning property).
+    const orAdd = e.target.closest('[data-or-add]');
+    if (orAdd) {
+      const bid = orAdd.dataset.orAdd;
+      const arr = state.offsetSel[bid] || (state.offsetSel[bid] = []);
+      const cand = offsetCandidates().find((c) => String(c.booking.id) === String(bid));
+      if (cand) {
+        const usedThis = new Set(arr.map((o) => String(o.propKey)));
+        const next = groupEligibleByProperty(cand.eligible).find((g) => !usedThis.has(g.key)
+          && (groupDropTotal(g.entries) - orConsumedByOtherBookings(g.key, bid)) > 0.005);
+        if (next) { const r = arr.length; arr.push({ propKey: next.key, amount: orDefaultAmount(bid, r, next.key) }); renderOffsetReview(); }
+      }
+      return;
+    }
+    // Remove one churn from a booking's offset.
+    const orDel = e.target.closest('[data-or-del]');
+    if (orDel) {
+      const [bid, r] = orKey(orDel.dataset.orDel);
+      if (Array.isArray(state.offsetSel[bid])) { state.offsetSel[bid].splice(r, 1); if (!state.offsetSel[bid].length) delete state.offsetSel[bid]; renderOffsetReview(); }
+      return;
+    }
     const btn = e.target.closest('[data-apply-offset]');
     if (!btn || btn.disabled) return;
     const bid = btn.closest('[data-booking]').dataset.booking;
     const sel = state.offsetSel || {};
-    const cur = sel[bid];
-    if (!cur || !cur.propKey) { toast('Choose a churn to offset with.', true); return; }
-    // Expand the chosen churning-property selection into per-churn offsets. Consume EARLIEST MONTH
-    // FIRST across ALL of the property's churns — i.e. exhaust the whole current-month drop before
-    // touching any future month — rather than draining one record (incl. its later month) at a time.
+    const arr = (Array.isArray(sel[bid]) ? sel[bid] : []).filter((o) => o.propKey && (Number(o.amount) || 0) > 0);
+    if (!arr.length) { toast('Choose a churn to offset with.', true); return; }
+    // Merge EVERY selected churning property into per-churn offsets. Each property expands EARLIEST
+    // MONTH FIRST across its own churns; a churn shared across selections accumulates its amount.
     const cand = offsetCandidates().find((c) => String(c.booking.id) === String(bid));
-    const group = cand && groupEligibleByProperty(cand.eligible).find((g) => g.key === cur.propKey);
-    if (!group) { toast('That churn is no longer available — reselect.', true); return; }
-    const offsets = expandOffsetPieces(group.entries, cur.amount); // earliest month first across records
-    if (!offsets.length) { toast('Enter an amount to offset.', true); return; }
+    const groups = cand ? groupEligibleByProperty(cand.eligible) : [];
+    const merged = new Map();
+    for (const row of arr) {
+      const group = groups.find((g) => g.key === String(row.propKey));
+      if (!group) continue;
+      for (const o of expandOffsetPieces(group.entries, row.amount)) merged.set(o.churnId, (merged.get(o.churnId) || 0) + o.amount);
+    }
+    const offsets = [...merged.entries()].map(([churnId, amount]) => ({ churnId, amount: Math.round(amount * 100) / 100 }));
+    if (!offsets.length) { toast('That churn is no longer available — reselect.', true); return; }
     // Show a spinner on the button while the offset applies + data reloads.
     btn.disabled = true;
     btn.innerHTML = '<span class="btn-spinner"></span>Applying…';
