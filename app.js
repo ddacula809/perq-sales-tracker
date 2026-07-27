@@ -1369,7 +1369,7 @@ function renderChurnDetail(quarterLabel) {
       const cls = String(r.classification || '');
       // Honor the Churn section's Account Owner filter.
       if (state.churnOwner !== 'All' && String(r.account_owner || '').trim() !== state.churnOwner) continue;
-      const e = { prop: r.property || r.property_id || '—', pmc: r.pmc_buying_center || '', last: r.last_date_under_contract || '', note: r.notes || '' };
+      const e = { prop: r.property || r.property_id || '—', pmc: r.pmc_buying_center || '', product: r.product || '', last: r.last_date_under_contract || '', note: r.notes || '' };
       // Churn Credit: a positive line in the real-churn table (cancels a locked closed-month drop).
       if (cls === 'Churn Credit') {
         if (wantContraction) continue;
@@ -1406,12 +1406,19 @@ function renderChurnDetail(quarterLabel) {
     const list = rowsFor(monthLabel, wantContraction);
     const total = list.reduce((s, x) => s + x.amt, 0);
     const body = list.length
-      ? list.map((x) => `<tr><td data-col="pmc" title="${escapeAttr(x.pmc || '')}">${escapeHtml(x.pmc || '—')}</td><td data-col="prop" title="${escapeAttr(x.prop || '')}">${escapeHtml(x.prop)}${x.credit ? ' <span class="carry-badge credit-badge">Churn Credit</span>' : (x.carriedFrom ? ` <span class="carry-badge" title="Carried over because ${escapeAttr(x.carriedFrom)} was closed before this churn was added">carried from ${escapeHtml(x.carriedFrom)}</span>` : '')}</td><td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`).join('')
+      ? list.map((x) => {
+        const pmcProp = [x.pmc, x.prop].filter(Boolean).join(' - ') || '—';
+        const badge = x.credit ? ' <span class="carry-badge credit-badge">Churn Credit</span>'
+          : (x.carriedFrom ? ` <span class="carry-badge" title="Carried over because ${escapeAttr(x.carriedFrom)} was closed before this churn was added">carried from ${escapeHtml(x.carriedFrom)}</span>` : '');
+        return `<tr><td data-col="pmcprop" title="${escapeAttr(pmcProp)}">${escapeHtml(pmcProp)}${badge}</td>`
+          + `<td data-col="product" title="${escapeAttr(x.product || '')}">${escapeHtml(x.product || '—')}</td>`
+          + `<td class="num" data-col="mrr">${fmtMoney(x.amt)}</td>${thirdCell(x)}</tr>`;
+      }).join('')
       : `<tr><td class="muted" colspan="4" style="padding:10px">${emptyLabel}</td></tr>`;
     return '<div class="churn-detail-card">'
       + `<div class="churn-detail-month">${escapeHtml(monthLabel)}</div>`
       + '<div class="churn-detail-scroll">'
-      + `<table><thead><tr>${th('PMC', 'pmc')}${th('Property', 'prop')}${th('MRR Dropped', 'mrr', 'num')}${th(thirdLabel, thirdKey)}</tr></thead>`
+      + `<table><thead><tr>${th('PMC - Property', 'pmcprop')}${th('Product', 'product')}${th('MRR Dropped', 'mrr', 'num')}${th(thirdLabel, thirdKey)}</tr></thead>`
       + `<tbody>${body}</tbody>`
       + (list.length ? `<tfoot><tr><td>Total</td><td></td><td class="num">${fmtMoney(total)}</td><td></td></tr></tfoot>` : '')
       + '</table></div></div>';
