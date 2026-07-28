@@ -9,7 +9,14 @@ import crypto from 'node:crypto';
 import { pool, getUserByUsername, getUserById } from './db.js';
 import { verifyPassword } from './auth.js';
 
-const BASE = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
+// Public origin of the app. Tolerate a value pasted without a scheme (e.g. "app.up.railway.app")
+// by defaulting to https, and strip any trailing slash.
+function normalizeBase(v) {
+  let b = String(v || '').trim().replace(/\/+$/, '');
+  if (b && !/^https?:\/\//i.test(b)) b = `https://${b}`;
+  return b;
+}
+const BASE = normalizeBase(process.env.APP_BASE_URL);
 // Roles allowed to use the connector — the same "sees all data" roles as the in-app assistant
 // (server.js /api/chat). Excludes account-scoped 'sales' and 'viewer' so the connector never widens
 // a user's in-app read access.
@@ -19,7 +26,11 @@ const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;  // access token: 30 days
 // Claude's fixed OAuth redirect (documented). We always accept it as a valid redirect URI.
 const CLAUDE_CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
 
-export function connectorEnabled() { return process.env.MCP_ENABLE === 'true' && !!BASE; }
+// Accept true / True / TRUE / 1 / yes for the toggle (a common source of "why is it still off?").
+export function connectorEnabled() {
+  const v = String(process.env.MCP_ENABLE || '').trim().toLowerCase();
+  return (v === 'true' || v === '1' || v === 'yes') && !!BASE;
+}
 export function baseUrl() { return BASE; }
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest();
