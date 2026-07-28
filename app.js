@@ -5441,7 +5441,30 @@ function ownerOptionsHtml(current) {
     .join('');
 }
 
-async function openUsers() { $('#usersModal').hidden = false; await renderUsersList(); }
+async function openUsers() { $('#usersModal').hidden = false; renderConnectorStatus(); await renderUsersList(); }
+
+// Claude connector (remote MCP) on/off status — so an admin can confirm it's live without reading
+// Railway logs. Enabled when the server has MCP_ENABLE=true + APP_BASE_URL (see /api/schema).
+function renderConnectorStatus() {
+  const el = document.getElementById('connectorStatus');
+  if (!el) return;
+  const c = (state.schema && state.schema.connector) || { enabled: false, mcpUrl: null };
+  if (c.enabled && c.mcpUrl) {
+    el.className = 'connector-status on';
+    el.innerHTML = '<span class="connector-dot"></span>'
+      + '<div class="connector-body"><strong>Claude connector: On</strong>'
+      + '<div class="connector-sub">Add it in claude.ai → Settings → Connectors → Add custom → Web, using this URL:</div>'
+      + `<div class="connector-url"><code id="connectorUrl">${escapeHtml(c.mcpUrl)}</code>`
+      + '<button type="button" class="view-btn" id="connectorCopy">Copy</button></div>'
+      + '<div class="connector-sub">Each teammate connects and signs in with their Revenue Desk login. Read-only.</div></div>';
+  } else {
+    el.className = 'connector-status off';
+    el.innerHTML = '<span class="connector-dot"></span>'
+      + '<div class="connector-body"><strong>Claude connector: Off</strong>'
+      + '<div class="connector-sub">To turn it on, set <code>MCP_ENABLE=true</code> and <code>APP_BASE_URL</code> '
+      + '(the app’s public https URL) on the Railway app service, then redeploy.</div></div>';
+  }
+}
 
 // The sections a given user currently sees (admins all; explicit allow-list if set; else defaults).
 function effectiveSectionsFor(u) {
@@ -5622,6 +5645,14 @@ function wireCloseMonth() {
 function wireUsers() {
   $('#usersBtn').onclick = () => { $('#userMenu').hidden = true; openUsers(); };
   $('#usersClose').onclick = () => { $('#usersModal').hidden = true; };
+
+  // Copy the connector's MCP URL to the clipboard.
+  $('#connectorStatus').addEventListener('click', async (e) => {
+    if (!e.target.closest('#connectorCopy')) return;
+    const url = (document.getElementById('connectorUrl') || {}).textContent || '';
+    try { await navigator.clipboard.writeText(url); toast('Connector URL copied'); }
+    catch { toast(url, false); }
+  });
 
   // Show/populate the Account Owner picker only for the Sales role.
   $('#newUserRole').addEventListener('change', () => {

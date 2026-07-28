@@ -222,6 +222,9 @@ app.get('/api/schema', async (req, res, next) => {
       productCategories,
       bprCategories: BPR_CATEGORIES,
       assistantEnabled: assistantEnabled(),
+      // Claude connector (remote MCP) status, so the admin UI can show on/off + the URL to paste
+      // into claude.ai without checking Railway logs.
+      connector: { enabled: connectorEnabled(), mcpUrl: connectorEnabled() ? `${baseUrl()}/mcp` : null },
     });
   } catch (e) { next(e); }
 });

@@ -879,6 +879,18 @@ tr.ss-group td {
 .users-page input, .users-page select { width: auto; margin-bottom: 0; }
 .users-page .btn { width: auto; }
 .users-hint { margin: 2px 0 14px; color: var(--ink-soft); font-size: 12px; }
+/* Claude connector on/off banner (top of the Users admin panel). */
+.connector-status { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--line); margin: 0 0 16px; font-size: 13px; }
+.connector-status.on { background: #e9f7ee; border-color: #bfe6cd; }
+.connector-status.off { background: #f4f5f7; }
+.connector-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex: none; background: #9aa3af; }
+.connector-status.on .connector-dot { background: #22a45d; }
+.connector-body { min-width: 0; }
+.connector-sub { color: var(--ink-soft); font-size: 12px; margin-top: 4px; }
+.connector-url { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.connector-url code { background: rgba(0,0,0,.06); padding: 4px 8px; border-radius: 6px; font-size: 12px; word-break: break-all; }
+.connector-status code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .users-list { margin-bottom: 14px; }
 .user-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 6px; border-bottom: 1px solid var(--line); }
 .user-row .user-name { flex: 1; min-width: 140px; font-weight: 600; }
