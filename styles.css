@@ -310,6 +310,7 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
   flex-shrink: 0; height: 6px; cursor: ns-resize; display: flex; align-items: center; justify-content: center;
   border-top: 1px solid var(--line-strong);
 }
+.filters-resize[hidden] { display: none; }
 .filters-resize::after { content: ''; width: 46px; height: 3px; border-radius: 3px; background: var(--line); }
 .filters-resize:hover::after { background: var(--accent); }
 .metrics-title {

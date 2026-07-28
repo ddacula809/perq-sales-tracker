@@ -5000,8 +5000,11 @@ function wireFiltersResize() {
     if (!active) return;
     const z = Math.min(2, Math.max(0.6, Math.round((active.startZoom + (e.clientY - active.startY) / 200) * 100) / 100));
     state.filterZoom = z;
+    // Shared filter-tile size — apply to whichever filter row is on screen (Bookings/Churn or SaaS).
     const row = $('#summary .filters-row');
     if (row) row.style.zoom = z;
+    const saasRow = $('#saasFilters');
+    if (saasRow && !saasRow.hidden) saasRow.style.zoom = z;
   });
   document.addEventListener('mouseup', () => {
     if (!active) return;
@@ -6014,8 +6017,11 @@ function saveSaasActiveFilters() { localStorage.setItem('perqSaasActiveFilters',
 function renderSaasFilterBar(allRows) {
   const el = $('#saasFilters');
   if (!el) return;
-  if (state.saasSub !== 'data') { el.hidden = true; el.innerHTML = ''; return; }
+  const grip = $('#saasFiltersResize');
+  if (state.saasSub !== 'data') { el.hidden = true; el.innerHTML = ''; if (grip) grip.hidden = true; return; }
   el.hidden = false;
+  if (grip) grip.hidden = false;
+  el.style.zoom = state.filterZoom; // shared filter-tile size (drag the grip below to resize)
   const active = state.saasActiveFilters.filter((k) => SAAS_FILTER_DEFS.some((d) => d.key === k));
   const tiles = active.map((k) => {
     const def = SAAS_FILTER_DEFS.find((d) => d.key === k);
@@ -6042,7 +6048,10 @@ function renderSaas(opts = {}) {
   $('#saasDashboard').hidden = sub !== 'dashboard';
   $('#saasUnit').hidden = sub !== 'unit';
   $('#saasZoomGroup').style.display = sub === 'data' ? '' : 'none';
-  if (sub !== 'data') { const sf = $('#saasFilters'); if (sf) { sf.hidden = true; sf.innerHTML = ''; } }
+  if (sub !== 'data') {
+    const sf = $('#saasFilters'); if (sf) { sf.hidden = true; sf.innerHTML = ''; }
+    const gr = $('#saasFiltersResize'); if (gr) gr.hidden = true;
+  }
 
   const { q, year } = parseQuarterLabel(state.saasQuarter);
   const idxs = [0, 1, 2].map((i) => year * 12 + (q - 1) * 3 + i);
