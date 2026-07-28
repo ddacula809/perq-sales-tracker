@@ -6165,9 +6165,19 @@ function renderSaas(opts = {}) {
       const fc = c ? monthIdxFromMonthYear(c.final_churn_month) : null;
       return a + ((fc != null && nowIdx >= fc) ? 0 : (Number(b.mrr) || 0));
     }, 0);
+    // Churned = it went live, at least one product's churn month has been reached, and no current
+    // MRR remains (all products have ended as of now). Reflects the property's status TODAY, like
+    // the current-MRR snapshot — the month columns still show the quarter's recognition.
+    const anyEnded = info.bookings.some((b) => {
+      const c = churnOf(b);
+      const fc = c ? monthIdxFromMonthYear(c.final_churn_month) : null;
+      return fc != null && nowIdx >= fc;
+    });
+    const churned = isLive && anyEnded && currentMrr <= 0.005;
+    const status = !isLive ? 'Not Live' : (churned ? 'Churned' : 'Active & Live');
     rows.push({
       pmc: info.pmcDisplay, propertyId: info.property_id, property: info.property,
-      sageId, goLive, isLive, status: isLive ? 'Active & Live' : 'Not Live', currentMrr,
+      sageId, goLive, isLive, churned, status, currentMrr,
       products, monthVals, types: typeObjs, total: monthVals.reduce((a, v) => a + v, 0),
     });
   }
@@ -6203,7 +6213,7 @@ function renderSaas(opts = {}) {
       + `<td data-col="property">${escapeHtml(r.property)}</td>`
       + `<td data-col="sage_id">${escapeHtml(r.sageId || '—')}</td>`
       + `<td data-col="golive">${escapeHtml(r.goLive || '—')}</td>`
-      + `<td data-col="status"><span class="saas-status ${r.isLive ? 'saas-status-live' : 'saas-status-notlive'}">${escapeHtml(r.status)}</span></td>`
+      + `<td data-col="status"><span class="saas-status ${r.churned ? 'saas-status-churned' : (r.isLive ? 'saas-status-live' : 'saas-status-notlive')}">${escapeHtml(r.status)}</span></td>`
       + `<td class="saas-products" data-col="products" title="${escapeAttr(r.products.join(', '))}">${escapeHtml(r.products.join(', ') || '—')}</td>`
       + `<td class="num" data-col="mrr">${fmtMoney(r.currentMrr)}</td>`
       + `${cells}<td class="num" data-col="qtotal">${fmtMoney(r.total)}</td></tr>`;

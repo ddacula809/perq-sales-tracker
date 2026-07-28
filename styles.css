@@ -1068,3 +1068,4 @@ tr.ss-group td {
 .saas-status { display: inline-block; font-size: 10px; font-weight: 700; border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
 .saas-status.saas-status-live { background: #dcefe2; color: var(--ok); }
 .saas-status.saas-status-notlive { background: #efe0c7; color: #8a6d2f; }
+.saas-status.saas-status-churned { background: #f6dcdc; color: #a3261e; }
