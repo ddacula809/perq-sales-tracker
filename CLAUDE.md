@@ -82,6 +82,20 @@ Churn (proration for a partial final month):
   port must match.
 - `DATABASE_SSL` — `true` only for an external Postgres that needs SSL; unset for Railway internal.
 - `APP_PASSWORD` — optional shared access key; when set, the API requires header `x-app-key`.
+- `ANTHROPIC_API_KEY` — enables the in-app "Ask Claude" assistant (`assistant.js`). Off if unset.
+- `MCP_ENABLE` — `true` turns on the **Claude connector** (remote MCP server + OAuth 2.1) so
+  claude.ai can add the Revenue Desk as a Custom Connector. Off/unset by default.
+- `APP_BASE_URL` — the app's public https origin (e.g. `https://revenue-desk.up.railway.app`),
+  required when `MCP_ENABLE=true`: it's the OAuth issuer + the base of the `/mcp` URL.
+
+### Claude connector (remote MCP)
+- Read-only. Files: `oauth.js` (OAuth 2.1 authorization-code + PKCE server; login reuses the
+  existing `users` accounts) and `mcp.js` (Streamable-HTTP JSON-RPC endpoint exposing the same
+  read-only tools as the assistant). Tables `oauth_clients` / `oauth_codes` / `oauth_tokens`
+  (auto-created in `db.js`). All routes live OUTSIDE `/api` and carry their own bearer auth.
+- Setup: org Owner → claude.ai Settings → Connectors → Add custom → Web → paste
+  `https://<APP_BASE_URL>/mcp`. Each teammate connects and signs in with their Revenue Desk login;
+  Claude registers itself dynamically (no client id/secret to paste).
 
 ## Workflow expectations
 

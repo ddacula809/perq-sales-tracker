@@ -17,7 +17,9 @@ const API_URL = 'https://api.anthropic.com/v1/messages';
 export function assistantEnabled() { return !!API_KEY; }
 
 // Read-only tools Claude may call. The server supplies the executors (see server.js).
-const TOOLS = [
+// Also reused by the MCP connector (mcp.js) so the in-app assistant and the external
+// Claude connector expose the exact same read-only capabilities.
+export const TOOLS = [
   {
     name: 'query_records',
     description:

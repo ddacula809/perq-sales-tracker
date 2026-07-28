@@ -228,6 +228,42 @@ export async function initDb() {
       undone BOOLEAN NOT NULL DEFAULT false
     );
   `);
+  // Claude connector (remote MCP) OAuth 2.1 state. Only created columns are used; everything is
+  // gated by MCP_ENABLE at the app layer, so these sit empty until the connector is turned on.
+  //  - oauth_clients: a client dynamically registers itself (RFC 7591) when first connecting.
+  //  - oauth_codes:   short-lived, single-use authorization codes (PKCE-bound).
+  //  - oauth_tokens:  hashed, expiring access/refresh tokens tied to a Revenue Desk user (read scope).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id TEXT PRIMARY KEY,
+      client_name TEXT,
+      redirect_uris TEXT[] NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_codes (
+      code_hash TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      redirect_uri TEXT NOT NULL,
+      code_challenge TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'read',
+      expires_at TIMESTAMPTZ NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT false
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_tokens (
+      token_hash TEXT PRIMARY KEY,
+      refresh_hash TEXT,
+      client_id TEXT,
+      user_id INTEGER NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'read',
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications (
       id SERIAL PRIMARY KEY,

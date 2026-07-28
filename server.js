@@ -26,6 +26,11 @@ import {
 import { verifyPassword, signToken, verifyToken } from './auth.js';
 import { sendEmail, changeEmailHtml } from './mailer.js';
 import { assistantEnabled, runAssistant } from './assistant.js';
+import {
+  connectorEnabled, baseUrl, protectedResourceMetadata, authServerMetadata, registerClient,
+  authorizeGet, authorizePost, tokenPost, verifyAccessToken, wwwAuthenticate,
+} from './oauth.js';
+import { handleMcpMessage } from './mcp.js';
 
 // Notification email recipients: admin + billing users (their username is their email).
 async function notifyEmails() {
@@ -1661,6 +1666,47 @@ app.post('/api/legacy/clear', requireRole('admin'), async (_req, res, next) => {
     res.json({ removedBookings: b.rowCount || 0, removedChurn: c.rowCount || 0 });
   } catch (e) { next(e); }
 });
+
+// ---- Claude connector: remote MCP server + OAuth 2.1 (claude.ai custom connector) ----
+// OFF unless MCP_ENABLE=true and APP_BASE_URL is set. Read-only: the OAuth token carries the "read"
+// scope and /mcp exposes the same lookup tools as the in-app assistant. These routes live OUTSIDE
+// /api (so they bypass the session-token middleware) and carry their own OAuth bearer auth.
+if (connectorEnabled()) {
+  const form = express.urlencoded({ extended: false });
+  const preflight = (_req, res) => res.set('Access-Control-Allow-Origin', '*')
+    .set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version')
+    .set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS').status(204).end();
+  app.options(['/mcp', '/token', '/register', '/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource'], preflight);
+  // OAuth discovery + endpoints.
+  app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata);
+  app.get('/.well-known/oauth-protected-resource/mcp', protectedResourceMetadata);
+  app.get('/.well-known/oauth-authorization-server', authServerMetadata);
+  app.post('/register', registerClient);
+  app.get('/authorize', authorizeGet);
+  app.post('/authorize', form, authorizePost);
+  app.post('/token', form, tokenPost);
+  // The MCP endpoint (bearer-protected). A missing/invalid token returns 401 + WWW-Authenticate so
+  // Claude discovers the OAuth server and starts the sign-in flow.
+  app.post('/mcp', async (req, res, next) => {
+    try {
+      const auth = req.get('authorization') || '';
+      const session = await verifyAccessToken(auth.startsWith('Bearer ') ? auth.slice(7) : '');
+      if (!session) return res.status(401).set('WWW-Authenticate', wwwAuthenticate()).json({ error: 'invalid_token' });
+      const tools = { query_records: assistantQuery, summarize: assistantSummarize };
+      const payload = req.body;
+      const messages = Array.isArray(payload) ? payload : [payload];
+      const out = [];
+      for (const msg of messages) {
+        const r = await handleMcpMessage(msg, tools);
+        if (r.body !== null) out.push(r.body);
+      }
+      if (!out.length) return res.status(202).end();
+      res.json(Array.isArray(payload) ? out : out[0]);
+    } catch (e) { next(e); }
+  });
+  app.get('/mcp', (_req, res) => res.status(405).set('Allow', 'POST').json({ error: 'method_not_allowed' }));
+  console.log(`Claude connector enabled — MCP endpoint at ${baseUrl()}/mcp`);
+}
 
 // ---- Static frontend (served explicitly so backend source files aren't exposed) ----
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
