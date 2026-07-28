@@ -302,6 +302,9 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 .ms-menu .ms-opt input { margin: 0; flex-shrink: 0; }
 .ms-empty { padding: 6px; color: var(--ink-soft); font-size: 12px; }
 .filters-row, .metrics-row { display: flex; flex-wrap: wrap; gap: 10px; }
+/* SaaS MRR Data multi-filter bar (sits above the table). */
+.saas-filters { padding: 8px 12px 10px; align-items: flex-end; border-bottom: 1px solid var(--line); }
+.saas-filters[hidden] { display: none; }
 /* Thin drag handle at the top of the grid: drag up to shrink the filter bar, down to grow. */
 .filters-resize {
   flex-shrink: 0; height: 6px; cursor: ns-resize; display: flex; align-items: center; justify-content: center;

@@ -50,6 +50,10 @@ const state = {
   saasTypeMonth: '',     // SaaS Dashboard "Bookings per Type" Month/Year filter (defaults to current)
   saasSub: 'data',       // SaaS Financials sub-tab: 'data' (MRR table) | 'dashboard' (tiles)
   saasZoom: parseFloat(localStorage.getItem('perqSaasZoom')) || 1,
+  // SaaS MRR Data multi-filter (same UX as the Bookings "Add Filter" bar). Values chosen per column
+  // (checkbox multi-select); saasActiveFilters is which filter tiles are shown.
+  saasFilters: {},
+  saasActiveFilters: (() => { try { return JSON.parse(localStorage.getItem('perqSaasActiveFilters') || '[]'); } catch { return []; } })(),
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   churnComOpen: false,      // dashboard: whether the COM (Property Sold/PMC Change) detail is open
   churnDetailExpanded: new Set(), // dashboard Churn Details: property rows expanded to per-product detail
@@ -5972,7 +5976,58 @@ function applySaasZoom() {
   $('#saasTable').style.zoom = state.saasZoom;
   $('#saasZoomLevel').textContent = Math.round(state.saasZoom * 100) + '%';
 }
-function renderSaas() {
+// ---- SaaS MRR Data multi-filter (mirrors the Bookings "Add Filter" bar) ----
+// Filterable columns of a built MRR-Data row (see rows.push in renderSaas).
+const SAAS_FILTER_DEFS = [
+  { key: 'pmc', label: 'PMC' },
+  { key: 'property', label: 'Property' },
+  { key: 'propertyId', label: 'Property ID' },
+  { key: 'sageId', label: 'Sage ID' },
+  { key: 'status', label: 'Status' },
+  { key: 'products', label: 'Products' }, // row.products is an array
+  { key: 'type', label: 'MRR Type' },     // any month's type pill
+  { key: 'goLive', label: 'GoLive Date' },
+];
+// The value(s) a row exposes for a given filter column (always an array; [] means blank).
+function saasRowValues(r, key) {
+  if (key === 'products') return (r.products || []).map((p) => String(p).trim()).filter(Boolean);
+  if (key === 'type') return [...new Set((r.types || []).map((t) => t && t.type).filter(Boolean))];
+  const v = r[key];
+  return (v === null || v === undefined || String(v).trim() === '') ? [] : [String(v)];
+}
+// Does a row pass every active SaaS filter? A filter passes if the row shares ≥1 selected value.
+function saasRowMatches(r) {
+  return SAAS_FILTER_DEFS.every((def) => {
+    const sel = selectedValues(state.saasFilters[def.key]);
+    if (!sel.length) return true;
+    return saasRowValues(r, def.key).some((v) => sel.includes(v));
+  });
+}
+// Distinct values for a column across the given rows (for the checkbox dropdown).
+function saasFilterValues(rows, key) {
+  const set = new Set();
+  for (const r of rows) for (const v of saasRowValues(r, key)) set.add(v);
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+function saveSaasActiveFilters() { localStorage.setItem('perqSaasActiveFilters', JSON.stringify(state.saasActiveFilters)); }
+// Build the removable filter tiles + "Add Filter" dropdown over the (unfiltered) rows.
+function renderSaasFilterBar(allRows) {
+  const el = $('#saasFilters');
+  if (!el) return;
+  if (state.saasSub !== 'data') { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const active = state.saasActiveFilters.filter((k) => SAAS_FILTER_DEFS.some((d) => d.key === k));
+  const tiles = active.map((k) => {
+    const def = SAAS_FILTER_DEFS.find((d) => d.key === k);
+    return filterTileHtml(k, escapeHtml(def.label), saasFilterValues(allRows, k), selectedValues(state.saasFilters[k]), true);
+  }).join('');
+  const addOpts = ['<option value="">+ Add a filter…</option>']
+    .concat(SAAS_FILTER_DEFS.filter((d) => !active.includes(d.key)).map((d) => `<option value="${d.key}">${escapeHtml(d.label)}</option>`)).join('');
+  const addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="saasAddFilter">${addOpts}</select></div>`;
+  el.innerHTML = tiles + addTile;
+}
+
+function renderSaas(opts = {}) {
   const qOpts = saasQuarterOptions();
   if (!qOpts.includes(state.saasQuarter)) {
     state.saasQuarter = qOpts.includes(currentQuarterLabel()) ? currentQuarterLabel() : (qOpts[qOpts.length - 1] || currentQuarterLabel());
@@ -5987,6 +6042,7 @@ function renderSaas() {
   $('#saasDashboard').hidden = sub !== 'dashboard';
   $('#saasUnit').hidden = sub !== 'unit';
   $('#saasZoomGroup').style.display = sub === 'data' ? '' : 'none';
+  if (sub !== 'data') { const sf = $('#saasFilters'); if (sf) { sf.hidden = true; sf.innerHTML = ''; } }
 
   const { q, year } = parseQuarterLabel(state.saasQuarter);
   const idxs = [0, 1, 2].map((i) => year * 12 + (q - 1) * 3 + i);
@@ -6083,7 +6139,7 @@ function renderSaas() {
   const nowD = new Date();
   const nowIdx = nowD.getFullYear() * 12 + nowD.getMonth();
 
-  const rows = [];
+  let rows = [];
   for (const [pid, info] of byProp) {
     const isLive = info.bookings.some((b) => b.golive_date);
     const monthVals = idxs.map((idx) => info.bookings.reduce((a, b) => a + saasBookingMonthMRR(b, churnOf(b), idx), 0));
@@ -6107,6 +6163,11 @@ function renderSaas() {
     });
   }
   rows.sort((a, b) => String(a.property).localeCompare(String(b.property)));
+  // Build the multi-filter bar from the full set, then show only rows that pass the active filters.
+  // keepFilterBar leaves the existing tiles/open dropdown untouched (a value was just toggled), so
+  // multi-select stays smooth — only the table below re-filters.
+  if (!opts.keepFilterBar) renderSaasFilterBar(rows);
+  rows = rows.filter(saasRowMatches);
 
   // Columns carry data-col (position-based so widths persist across quarters) + resize handles.
   const RES = '<span class="col-resize"></span>';
@@ -6137,7 +6198,10 @@ function renderSaas() {
       + `<td class="saas-products" data-col="products" title="${escapeAttr(r.products.join(', '))}">${escapeHtml(r.products.join(', ') || '—')}</td>`
       + `<td class="num" data-col="mrr">${fmtMoney(r.currentMrr)}</td>`
       + `${cells}<td class="num" data-col="qtotal">${fmtMoney(r.total)}</td></tr>`;
-  }).join('') : `<tr><td class="muted" colspan="${10 + idxs.length * 2}" style="padding:14px">No ${escapeHtml(category)} properties in ${escapeHtml(state.saasQuarter)}.</td></tr>`;
+  }).join('') : `<tr><td class="muted" colspan="${10 + idxs.length * 2}" style="padding:14px">${
+    SAAS_FILTER_DEFS.some((d) => selectedValues(state.saasFilters[d.key]).length)
+      ? 'No properties match the current filters.'
+      : `No ${escapeHtml(category)} properties in ${escapeHtml(state.saasQuarter)}.`}</td></tr>`;
 
   if (rows.length) {
     const monthTotals = idxs.map((_, j) => rows.reduce((a, r) => a + r.monthVals[j], 0));
@@ -6375,6 +6439,87 @@ function wireSaas() {
   const setZoom = (z) => { state.saasZoom = Math.min(2, Math.max(0.5, Math.round(z * 10) / 10)); localStorage.setItem('perqSaasZoom', String(state.saasZoom)); applySaasZoom(); };
   $('#saasZoomOut').onclick = () => setZoom(state.saasZoom - 0.1);
   $('#saasZoomIn').onclick = () => setZoom(state.saasZoom + 0.1);
+  wireSaasFilters();
+}
+
+// Delegated handlers for the SaaS MRR Data multi-filter (own state, scoped to #saasFilters so it
+// never clashes with the Bookings/Churn filter bar). Mirrors wireFilterMenus.
+function wireSaasFilters() {
+  const bar = $('#saasFilters');
+  if (!bar) return;
+  const closeMenus = () => {
+    let closed = false;
+    bar.querySelectorAll('.ms-menu:not([hidden])').forEach((m) => { m.hidden = true; closed = true; });
+    return closed;
+  };
+  const setVals = (key, arr) => { state.saasFilters[key] = (arr && arr.length) ? arr.slice() : 'All'; };
+  const updateSummary = (key) => {
+    const ms = bar.querySelector(`[data-ms="${key}"]`);
+    if (!ms) return;
+    const sel = selectedValues(state.saasFilters[key]);
+    const label = ms.querySelector('.ms-label');
+    if (label) label.textContent = sel.length === 0 ? 'All' : (sel.length === 1 ? sel[0] : `${sel.length} selected`);
+  };
+  bar.addEventListener('change', (e) => {
+    // Add Filter dropdown.
+    if (e.target.id === 'saasAddFilter') {
+      const id = e.target.value;
+      if (id && !state.saasActiveFilters.includes(id)) { state.saasActiveFilters.push(id); saveSaasActiveFilters(); renderSaas(); }
+      return;
+    }
+    // A value checkbox toggled.
+    const cb = e.target.closest('.ms-opt input[type=checkbox]');
+    if (cb) {
+      const ms = cb.closest('[data-ms]');
+      const key = ms.dataset.ms;
+      setVals(key, [...ms.querySelectorAll('.ms-opt input[type=checkbox]:checked')].map((c) => c.value));
+      updateSummary(key);
+      renderSaas({ keepFilterBar: true }); // keep the open dropdown; only re-filter the table
+    }
+  });
+  bar.addEventListener('click', (e) => {
+    // Remove a filter tile.
+    const rm = e.target.closest('[data-remove-filter]');
+    if (rm) {
+      const key = rm.dataset.removeFilter;
+      state.saasActiveFilters = state.saasActiveFilters.filter((k) => k !== key);
+      delete state.saasFilters[key];
+      saveSaasActiveFilters();
+      renderSaas();
+      return;
+    }
+    // Open/close a checkbox dropdown.
+    const btn = e.target.closest('[data-ms-btn]');
+    if (btn) {
+      const menu = btn.parentElement.querySelector('.ms-menu');
+      const willOpen = menu.hidden;
+      closeMenus();
+      if (willOpen) { menu.hidden = false; const s = menu.querySelector('.ms-search'); if (s) setTimeout(() => s.focus(), 0); }
+      e.stopPropagation();
+      return;
+    }
+    // Clear a dropdown's selections.
+    const clear = e.target.closest('[data-ms-clear]');
+    if (clear) {
+      const key = clear.dataset.msClear;
+      clear.closest('.ms-menu').querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = false; });
+      setVals(key, []);
+      updateSummary(key);
+      renderSaas({ keepFilterBar: true });
+      e.stopPropagation();
+    }
+  });
+  bar.addEventListener('input', (e) => {
+    const s = e.target.closest('.ms-search');
+    if (!s) return;
+    const q = s.value.trim().toLowerCase();
+    s.closest('.ms-menu').querySelectorAll('.ms-opt').forEach((opt) => { opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+  });
+  // Click outside an open SaaS menu closes it.
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#saasFilters .ms')) return;
+    closeMenus();
+  });
 }
 
 // ---------- Boot ----------
