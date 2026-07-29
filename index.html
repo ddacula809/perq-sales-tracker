@@ -95,6 +95,7 @@
         <div class="more-menu" id="userMenu" hidden>
           <button type="button" class="more-item" id="usersBtn" hidden>Users</button>
           <button type="button" class="more-item" id="productsBtn" hidden>Products</button>
+          <button type="button" class="more-item" id="bundlesBtn" hidden>Product Bundles</button>
           <button type="button" class="more-item" id="closeMonthBtn" hidden>Close Month</button>
           <button type="button" class="more-item" id="changePwBtn">Change password</button>
           <button type="button" class="more-item" id="logoutBtn">Log out</button>
@@ -414,13 +415,13 @@
     </div>
   </div>
 
-  <div class="modal" id="productsModal" hidden>
-    <div class="modal-card users-card">
+  <div class="page-view" id="productsModal" hidden>
+    <div class="page-view-inner users-page">
       <div class="entry-head">
         <h2>Products</h2>
-        <button type="button" class="entry-close" id="productsClose" title="Close">✕</button>
+        <button type="button" class="btn" id="productsClose" title="Back to app">← Back</button>
       </div>
-      <p class="recon-note">This list is the source of the Product dropdown across the app. Each product's BPR Category decides how it rolls up (Software, Digital Advertising, etc.). Removing a product only hides it from the dropdown — existing bookings keep their product.</p>
+      <p class="users-hint">This list is the source of the Product dropdown across the app. Each product's BPR Category decides how it rolls up (Software, Digital Advertising, etc.). Removing a product only hides it from the dropdown — existing bookings keep their product.</p>
       <div class="users-list" id="productsList"></div>
       <form id="addProductForm" class="add-user" autocomplete="off">
         <h3>Add product</h3>
@@ -430,6 +431,25 @@
           <button type="submit" class="btn solid">Add</button>
         </div>
         <p class="err" id="addProductErr"></p>
+      </form>
+    </div>
+  </div>
+
+  <div class="page-view" id="bundlesModal" hidden>
+    <div class="page-view-inner users-page">
+      <div class="entry-head">
+        <h2>Product Bundles</h2>
+        <button type="button" class="btn" id="bundlesClose" title="Back to app">← Back</button>
+      </div>
+      <p class="users-hint">A bundle is a named package of existing products. Add a bundle, then open its Products dropdown to choose which products it includes.</p>
+      <div class="users-list" id="bundlesList"></div>
+      <form id="addBundleForm" class="add-user" autocomplete="off">
+        <h3>Add bundle</h3>
+        <div class="add-user-row">
+          <input type="text" id="newBundleName" placeholder="Bundle name" autocomplete="off" />
+          <button type="submit" class="btn solid">Add</button>
+        </div>
+        <p class="err" id="addBundleErr"></p>
       </form>
     </div>
   </div>

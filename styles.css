@@ -901,6 +901,7 @@ tr.ss-group td {
 .users-list { margin-bottom: 14px; }
 .user-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 6px; border-bottom: 1px solid var(--line); }
 .user-row .user-name { flex: 1; min-width: 140px; font-weight: 600; }
+.user-row .bundle-name { flex: 1; min-width: 180px; font: inherit; font-weight: 600; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; }
 .user-row select { font: inherit; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; }
 /* Per-user section-access tickboxes (their own line, full width) */
 .user-sections { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 4px 2px 2px; }

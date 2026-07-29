@@ -11,6 +11,7 @@ import {
   listNotifications, createNotification, dismissNotification, resolveNotification,
   createOffsetTxn, listOffsetTxns, getOffsetTxn, markOffsetTxnUndone,
   listProducts, loadCatalog,
+  listBundles, createBundle, updateBundle, deleteBundle,
   listClosedMonths, closeMonth, reopenMonth,
 } from './db.js';
 import { computeBooking, computeChurn, quarterFromMonthName, quarterFromMonthYear, monthYear, wholeMonthsBetween } from './compute.js';
@@ -265,6 +266,47 @@ app.patch('/api/products/:id', requireRole('admin'), async (req, res, next) => {
 });
 app.delete('/api/products/:id', requireRole('admin'), async (req, res, next) => {
   try { await deleteRow('products', Number(req.params.id)); await loadCatalog(); res.status(204).end(); }
+  catch (e) { next(e); }
+});
+
+// ---- Product Bundles (admin-managed named packages of existing products) ----
+// Read: any authenticated user. Create/edit/delete: admin only.
+app.get('/api/product-bundles', async (_req, res, next) => {
+  try { res.json(await listBundles()); } catch (e) { next(e); }
+});
+app.post('/api/product-bundles', requireRole('admin'), async (req, res, next) => {
+  try {
+    const name = String((req.body && req.body.name) || '').trim();
+    if (!name) return res.status(400).json({ error: 'Bundle name is required.' });
+    const existing = await listBundles();
+    if (existing.some((b) => String(b.name || '').trim().toLowerCase() === name.toLowerCase())) {
+      return res.status(400).json({ error: 'A bundle with that name already exists.' });
+    }
+    res.status(201).json(await createBundle({ name, product_ids: (req.body && req.body.product_ids) || [] }));
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'A bundle with that name already exists.' });
+    next(e);
+  }
+});
+app.patch('/api/product-bundles/:id', requireRole('admin'), async (req, res, next) => {
+  try {
+    const patch = {};
+    if (req.body && req.body.name !== undefined) {
+      const nm = String(req.body.name || '').trim();
+      if (!nm) return res.status(400).json({ error: 'Bundle name cannot be blank.' });
+      patch.name = nm;
+    }
+    if (req.body && req.body.product_ids !== undefined) patch.product_ids = req.body.product_ids;
+    const updated = await updateBundle(Number(req.params.id), patch);
+    if (!updated) return res.status(404).json({ error: 'Not found' });
+    res.json(updated);
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'A bundle with that name already exists.' });
+    next(e);
+  }
+});
+app.delete('/api/product-bundles/:id', requireRole('admin'), async (req, res, next) => {
+  try { await deleteBundle(Number(req.params.id)); res.status(204).end(); }
   catch (e) { next(e); }
 });
 

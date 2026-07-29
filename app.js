@@ -2237,6 +2237,7 @@ function renderAll() {
   $('#offsetReviewBtn').hidden = !(canAddDelete() && mfOps);
   $('#usersBtn').hidden = !isAdmin();
   $('#productsBtn').hidden = !(isAdmin() && mfOps);
+  $('#bundlesBtn').hidden = !(isAdmin() && mfOps);
   $('#closeMonthBtn').hidden = !(isAdmin() && mfOps);
   $('#legacyImportBtn').hidden = !(isAdmin() && mfOps);
   $('#legacyClearBtn').hidden = !(isAdmin() && mfOps);
@@ -5582,7 +5583,6 @@ async function refreshAfterProductChange() {
 function wireProducts() {
   $('#productsBtn').onclick = () => { $('#userMenu').hidden = true; openProducts(); };
   $('#productsClose').onclick = () => { $('#productsModal').hidden = true; };
-  $('#productsModal').addEventListener('click', (e) => { if (e.target.id === 'productsModal') $('#productsModal').hidden = true; });
 
   $('#addProductForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -5621,6 +5621,91 @@ function wireProducts() {
       await refreshAfterProductChange();
     } catch (err) { toast(err.message, true); }
   });
+}
+
+// ---------- Product Bundles (admin-managed named packages of products) ----------
+async function openBundles() { $('#bundlesModal').hidden = false; await renderBundlesList(); }
+function bundleSummary(count) { return count ? `${count} product${count === 1 ? '' : 's'}` : 'No products'; }
+async function renderBundlesList() {
+  try {
+    const [bundles, products] = await Promise.all([api('/api/product-bundles'), api('/api/products')]);
+    if (!bundles.length) { $('#bundlesList').innerHTML = '<p class="muted" style="padding:10px">No bundles yet — add one below.</p>'; return; }
+    $('#bundlesList').innerHTML = bundles.map((b) => {
+      const sel = new Set((b.product_ids || []).map(Number));
+      const list = products.length
+        ? products.map((p) => `<label class="ms-opt"><input type="checkbox" data-bundle-box="${b.id}" value="${p.id}"${sel.has(Number(p.id)) ? ' checked' : ''}/><span>${escapeHtml(p.name)}</span></label>`).join('')
+        : '<div class="ms-empty">No products yet</div>';
+      const count = products.filter((p) => sel.has(Number(p.id))).length;
+      return `<div class="user-row" data-bundle="${b.id}">
+        <input type="text" class="bundle-name" data-bundle-name="${b.id}" value="${escapeAttr(b.name)}" title="Bundle name" />
+        <div class="ms bundle-ms" data-bundle-ms="${b.id}">
+          <button type="button" class="ms-btn" data-bundle-btn="${b.id}"><span class="ms-label">${escapeHtml(bundleSummary(count))}</span><span class="ms-caret">▾</span></button>
+          <div class="ms-menu" hidden><div class="ms-list">${list}</div></div>
+        </div>
+        <button type="button" class="view-btn danger" data-del-bundle="${b.id}">Remove</button>
+      </div>`;
+    }).join('');
+  } catch (e) { $('#bundlesList').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+}
+function wireBundles() {
+  $('#bundlesBtn').onclick = () => { $('#userMenu').hidden = true; openBundles(); };
+  $('#bundlesClose').onclick = () => { $('#bundlesModal').hidden = true; };
+
+  $('#addBundleForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('#newBundleName').value.trim();
+    if (!name) { $('#addBundleErr').textContent = 'Enter a bundle name.'; return; }
+    try {
+      await api('/api/product-bundles', { method: 'POST', body: JSON.stringify({ name }) });
+      $('#newBundleName').value = ''; $('#addBundleErr').textContent = '';
+      toast('Bundle added');
+      await renderBundlesList();
+    } catch (err) { $('#addBundleErr').textContent = err.message; }
+  });
+
+  const list = $('#bundlesList');
+  list.addEventListener('change', async (e) => {
+    // Rename a bundle.
+    const nm = e.target.closest('[data-bundle-name]');
+    if (nm) {
+      const v = nm.value.trim();
+      if (!v) { toast('Bundle name cannot be blank.', true); renderBundlesList(); return; }
+      try { await api(`/api/product-bundles/${nm.dataset.bundleName}`, { method: 'PATCH', body: JSON.stringify({ name: v }) }); toast('Bundle renamed'); }
+      catch (err) { toast(err.message, true); renderBundlesList(); }
+      return;
+    }
+    // Toggle a product in/out of the bundle (keeps the open dropdown; updates the label in place).
+    const box = e.target.closest('[data-bundle-box]');
+    if (box) {
+      const id = box.dataset.bundleBox;
+      const ids = [...list.querySelectorAll(`[data-bundle-box="${id}"]`)].filter((c) => c.checked).map((c) => Number(c.value));
+      try {
+        await api(`/api/product-bundles/${id}`, { method: 'PATCH', body: JSON.stringify({ product_ids: ids }) });
+        const label = document.querySelector(`[data-bundle-ms="${id}"] .ms-label`);
+        if (label) label.textContent = bundleSummary(ids.length);
+        toast('Bundle updated');
+      } catch (err) { toast(err.message, true); box.checked = !box.checked; }
+    }
+  });
+  const closeBundleMenus = () => list.querySelectorAll('.bundle-ms .ms-menu:not([hidden])').forEach((m) => { m.hidden = true; });
+  list.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-bundle-btn]');
+    if (btn) {
+      const menu = btn.parentElement.querySelector('.ms-menu');
+      const willOpen = menu.hidden;
+      closeBundleMenus();
+      if (willOpen) menu.hidden = false;
+      e.stopPropagation();
+      return;
+    }
+    const del = e.target.closest('[data-del-bundle]');
+    if (del) {
+      if (!confirm('Remove this bundle? (Products themselves are not affected.)')) return;
+      try { await api(`/api/product-bundles/${del.dataset.delBundle}`, { method: 'DELETE' }); toast('Bundle removed'); renderBundlesList(); }
+      catch (err) { toast(err.message, true); }
+    }
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.bundle-ms')) closeBundleMenus(); });
 }
 
 // ---------- Close Month (admin month-end lock) ----------
@@ -6678,7 +6763,7 @@ function wireSaasFilters() {
 
 // ---------- Boot ----------
 async function boot() {
-  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireCloseMonth(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireChurnEntry(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
+  wireTabs(); wireSidebar(); wireActions(); wireGrid(); wireAuth(); wireUsers(); wireProducts(); wireBundles(); wireCloseMonth(); wireEntry(); wireView(); wireColumns(); wireResize(); wireCellTip(); wireReconcile(); wirePager(); wireSalesSupport(); wireChurnEntry(); wireBilling(); wireNotifications(); wireResult(); wireSfRecon(); wireOffsetReview(); wireLegacy(); wireQuickFilter(); wireTotalsZoom(); wireFiltersResize(); wireFilterMenus(); wireAssistant(); wireSaas();
   applyZoom();
   wireUpdateCheck();
   $('#returnAdminBtn').onclick = returnToAdmin;

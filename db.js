@@ -315,6 +315,18 @@ export async function initDb() {
   `);
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS products_name_lower_idx ON products (lower(name))');
   await ensureColumns('products', PRODUCT_FIELDS);
+  // Product Bundles — admin-managed named packages, each including a set of products (by product id).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS product_bundles (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      product_ids INTEGER[] NOT NULL DEFAULT '{}',
+      sort_order INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS product_bundles_name_lower_idx ON product_bundles (lower(name))');
   await ensureColumns('bookings', BOOKING_FIELDS);
   // Convert-instance booking fields are additive nullable columns on the shared bookings table
   // (sales_rep/mrr already exist, so those ALTERs are no-ops).
@@ -410,6 +422,32 @@ export async function listProducts() {
     "SELECT * FROM products ORDER BY COALESCE(sort_order, 999999) ASC, lower(name) ASC");
   return rows;
 }
+
+// ---- Product Bundles ----
+const bundleIds = (v) => (Array.isArray(v) ? v.map(Number).filter((n) => Number.isFinite(n)) : []);
+export async function listBundles() {
+  const { rows } = await pool.query(
+    "SELECT * FROM product_bundles ORDER BY COALESCE(sort_order, 999999) ASC, lower(name) ASC");
+  return rows;
+}
+export async function createBundle({ name, product_ids }) {
+  const { rows } = await pool.query(
+    'INSERT INTO product_bundles (name, product_ids) VALUES ($1, $2) RETURNING *',
+    [String(name).trim(), bundleIds(product_ids)]);
+  return rows[0];
+}
+export async function updateBundle(id, { name, product_ids }) {
+  const sets = [];
+  const vals = [];
+  if (name !== undefined) { vals.push(String(name).trim()); sets.push(`name=$${vals.length}`); }
+  if (product_ids !== undefined) { vals.push(bundleIds(product_ids)); sets.push(`product_ids=$${vals.length}`); }
+  if (!sets.length) { const { rows } = await pool.query('SELECT * FROM product_bundles WHERE id=$1', [id]); return rows[0]; }
+  sets.push('updated_at=now()');
+  vals.push(id);
+  const { rows } = await pool.query(`UPDATE product_bundles SET ${sets.join(', ')} WHERE id=$${vals.length} RETURNING *`, vals);
+  return rows[0];
+}
+export async function deleteBundle(id) { await pool.query('DELETE FROM product_bundles WHERE id=$1', [id]); }
 
 // Refresh the in-memory Product -> BPR Category map from the DB. Call after any product change.
 export async function loadCatalog() {
