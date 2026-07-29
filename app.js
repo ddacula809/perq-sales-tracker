@@ -54,6 +54,9 @@ const state = {
   // (checkbox multi-select); saasActiveFilters is which filter tiles are shown.
   saasFilters: {},
   saasActiveFilters: (() => { try { return JSON.parse(localStorage.getItem('perqSaasActiveFilters') || '[]'); } catch { return []; } })(),
+  // Same multi-filter, but for the Unit Economics Report (its rows are type-bucketed events).
+  saasUnitFilters: {},
+  saasUnitActiveFilters: (() => { try { return JSON.parse(localStorage.getItem('perqSaasUnitActiveFilters') || '[]'); } catch { return []; } })(),
   churnDetailQuarter: null, // dashboard: quarter whose per-month Churn Details tables are open
   churnComOpen: false,      // dashboard: whether the COM (Property Sold/PMC Change) detail is open
   churnDetailExpanded: new Set(), // dashboard Churn Details: property rows expanded to per-product detail
@@ -6013,24 +6016,69 @@ function saasFilterValues(rows, key) {
   return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 function saveSaasActiveFilters() { localStorage.setItem('perqSaasActiveFilters', JSON.stringify(state.saasActiveFilters)); }
-// Build the removable filter tiles + "Add Filter" dropdown over the (unfiltered) rows.
-function renderSaasFilterBar(allRows) {
+function saveSaasUnitActiveFilters() { localStorage.setItem('perqSaasUnitActiveFilters', JSON.stringify(state.saasUnitActiveFilters)); }
+
+// ---- Unit Economics Report multi-filter (its rows are type-bucketed events {type, pmcProperty, product}) ----
+const SAAS_UNIT_FILTER_DEFS = [
+  { key: 'type', label: 'Type' },              // New Logo / Expansion / Upsell / Contraction / Churn …
+  { key: 'pmcProperty', label: 'PMC - Property' },
+  { key: 'product', label: 'Product' },
+];
+function saasUnitEventValues(e, key) {
+  const v = e[key];
+  return (v === null || v === undefined || String(v).trim() === '' || v === '—') ? [] : [String(v)];
+}
+function saasUnitEventMatches(e) {
+  return SAAS_UNIT_FILTER_DEFS.every((def) => {
+    const sel = selectedValues(state.saasUnitFilters[def.key]);
+    if (!sel.length) return true;
+    return saasUnitEventValues(e, def.key).some((v) => sel.includes(v));
+  });
+}
+function saasUnitFilterValues(events, key) {
+  const set = new Set();
+  for (const e of events) for (const v of saasUnitEventValues(e, key)) set.add(v);
+  const arr = [...set];
+  if (key === 'type') return arr.sort((a, b) => ((SAAS_BUCKET_ORDER.indexOf(a) + 1) || 99) - ((SAAS_BUCKET_ORDER.indexOf(b) + 1) || 99));
+  return arr.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+// The always-present Quarter + Category tiles (single-select), shown on every SaaS sub-tab. Folding
+// these into the filter bar replaces the old standalone dropdowns.
+function saasPinnedTilesHtml() {
+  const qOpts = saasQuarterOptions();
+  const qsel = (qOpts.length ? qOpts : ['—']).map((q) => `<option${q === state.saasQuarter ? ' selected' : ''}>${escapeHtml(q)}</option>`).join('');
+  const cats = [['All', 'All'], ['Multifamily', 'Software'], ['Digital Advertising', 'Professional Services']];
+  const csel = cats.map(([v, l]) => `<option value="${escapeAttr(v)}"${v === state.saasCategory ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
+  return '<div class="filter saas-pin"><label>Quarter</label>'
+    + `<select id="saasQuarterSel" class="saas-pin-sel">${qsel}</select></div>`
+    + '<div class="filter saas-pin"><label>Category</label>'
+    + `<select id="saasCategorySel" class="saas-pin-sel">${csel}</select></div>`;
+}
+// Build the SaaS filter bar for a sub-tab: Quarter + Category (all tabs), plus the value-filter tiles
+// + "Add Filter" for the data / unit tabs. `items` are the (unfiltered) rows (data) or events (unit).
+function renderSaasFilterBar(sub, items) {
   const el = $('#saasFilters');
   if (!el) return;
   const grip = $('#saasFiltersResize');
-  if (state.saasSub !== 'data') { el.hidden = true; el.innerHTML = ''; if (grip) grip.hidden = true; return; }
   el.hidden = false;
   if (grip) grip.hidden = false;
   el.style.zoom = state.filterZoom; // shared filter-tile size (drag the grip below to resize)
-  const active = state.saasActiveFilters.filter((k) => SAAS_FILTER_DEFS.some((d) => d.key === k));
-  const tiles = active.map((k) => {
-    const def = SAAS_FILTER_DEFS.find((d) => d.key === k);
-    return filterTileHtml(k, escapeHtml(def.label), saasFilterValues(allRows, k), selectedValues(state.saasFilters[k]), true);
-  }).join('');
-  const addOpts = ['<option value="">+ Add a filter…</option>']
-    .concat(SAAS_FILTER_DEFS.filter((d) => !active.includes(d.key)).map((d) => `<option value="${d.key}">${escapeHtml(d.label)}</option>`)).join('');
-  const addTile = `<div class="filter add-filter"><label>Add Filter</label><select id="saasAddFilter">${addOpts}</select></div>`;
-  el.innerHTML = tiles + addTile;
+  let html = saasPinnedTilesHtml();
+  if (sub === 'data' || sub === 'unit') {
+    const defs = sub === 'unit' ? SAAS_UNIT_FILTER_DEFS : SAAS_FILTER_DEFS;
+    const filters = sub === 'unit' ? state.saasUnitFilters : state.saasFilters;
+    const valuesOf = sub === 'unit' ? saasUnitFilterValues : saasFilterValues;
+    const active = (sub === 'unit' ? state.saasUnitActiveFilters : state.saasActiveFilters).filter((k) => defs.some((d) => d.key === k));
+    html += active.map((k) => {
+      const def = defs.find((d) => d.key === k);
+      return filterTileHtml(k, escapeHtml(def.label), valuesOf(items || [], k), selectedValues(filters[k]), true);
+    }).join('');
+    const addOpts = ['<option value="">+ Add a filter…</option>']
+      .concat(defs.filter((d) => !active.includes(d.key)).map((d) => `<option value="${d.key}">${escapeHtml(d.label)}</option>`)).join('');
+    html += `<div class="filter add-filter"><label>Add Filter</label><select id="saasAddFilter">${addOpts}</select></div>`;
+  }
+  el.innerHTML = html;
 }
 
 function renderSaas(opts = {}) {
@@ -6038,8 +6086,6 @@ function renderSaas(opts = {}) {
   if (!qOpts.includes(state.saasQuarter)) {
     state.saasQuarter = qOpts.includes(currentQuarterLabel()) ? currentQuarterLabel() : (qOpts[qOpts.length - 1] || currentQuarterLabel());
   }
-  $('#saasQuarter').innerHTML = qOpts.map((q) => `<option${q === state.saasQuarter ? ' selected' : ''}>${q}</option>`).join('') || '<option>—</option>';
-  $('#saasCategory').value = state.saasCategory;
   applySaasZoom();
   // Sub-tabs: MRR Data (table) | Dashboard (tiles) | Unit Economics (type buckets).
   const sub = state.saasSub;
@@ -6048,10 +6094,6 @@ function renderSaas(opts = {}) {
   $('#saasDashboard').hidden = sub !== 'dashboard';
   $('#saasUnit').hidden = sub !== 'unit';
   $('#saasZoomGroup').style.display = sub === 'data' ? '' : 'none';
-  if (sub !== 'data') {
-    const sf = $('#saasFilters'); if (sf) { sf.hidden = true; sf.innerHTML = ''; }
-    const gr = $('#saasFiltersResize'); if (gr) gr.hidden = true;
-  }
 
   const { q, year } = parseQuarterLabel(state.saasQuarter);
   const idxs = [0, 1, 2].map((i) => year * 12 + (q - 1) * 3 + i);
@@ -6061,7 +6103,7 @@ function renderSaas(opts = {}) {
   const churnCache = new Map();
   const churnOf = (b) => { if (!churnCache.has(b.id)) churnCache.set(b.id, saasChurnFor(b)); return churnCache.get(b.id); };
 
-  if (sub === 'dashboard') { renderSaasDashboard(idxs, category, churnOf); return; }
+  if (sub === 'dashboard') { renderSaasFilterBar('dashboard', null); renderSaasDashboard(idxs, category, churnOf); return; }
 
   // Precompute, across ALL active bookings: each property's bookings + first go-live month,
   // each PMC's first go-live month (for New Logo). Needed by the table and the Unit report.
@@ -6093,7 +6135,7 @@ function renderSaas(opts = {}) {
     return list ? list.reduce((a, b) => a + saasBookingMonthMRR(b, churnOf(b), idx), 0) : NaN;
   };
 
-  if (sub === 'unit') { renderSaasUnit(idxs, category, { churnOf, firstGoLive, pmcFirstGoLive, propTotalAt, pmcTotalAt }); return; }
+  if (sub === 'unit') { renderSaasUnit(idxs, category, { churnOf, firstGoLive, pmcFirstGoLive, propTotalAt, pmcTotalAt }, opts); return; }
 
   // MRR Type for a property+category row in absolute month `idx`. Returns { type, note }.
   function saasTypeFor(pid, pmc, catBookings, idx) {
@@ -6185,7 +6227,7 @@ function renderSaas(opts = {}) {
   // Build the multi-filter bar from the full set, then show only rows that pass the active filters.
   // keepFilterBar leaves the existing tiles/open dropdown untouched (a value was just toggled), so
   // multi-select stays smooth — only the table below re-filters.
-  if (!opts.keepFilterBar) renderSaasFilterBar(rows);
+  if (!opts.keepFilterBar) renderSaasFilterBar('data', rows);
   rows = rows.filter(saasRowMatches);
 
   // Columns carry data-col (position-based so widths persist across quarters) + resize handles.
@@ -6335,7 +6377,7 @@ const SAAS_BUCKET_ORDER = ['New Logo', 'Expansion', 'Upsell', 'Reactivation', 'C
 // Unit Economics Report sub-tab: one card per month of the quarter (like Churn Details).
 // Each month's table lists the type buckets (New Logo, Expansion, …) as groups, with
 // PMC - Property / Product / MRR rows. Long PMC - Property values truncate; scroll horizontally.
-function renderSaasUnit(idxs, category, h) {
+function renderSaasUnit(idxs, category, h, opts = {}) {
   const { firstGoLive, pmcFirstGoLive, pmcTotalAt } = h;
   const idxSet = new Set(idxs);
   const events = [];
@@ -6384,13 +6426,17 @@ function renderSaasUnit(idxs, category, h) {
       push(type, pmcProperty, c.product, fIdx, Number(c.final_churn_amount) || 0);
     }
   }
+  // Build the multi-filter bar from the full event set, then show only events that pass the filters.
+  if (!opts.keepFilterBar) renderSaasFilterBar('unit', events);
+  const shownEvents = events.filter(saasUnitEventMatches);
+  const filtered = SAAS_UNIT_FILTER_DEFS.some((d) => selectedValues(state.saasUnitFilters[d.key]).length);
   const monthLabel = (idx) => `${MONTHS[idx % 12]} ${Math.floor(idx / 12)}`;
   // One card per month; inside, group rows by type bucket (in order).
   const cards = idxs.map((mIdx) => {
-    const monthEvents = events.filter((e) => e.monthIdx === mIdx);
+    const monthEvents = shownEvents.filter((e) => e.monthIdx === mIdx);
     let body;
     if (!monthEvents.length) {
-      body = '<tr><td class="muted" colspan="3" style="padding:10px">No activity this month.</td></tr>';
+      body = `<tr><td class="muted" colspan="3" style="padding:10px">${filtered ? 'No activity matches the current filters.' : 'No activity this month.'}</td></tr>`;
     } else {
       // Group by bucket — each event's type IS its bucket (Churn Logo/Rooftop/Prorated/Downgrade).
       const byBucket = new Map();
@@ -6433,12 +6479,11 @@ function renderSaasUnit(idxs, category, h) {
       + `<tbody>${body}</tbody></table></div></div>`;
   }).join('');
   $('#saasUnit').innerHTML = `<div class="churn-detail-grid">${cards}</div>`;
-  $('#saasCount').textContent = `${catLabel(category)} · ${state.saasQuarter} · ${events.length} event${events.length === 1 ? '' : 's'}`;
+  $('#saasCount').textContent = `${catLabel(category)} · ${state.saasQuarter} · ${shownEvents.length} event${shownEvents.length === 1 ? '' : 's'}`;
 }
 
 function wireSaas() {
-  $('#saasCategory').onchange = (e) => { state.saasCategory = e.target.value; renderSaas(); };
-  $('#saasQuarter').onchange = (e) => { state.saasQuarter = e.target.value; renderSaas(); };
+  // Quarter + Category now live as tiles inside the filter bar (#saasFilters) — handled by wireSaasFilters.
   // The "Bookings per Type" Month/Year filter lives inside the (re-rendered) dashboard, so bind
   // it with a delegated listener on the container.
   $('#saasDashboard').addEventListener('change', (e) => {
@@ -6471,19 +6516,27 @@ function wireSaasFilters() {
     bar.querySelectorAll('.ms-menu:not([hidden])').forEach((m) => { m.hidden = true; closed = true; });
     return closed;
   };
-  const setVals = (key, arr) => { state.saasFilters[key] = (arr && arr.length) ? arr.slice() : 'All'; };
+  // The value-filter state depends on which sub-tab is active (data vs unit).
+  const filtersFor = () => (state.saasSub === 'unit' ? state.saasUnitFilters : state.saasFilters);
+  const activeFor = () => (state.saasSub === 'unit' ? state.saasUnitActiveFilters : state.saasActiveFilters);
+  const saveActive = () => (state.saasSub === 'unit' ? saveSaasUnitActiveFilters() : saveSaasActiveFilters());
+  const setVals = (key, arr) => { filtersFor()[key] = (arr && arr.length) ? arr.slice() : 'All'; };
   const updateSummary = (key) => {
     const ms = bar.querySelector(`[data-ms="${key}"]`);
     if (!ms) return;
-    const sel = selectedValues(state.saasFilters[key]);
+    const sel = selectedValues(filtersFor()[key]);
     const label = ms.querySelector('.ms-label');
     if (label) label.textContent = sel.length === 0 ? 'All' : (sel.length === 1 ? sel[0] : `${sel.length} selected`);
   };
   bar.addEventListener('change', (e) => {
-    // Add Filter dropdown.
+    // Quarter / Category single-select tiles (drive the whole computation → full re-render).
+    if (e.target.id === 'saasQuarterSel') { state.saasQuarter = e.target.value; renderSaas(); return; }
+    if (e.target.id === 'saasCategorySel') { state.saasCategory = e.target.value; renderSaas(); return; }
+    // Add Filter dropdown (scoped to the active sub-tab's filter set).
     if (e.target.id === 'saasAddFilter') {
       const id = e.target.value;
-      if (id && !state.saasActiveFilters.includes(id)) { state.saasActiveFilters.push(id); saveSaasActiveFilters(); renderSaas(); }
+      const active = activeFor();
+      if (id && !active.includes(id)) { active.push(id); saveActive(); renderSaas(); }
       return;
     }
     // A value checkbox toggled.
@@ -6493,7 +6546,7 @@ function wireSaasFilters() {
       const key = ms.dataset.ms;
       setVals(key, [...ms.querySelectorAll('.ms-opt input[type=checkbox]:checked')].map((c) => c.value));
       updateSummary(key);
-      renderSaas({ keepFilterBar: true }); // keep the open dropdown; only re-filter the table
+      renderSaas({ keepFilterBar: true }); // keep the open dropdown; only re-filter the table/cards
     }
   });
   bar.addEventListener('click', (e) => {
@@ -6501,9 +6554,10 @@ function wireSaasFilters() {
     const rm = e.target.closest('[data-remove-filter]');
     if (rm) {
       const key = rm.dataset.removeFilter;
-      state.saasActiveFilters = state.saasActiveFilters.filter((k) => k !== key);
-      delete state.saasFilters[key];
-      saveSaasActiveFilters();
+      if (state.saasSub === 'unit') state.saasUnitActiveFilters = state.saasUnitActiveFilters.filter((k) => k !== key);
+      else state.saasActiveFilters = state.saasActiveFilters.filter((k) => k !== key);
+      delete filtersFor()[key];
+      saveActive();
       renderSaas();
       return;
     }

@@ -305,6 +305,9 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
 /* SaaS MRR Data multi-filter bar (sits above the table). */
 .saas-filters { padding: 8px 12px 10px; align-items: flex-end; border-bottom: 1px solid var(--line); }
 .saas-filters[hidden] { display: none; }
+/* Pinned Quarter / Category single-select tiles inside the SaaS filter bar. */
+.saas-filters .filter.saas-pin { border-color: var(--line-strong); }
+.saas-pin-sel { font: inherit; padding: 5px 6px; border: 1px solid var(--line-strong); border-radius: 6px; max-width: 180px; }
 /* Thin drag handle at the top of the grid: drag up to shrink the filter bar, down to grow. */
 .filters-resize {
   flex-shrink: 0; height: 6px; cursor: ns-resize; display: flex; align-items: center; justify-content: center;
