@@ -45,6 +45,7 @@ const state = {
   colWidths: (() => { try { return JSON.parse(localStorage.getItem('perqColWidths') || '{}'); } catch { return {}; } })(),
   churnQuarter: 'All',   // dashboard churn-by-month quarter filter
   churnOwner: 'All',     // dashboard churn Account Owner filter (sales users default to their name)
+  churnPmc: 'All',       // dashboard churn PMC filter
   saasCategory: 'Multifamily', // SaaS Financials: Multifamily | Digital Advertising
   saasQuarter: '',       // SaaS Financials quarter label, e.g. 'Q1 2026' (defaults to current)
   saasTypeMonth: '',     // SaaS Dashboard "Bookings per Type" Month/Year filter (defaults to current)
@@ -1063,6 +1064,11 @@ function renderSummary() {
       .sort((a, b) => a.localeCompare(b));
     if (state.churnOwner !== 'All' && !churnOwners.includes(state.churnOwner)) state.churnOwner = 'All';
     const churnOwnerMatch = (r) => state.churnOwner === 'All' || String(r.account_owner || '').trim() === state.churnOwner;
+    // PMC filter for the whole Churn section (tiles + details).
+    const churnPmcs = [...new Set(state.rows.churn.map((r) => String(r.pmc_buying_center || '').trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+    if (state.churnPmc !== 'All' && !churnPmcs.includes(state.churnPmc)) state.churnPmc = 'All';
+    const churnPmcMatch = (r) => state.churnPmc === 'All' || String(r.pmc_buying_center || '').trim() === state.churnPmc;
 
     // Churn by month: prorated churn + final churn amounts landing in each month. A late-added
     // churn whose month is closed carries over to the next open month (effectiveChurnMonth).
@@ -1078,6 +1084,7 @@ function renderSummary() {
     for (const r of state.rows.churn) {
       if (String(r.classification || '') === 'Contraction') continue; // contractions aren't churn
       if (!churnOwnerMatch(r)) continue;
+      if (!churnPmcMatch(r)) continue;
       const isCom = String(r.lost_mrr_reason || '').trim() === 'Property Sold/PMC Change';
       const add = (month, amt, dateAdded) => {
         addTo(churnByMonth, month, amt, dateAdded);
@@ -1131,7 +1138,11 @@ function renderSummary() {
     const ownerVals = ['All', ...churnOwners];
     const churnOwnerSel = `<select id="churnOwner" class="churn-quarter"${isSales() ? ' disabled' : ''}>` +
       ownerVals.map((o) => `<option${o === state.churnOwner ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') + '</select>';
+    // PMC filter.
+    const churnPmcSel = '<select id="churnPmc" class="churn-quarter">' +
+      ['All', ...churnPmcs].map((p) => `<option${p === state.churnPmc ? ' selected' : ''}>${escapeHtml(p)}</option>`).join('') + '</select>';
     metricsHtml += `<div class="metrics-title metrics-title-row"><span>Churn</span>`
+      + `<label class="churn-filter-lbl">PMC ${churnPmcSel}</label>`
       + `<label class="churn-filter-lbl">Owner ${churnOwnerSel}</label>${quarterSel}</div>`;
     if (qTotalCards) metricsHtml += `<div class="metrics-row">${qTotalCards}${comCard}</div>`;
     metricsHtml += `<div class="metrics-row">${churnCards || '<span class="muted">No churn data.</span>'}</div>`;
@@ -1177,6 +1188,8 @@ function renderSummary() {
   if (bqSel) bqSel.onchange = (e) => { state.bookingQuarter = e.target.value; renderSummary(); };
   const coSel = $('#churnOwner');
   if (coSel) coSel.onchange = (e) => { state.churnOwner = e.target.value; renderSummary(); };
+  const cpSel = $('#churnPmc');
+  if (cpSel) cpSel.onchange = (e) => { state.churnPmc = e.target.value; renderSummary(); };
   // Click a quarter-total tile -> toggle its per-month Churn Details breakdown.
   el.querySelectorAll('[data-churn-quarter]').forEach((tile) => {
     tile.onclick = () => {
@@ -1353,6 +1366,7 @@ function renderComDetail() {
     if (String(r.classification || '') === 'Contraction') continue;
     if (String(r.lost_mrr_reason || '').trim() !== 'Property Sold/PMC Change') continue;
     if (state.churnOwner !== 'All' && String(r.account_owner || '').trim() !== state.churnOwner) continue;
+    if (state.churnPmc !== 'All' && String(r.pmc_buying_center || '').trim() !== state.churnPmc) continue;
     let amt = 0; let month = '';
     const consider = (m0, a0, credit) => {
       const a = credit ? Math.abs(Number(a0) || 0) : Number(a0);
@@ -1396,8 +1410,9 @@ function renderChurnDetail(quarterLabel) {
     const out = [];
     for (const r of state.rows.churn) {
       const cls = String(r.classification || '');
-      // Honor the Churn section's Account Owner filter.
+      // Honor the Churn section's Account Owner + PMC filters.
       if (state.churnOwner !== 'All' && String(r.account_owner || '').trim() !== state.churnOwner) continue;
+      if (state.churnPmc !== 'All' && String(r.pmc_buying_center || '').trim() !== state.churnPmc) continue;
       const e = { prop: r.property || r.property_id || '—', pmc: r.pmc_buying_center || '', product: r.product || '', last: r.last_date_under_contract || '', note: r.notes || '' };
       // Churn Credit: a positive line in the real-churn table (cancels a locked closed-month drop).
       if (cls === 'Churn Credit') {
