@@ -5481,15 +5481,27 @@ function effectiveSectionsFor(u) {
   if (u.role === 'admin') return ALL_SECTION_KEYS.slice();
   return (Array.isArray(u.section_access) && u.section_access.length) ? u.section_access : roleDefaultSections(u.role);
 }
-// Per-user section-access tickboxes. Admins get a static "all" note; everyone else gets a checkbox
-// per section, pre-checked to what they see today. Toggling switches them to an explicit allow-list.
+// Summary label for a user's section-access dropdown.
+function sectionSummary(count, explicit) {
+  if (!explicit) return `Role default · ${count}`;
+  if (count === 0) return 'Role default';
+  if (count === ALL_SECTION_KEYS.length) return 'All sections';
+  return `${count} section${count === 1 ? '' : 's'}`;
+}
+// Per-user section access as a multiselect dropdown (checkbox list). Admins get a static "all" note;
+// everyone else gets a compact dropdown pre-checked to what they see today. Toggling switches them
+// to an explicit allow-list; "Reset to role default" clears it back to the role's defaults.
 function sectionAccessHtml(u) {
   if (u.role === 'admin') return '<div class="user-sections muted">Section access: <em>all sections (admin)</em></div>';
   const eff = new Set(effectiveSectionsFor(u));
-  const explicit = Array.isArray(u.section_access) && u.section_access.length;
-  const boxes = ALL_SECTION_KEYS.map((k) =>
-    `<label class="sec-chk"><input type="checkbox" data-section-for="${u.id}" data-section="${k}"${eff.has(k) ? ' checked' : ''} /> ${escapeHtml(TAB_LABELS[k] || k)}</label>`).join('');
-  return `<div class="user-sections"><span class="sec-lbl">Sections${explicit ? '' : ' · role default'}</span>${boxes}</div>`;
+  const explicit = !!(Array.isArray(u.section_access) && u.section_access.length);
+  const list = ALL_SECTION_KEYS.map((k) =>
+    `<label class="ms-opt"><input type="checkbox" data-sec-box="${u.id}" value="${escapeAttr(k)}"${eff.has(k) ? ' checked' : ''}/><span>${escapeHtml(TAB_LABELS[k] || k)}</span></label>`).join('');
+  return '<div class="user-sections"><span class="sec-lbl">Sections</span>'
+    + `<div class="ms sec-ms" data-sec-ms="${u.id}">`
+    + `<button type="button" class="ms-btn" data-sec-btn="${u.id}"><span class="ms-label">${escapeHtml(sectionSummary(eff.size, explicit))}</span><span class="ms-caret">▾</span></button>`
+    + `<div class="ms-menu" hidden><div class="ms-tools"><button type="button" class="ms-clear" data-sec-clear="${u.id}">Reset to role default</button></div>`
+    + `<div class="ms-list">${list}</div></div></div></div>`;
 }
 
 async function renderUsersList() {
@@ -5718,17 +5730,52 @@ function wireUsers() {
     }
     // Section access: gather every ticked section for this user and save it as the explicit
     // allow-list. Unticking everything sends [] -> the user falls back to their role defaults.
-    const sec = e.target.closest('[data-section-for]');
+    // Update the dropdown's summary label in place so the open menu stays open while ticking.
+    const sec = e.target.closest('[data-sec-box]');
     if (sec) {
-      const uid = sec.dataset.sectionFor;
-      const checked = [...$('#usersList').querySelectorAll(`[data-section-for="${uid}"]`)]
-        .filter((b) => b.checked).map((b) => b.dataset.section);
+      const uid = sec.dataset.secBox;
+      const boxes = [...$('#usersList').querySelectorAll(`[data-sec-box="${uid}"]`)];
+      const checked = boxes.filter((b) => b.checked).map((b) => b.value);
       try {
         await api(`/api/users/${uid}`, { method: 'PATCH', body: JSON.stringify({ section_access: checked }) });
         toast('Section access updated');
+        if (!checked.length) {
+          renderUsersList(); // emptied -> falls back to role default; re-render to show that state
+        } else {
+          const label = document.querySelector(`[data-sec-ms="${uid}"] .ms-label`);
+          if (label) label.textContent = sectionSummary(checked.length, true);
+        }
       } catch (err) { toast(err.message, true); sec.checked = !sec.checked; }
     }
   });
+
+  // Open/close a section-access dropdown (only one open at a time).
+  const closeSecMenus = () => $('#usersList').querySelectorAll('.sec-ms .ms-menu:not([hidden])').forEach((m) => { m.hidden = true; });
+  $('#usersList').addEventListener('click', async (e) => {
+    const secBtn = e.target.closest('[data-sec-btn]');
+    if (secBtn) {
+      const menu = secBtn.parentElement.querySelector('.ms-menu');
+      const willOpen = menu.hidden;
+      closeSecMenus();
+      if (willOpen) menu.hidden = false;
+      e.stopPropagation();
+      return;
+    }
+    // Reset a user's section access to their role default (clears the explicit allow-list).
+    const secClear = e.target.closest('[data-sec-clear]');
+    if (secClear) {
+      const uid = secClear.dataset.secClear;
+      try {
+        await api(`/api/users/${uid}`, { method: 'PATCH', body: JSON.stringify({ section_access: [] }) });
+        toast('Reset to role default');
+        renderUsersList();
+      } catch (err) { toast(err.message, true); }
+      e.stopPropagation();
+      return;
+    }
+  });
+  // Clicking outside an open section dropdown closes it.
+  document.addEventListener('click', (e) => { if (!e.target.closest('.sec-ms')) closeSecMenus(); });
 
   // Reset password / delete / log in as.
   $('#usersList').addEventListener('click', async (e) => {
