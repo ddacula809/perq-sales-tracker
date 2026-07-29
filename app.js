@@ -1077,7 +1077,7 @@ function renderSummary() {
     const addTo = (bucket, month, amt, dateAdded) => {
       const m0 = String(month || '').trim();
       const a = Number(amt);
-      if (!m0 || m0 === '-' || !Number.isFinite(a)) return;
+      if (!m0 || m0 === '-' || !Number.isFinite(a) || a === 0) return; // ignore $0 churn (e.g. a $0-MRR product)
       const m = effectiveChurnMonth(m0, dateAdded).month;
       bucket[m] = (bucket[m] || 0) + a;
     };
@@ -1433,7 +1433,7 @@ function renderChurnDetail(quarterLabel) {
       const fm = effectiveChurnMonth(r.final_churn_month, r.date_added);
       if (fm.month === monthLabel) {
         const a = Number(r.final_churn_amount);
-        if (Number.isFinite(a)) out.push({ ...e, amt: a, carriedFrom: fm.carriedFrom });
+        if (Number.isFinite(a) && a !== 0) out.push({ ...e, amt: a, carriedFrom: fm.carriedFrom }); // skip $0 churn
       }
     }
     // Sort by PMC A–Z (then Property) for a predictable, easy-to-scan order.
