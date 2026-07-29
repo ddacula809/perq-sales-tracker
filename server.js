@@ -790,13 +790,24 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
       const d = new Date(Number(y), mi, 0); // day 0 of month mi = last day of the previous month
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
+    // The prorated piece is "locked" — i.e. we must NOT reclassify it in its own month — when that
+    // month is either (a) formally CLOSED (and the churn was added before it closed), or (b) in an
+    // EARLIER QUARTER than the final churn month. Case (b) is the quarter-straddle: e.g. a last date
+    // of 06/23 prorates in June (Q2) with the final drop in July (Q3); contracting the June piece
+    // would retroactively change the prior quarter. In both cases we bring the prorated forward to
+    // the final (open) month as a Contraction + issue a Churn Credit, leaving the original month's
+    // churn untouched — so the full drop contracts in the final month.
     const lockedProrated = (churn) => {
       const cc = computeChurn(churn);
       const pm = String(cc.prorated_churn_month || '').trim();      // "May 2026" or "-"
       const pa = Math.abs(Number(cc.prorated_churn_amount) || 0);   // the prorated drop magnitude
       if (!pm || pm === '-' || pa === 0) return null;
       const cd = closed[pm];
-      if (!cd || String(churn.date_added || '').slice(0, 10) > cd) return null; // not closed / not locked
+      const isClosed = !!cd && String(churn.date_added || '').slice(0, 10) <= cd;
+      const pq = quarterFromMonthYear(pm);
+      const fq = quarterFromMonthYear(String(cc.final_churn_month || '').trim());
+      const priorQuarter = !!(pq && fq) && ((pq.year - fq.year) * 4 + (pq.q - fq.q)) < 0;
+      if (!isClosed && !priorQuarter) return null; // open + same quarter -> handled the normal way
       return { month: pm, amount: pa };
     };
 
@@ -840,7 +851,7 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
           notes: `Churn Credit for prorated churn brought over from ${Pm} (offset of ${bookingProp}, ${bookingPeriod})` });
         // Brought-over prorated: the used part Contracted; any remainder kept as Churn Net.
         if (proratedUsed > 0.005) await insertRow('churn', { ...openBase, mrr: sign * proratedUsed, classification: 'Contraction',
-          notes: `Prorated churn brought over from ${Pm} (closed), used to offset ${bookingProp} (${bookingPeriod}) — License Transfer` });
+          notes: `Prorated churn brought over from ${Pm} (prior period), used to offset ${bookingProp} (${bookingPeriod}) — License Transfer` });
         if (proratedNet > 0.005) await insertRow('churn', { ...openBase, mrr: sign * proratedNet, classification: String(churn.classification || '') || 'Churn',
           notes: `Churn Net — prorated churn brought over from ${Pm}; ${usd(proratedNet)} not offset` });
         // Rooftop (final churn, open month): only touched if the offset reaches past the prorated.
@@ -858,7 +869,7 @@ app.post('/api/bookings/apply-offset', requireRole('admin', 'standard'), async (
           await insertRow('churn', {
             ...churn, mrr: sign * Pa, recognition_date: lastDayBeforeMonth(Pm),
             classification: String(churn.classification || '') || 'Churn', date_added: churn.date_added,
-            notes: `Prorated churn retained in ${Pm} (closed) after the original was carried over to offset ${bookingProp}`,
+            notes: `Prorated churn retained in ${Pm} (prior period) after the original was carried over to offset ${bookingProp}`,
           });
           if (rooftopRemain > 0.005) await insertRow('churn', {
             ...churn, mrr: sign * rooftopRemain, recognition_date: lastDayOfMonthLabel(Pm),
