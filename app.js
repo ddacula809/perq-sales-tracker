@@ -6544,7 +6544,7 @@ const SAAS_BUCKET_ORDER = ['New Logo', 'Expansion', 'Upsell', 'Reactivation', 'C
 // Each month's table lists the type buckets (New Logo, Expansion, …) as groups, with
 // PMC - Property / Product / MRR rows. Long PMC - Property values truncate; scroll horizontally.
 function renderSaasUnit(idxs, category, h, opts = {}) {
-  const { firstGoLive, pmcFirstGoLive, pmcTotalAt } = h;
+  const { churnOf, firstGoLive, pmcFirstGoLive, pmcTotalAt } = h;
   const idxSet = new Set(idxs);
   const events = [];
   const push = (type, pmcProperty, product, monthIdx, amt) => {
