@@ -581,9 +581,10 @@ export async function createUser({ username, password, role, account_owner, conv
   );
   return rows[0];
 }
-export async function updateUser(id, { role, password, account_owner, convert_access, section_access }) {
+export async function updateUser(id, { username, role, password, account_owner, convert_access, section_access }) {
   const sets = [];
   const vals = [];
+  if (username !== undefined) { vals.push(String(username).trim()); sets.push(`username=$${vals.length}`); }
   if (role) { vals.push(role); sets.push(`role=$${vals.length}`); }
   if (password) { vals.push(hashPassword(password)); sets.push(`password_hash=$${vals.length}`); }
   if (account_owner !== undefined) { vals.push(account_owner || null); sets.push(`account_owner=$${vals.length}`); }

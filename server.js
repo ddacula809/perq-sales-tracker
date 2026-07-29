@@ -1278,6 +1278,12 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
     const id = Number(req.params.id);
     const { role, password, account_owner, convert_access, section_access } = req.body || {};
     if (role && !USER_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role.' });
+    // Optional rename. Usernames are the login id (and, for billing/admin, the notification email).
+    let username;
+    if (req.body && req.body.username !== undefined) {
+      username = String(req.body.username || '').trim();
+      if (!username) return res.status(400).json({ error: 'Username cannot be blank.' });
+    }
     // section_access, when provided, must be an array of known section keys (empty = role defaults).
     let sections;
     if (section_access !== undefined) {
@@ -1291,10 +1297,13 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res, next) => {
         return res.status(400).json({ error: 'Cannot change the role of the last admin.' });
       }
     }
-    const updated = await updateUser(id, { role, password, account_owner, convert_access, section_access: sections });
+    const updated = await updateUser(id, { username, role, password, account_owner, convert_access, section_access: sections });
     if (!updated) return res.status(404).json({ error: 'Not found' });
     res.json(updated);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'That username already exists.' });
+    next(e);
+  }
 });
 app.delete('/api/users/:id', requireRole('admin'), async (req, res, next) => {
   try {

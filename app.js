@@ -5509,6 +5509,7 @@ async function renderUsersList() {
         : `<label class="user-convert" title="Grant access to the Convert instance"><input type="checkbox" data-convert-for="${u.id}"${u.convert_access ? ' checked' : ''} /> Convert</label>`;
       return `<div class="user-row">
         <span class="user-name">${escapeHtml(u.username)}</span>
+        <button type="button" class="view-btn" data-rename-user="${u.id}" data-rename-name="${escapeAttr(u.username)}" title="Change this user's login username">Rename</button>
         <select data-role-for="${u.id}">${opts}</select>
         ${ownerSel}
         ${convChk}
@@ -5750,6 +5751,24 @@ function wireUsers() {
       if (!np) return;
       try { await api(`/api/users/${pw.dataset.pwUser}`, { method: 'PATCH', body: JSON.stringify({ password: np }) }); toast('Password reset'); }
       catch (err) { toast(err.message, true); }
+      return;
+    }
+    const rn = e.target.closest('[data-rename-user]');
+    if (rn) {
+      const cur = rn.dataset.renameName || '';
+      const nu = prompt('New username (for billing/admin accounts this is also the notification email):', cur);
+      if (nu === null) return; // cancelled
+      const trimmed = nu.trim();
+      if (!trimmed || trimmed === cur) return;
+      try {
+        await api(`/api/users/${rn.dataset.renameUser}`, { method: 'PATCH', body: JSON.stringify({ username: trimmed }) });
+        // If you renamed your OWN account, refresh the session view so it reflects the new name.
+        if (state.user && String(state.user.id) === String(rn.dataset.renameUser)) {
+          try { const { user } = await api('/api/me'); state.user = user; } catch { /* non-fatal */ }
+        }
+        toast('Username updated');
+        renderUsersList();
+      } catch (err) { toast(err.message, true); }
     }
   });
 }
