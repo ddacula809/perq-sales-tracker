@@ -6644,7 +6644,44 @@ function renderSaasUnit(idxs, category, h, opts = {}) {
       + '<div class="churn-detail-scroll"><table><thead><tr><th>PMC - Property</th><th>Product</th><th class="num">MRR</th></tr></thead>'
       + `<tbody>${body}</tbody></table></div></div>`;
   }).join('');
-  $('#saasUnit').innerHTML = `<div class="churn-detail-grid">${cards}</div>`;
+  // MRR Movement Check — mirrors the workbook's Churn Q[N] build-up (B386:E393): Starting MRR +
+  // every movement should equal the Ending MRR, with no variance. Computed two independent ways:
+  //   • Starting/Ending MRR = total recognized MRR in the month BEFORE the quarter / the quarter's
+  //     last month (the recognition engine — the "actual").
+  //   • Movements = the New / Expansion / Upsell / Reactivation / Contraction / Churn events above.
+  // A non-zero variance means the movements don't reconcile the Starting → Ending change (a data or
+  // logic gap — e.g. a churn that didn't actually stop its booking's MRR). Uses the FULL quarter
+  // (independent of the Type/PMC/Product display filters).
+  const recMRR = (idx) => state.rows.bookings.reduce((a, b) =>
+    ((saasCatMatch(category, saasCategoryOf(b)) && saasRecognized(b)) ? a + saasBookingMonthMRR(b, churnOf(b), idx) : a), 0);
+  const startIdx = idxs[0] - 1;
+  const endIdx = idxs[idxs.length - 1];
+  const startMRR = recMRR(startIdx);
+  const endActual = recMRR(endIdx);
+  const bsum = (types) => events.filter((e) => types.includes(e.type)).reduce((a, e) => a + e.mrr, 0);
+  const moves = [
+    ['New', bsum(['New Logo'])],
+    ['Expansion', bsum(['Expansion'])],
+    ['Upsell', bsum(['Upsell'])],
+    ['Reactivation', bsum(['Reactivation'])],
+    ['Contraction', bsum(['Contraction'])],
+    ['Churn / Downgrades', bsum(['Churn Logo', 'Churn Rooftop', 'Churn Prorated Rooftop', 'Churn Downgrade'])],
+  ];
+  const movements = moves.reduce((a, [, v]) => a + v, 0);
+  const computedEnd = startMRR + movements;
+  const variance = endActual - computedEnd;
+  const balanced = Math.abs(variance) < 0.5;
+  const reconRow = (label, val, cls) => `<tr${cls ? ` class="${cls}"` : ''}><td>${escapeHtml(label)}</td><td class="num">${fmtMoney(val)}</td></tr>`;
+  const reconHtml = '<div class="saas-recon">'
+    + `<div class="saas-recon-title">MRR Movement Check · ${escapeHtml(state.saasQuarter)}<span class="saas-recon-note">full quarter — not affected by the filters below</span></div>`
+    + '<table class="saas-recon-table">'
+    + reconRow(`Starting MRR (${monthLabel(startIdx)})`, startMRR, 'recon-start')
+    + moves.map(([k, v]) => reconRow(k, v)).join('')
+    + reconRow('Computed Ending MRR', computedEnd, 'recon-sub')
+    + reconRow(`Actual Ending MRR (${monthLabel(endIdx)})`, endActual)
+    + `<tr class="recon-variance ${balanced ? 'ok' : 'bad'}"><td>${balanced ? '✓ Balanced — no variance' : '⚠ Variance — movements don’t reconcile'}</td><td class="num">${fmtMoney(variance)}</td></tr>`
+    + '</table></div>';
+  $('#saasUnit').innerHTML = reconHtml + `<div class="churn-detail-grid">${cards}</div>`;
   $('#saasCount').textContent = `${catLabel(category)} · ${state.saasQuarter} · ${shownEvents.length} event${shownEvents.length === 1 ? '' : 's'}`;
 }
 
