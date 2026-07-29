@@ -335,11 +335,12 @@ tbody tr.row-flash td { background: var(--accent-soft) !important; transition: b
   text-transform: none; letter-spacing: 0; color: var(--ink-soft);
 }
 .muted { color: var(--ink-soft); font-size: 12px; }
-/* Unit Economics — MRR Movement Check (Starting + movements = Ending, with variance). */
-.saas-recon { max-width: 460px; margin: 4px 0 18px; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; }
-.saas-recon-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-  padding: 9px 12px; background: var(--panel); font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--line); }
-.saas-recon-note { font-weight: 400; font-size: 11px; color: var(--ink-soft); }
+/* Unit Economics — MRR Movement Check (per month: Starting + movements = Ending, with variance). */
+.saas-recon-head { font-weight: 600; font-size: 13px; margin: 4px 0 8px; }
+.saas-recon-note { font-weight: 400; font-size: 11px; color: var(--ink-soft); margin-left: 8px; }
+.saas-recon-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 18px; }
+.saas-recon { flex: 1 1 300px; max-width: 380px; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; }
+.saas-recon-title { padding: 8px 12px; background: var(--panel); font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--line); }
 .saas-recon-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .saas-recon-table td { padding: 5px 12px; border-bottom: 1px solid var(--line); }
 .saas-recon-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }

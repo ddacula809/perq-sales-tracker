@@ -6654,33 +6654,38 @@ function renderSaasUnit(idxs, category, h, opts = {}) {
   // (independent of the Type/PMC/Product display filters).
   const recMRR = (idx) => state.rows.bookings.reduce((a, b) =>
     ((saasCatMatch(category, saasCategoryOf(b)) && saasRecognized(b)) ? a + saasBookingMonthMRR(b, churnOf(b), idx) : a), 0);
-  const startIdx = idxs[0] - 1;
-  const endIdx = idxs[idxs.length - 1];
-  const startMRR = recMRR(startIdx);
-  const endActual = recMRR(endIdx);
-  const bsum = (types) => events.filter((e) => types.includes(e.type)).reduce((a, e) => a + e.mrr, 0);
-  const moves = [
-    ['New', bsum(['New Logo'])],
-    ['Expansion', bsum(['Expansion'])],
-    ['Upsell', bsum(['Upsell'])],
-    ['Reactivation', bsum(['Reactivation'])],
-    ['Contraction', bsum(['Contraction'])],
-    ['Churn / Downgrades', bsum(['Churn Logo', 'Churn Rooftop', 'Churn Prorated Rooftop', 'Churn Downgrade'])],
-  ];
-  const movements = moves.reduce((a, [, v]) => a + v, 0);
-  const computedEnd = startMRR + movements;
-  const variance = endActual - computedEnd;
-  const balanced = Math.abs(variance) < 0.5;
+  const bsum = (mIdx, types) => events.filter((e) => e.monthIdx === mIdx && types.includes(e.type)).reduce((a, e) => a + e.mrr, 0);
   const reconRow = (label, val, cls) => `<tr${cls ? ` class="${cls}"` : ''}><td>${escapeHtml(label)}</td><td class="num">${fmtMoney(val)}</td></tr>`;
-  const reconHtml = '<div class="saas-recon">'
-    + `<div class="saas-recon-title">MRR Movement Check · ${escapeHtml(state.saasQuarter)}<span class="saas-recon-note">full quarter — not affected by the filters below</span></div>`
-    + '<table class="saas-recon-table">'
-    + reconRow(`Starting MRR (${monthLabel(startIdx)})`, startMRR, 'recon-start')
-    + moves.map(([k, v]) => reconRow(k, v)).join('')
-    + reconRow('Computed Ending MRR', computedEnd, 'recon-sub')
-    + reconRow(`Actual Ending MRR (${monthLabel(endIdx)})`, endActual)
-    + `<tr class="recon-variance ${balanced ? 'ok' : 'bad'}"><td>${balanced ? '✓ Balanced — no variance' : '⚠ Variance — movements don’t reconcile'}</td><td class="num">${fmtMoney(variance)}</td></tr>`
-    + '</table></div>';
+  // One build-up per month: Starting MRR (prior month's ending) + this month's movements = Ending
+  // MRR; the variance vs the actual recognized MRR should be ~0. Chains month over month, so each
+  // month's Starting equals the previous month's Ending (like the workbook's C386 → L386 → …).
+  const reconBlock = (mIdx) => {
+    const startMRR = recMRR(mIdx - 1);
+    const endActual = recMRR(mIdx);
+    const moves = [
+      ['New', bsum(mIdx, ['New Logo'])],
+      ['Expansion', bsum(mIdx, ['Expansion'])],
+      ['Upsell', bsum(mIdx, ['Upsell'])],
+      ['Reactivation', bsum(mIdx, ['Reactivation'])],
+      ['Contraction', bsum(mIdx, ['Contraction'])],
+      ['Churn / Downgrades', bsum(mIdx, ['Churn Logo', 'Churn Rooftop', 'Churn Prorated Rooftop', 'Churn Downgrade'])],
+    ];
+    const computedEnd = startMRR + moves.reduce((a, [, v]) => a + v, 0);
+    const variance = endActual - computedEnd;
+    const balanced = Math.abs(variance) < 0.5;
+    return '<div class="saas-recon">'
+      + `<div class="saas-recon-title">${escapeHtml(monthLabel(mIdx))}</div>`
+      + '<table class="saas-recon-table">'
+      + reconRow(`Starting MRR (${monthLabel(mIdx - 1)})`, startMRR, 'recon-start')
+      + moves.map(([k, v]) => reconRow(k, v)).join('')
+      + reconRow('Computed Ending MRR', computedEnd, 'recon-sub')
+      + reconRow('Actual Ending MRR', endActual)
+      + `<tr class="recon-variance ${balanced ? 'ok' : 'bad'}"><td>${balanced ? '✓ Balanced' : '⚠ Variance'}</td><td class="num">${fmtMoney(variance)}</td></tr>`
+      + '</table></div>';
+  };
+  const reconHtml = '<div class="saas-recon-head">MRR Movement Check · month over month · '
+    + `${escapeHtml(state.saasQuarter)}<span class="saas-recon-note">full quarter — not affected by the filters below</span></div>`
+    + `<div class="saas-recon-row">${idxs.map(reconBlock).join('')}</div>`;
   $('#saasUnit').innerHTML = reconHtml + `<div class="churn-detail-grid">${cards}</div>`;
   $('#saasCount').textContent = `${catLabel(category)} · ${state.saasQuarter} · ${shownEvents.length} event${shownEvents.length === 1 ? '' : 's'}`;
 }
